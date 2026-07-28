@@ -72,9 +72,19 @@ def init_db():
         try:
             with engine.connect() as conn:
                 conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS media_type VARCHAR DEFAULT 'text';"))
+                conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS media_url VARCHAR;"))
                 conn.commit()
         except Exception as e:
-            print(f"pgvector extension note: {e}")
+            print(f"pgvector/column migration note: {e}")
+    else:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE memories ADD COLUMN media_type TEXT DEFAULT 'text';"))
+                conn.execute(text("ALTER TABLE memories ADD COLUMN media_url TEXT;"))
+                conn.commit()
+        except Exception:
+            pass
 
     SQLModel.metadata.create_all(engine)
     print(f"✅ GigaMind database initialized on {'Supabase PostgreSQL' if is_postgres else 'SQLite'}.")
