@@ -18,6 +18,8 @@ class MemoryItem(SQLModel, table=True):
     id: str = Field(primary_key=True)
     content: str
     category: str = Field(default="general", index=True)
+    media_type: str = Field(default="text", index=True) # text, image, pdf, code
+    media_url: Optional[str] = Field(default=None)
     tags_json: str = Field(default="[]")
     embedding_json: str = Field(default="[]")
     created_at: str
@@ -42,9 +44,16 @@ class TaskSessionItem(SQLModel, table=True):
     updated_at: str
 
 # Database Engine initialization
-db_path = os.getenv("DB_PATH", "./gigamind.db")
-sqlite_url = f"sqlite:///{db_path}"
-engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    db_path = os.getenv("DB_PATH", "./gigamind.db")
+    database_url = f"sqlite:///{db_path}"
+
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+engine = create_engine(database_url, connect_args=connect_args)
 
 def init_db():
     SQLModel.metadata.create_all(engine)

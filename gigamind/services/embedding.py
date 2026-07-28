@@ -3,17 +3,54 @@ import math
 import hashlib
 import urllib.request
 import json
-from typing import List
+from typing import List, Optional
 
 DEFAULT_DIM = 512
 
 def _hash_token(token: str) -> int:
     return int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16)
 
-def generate_embedding(text: str) -> List[float]:
-    # 1. Voyage AI (Top MTEB Retrieval Model: voyage-3-lite)
+def generate_embedding(text: str, image_base64: Optional[str] = None, mime_type: str = "image/png") -> List[float]:
+    """
+    Generate Multimodal Vector Embedding (Text, Code, Images, PDFs).
+    Uses Google Gemini Multimodal Embeddings (text-embedding-004) when GEMINI_API_KEY is present,
+    with fallbacks to Voyage AI, HuggingFace, OpenAI, and local feature vectorizer.
+    """
+    # 1. Google Gemini Multimodal Embeddings API (Supports Text + Images + Code)
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if gemini_key:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={gemini_key}"
+
+            parts = []
+            if text:
+                parts.append({"text": text})
+            if image_base64:
+                parts.append({
+                    "inline_data": {
+                        "mime_type": mime_type,
+                        "data": image_base64
+                    }
+                })
+
+            req = urllib.request.Request(
+                url,
+                data=json.dumps({
+                    "model": "models/text-embedding-004",
+                    "content": {"parts": parts}
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                values = data["embedding"]["values"]
+                return [float(x) for x in values[:DEFAULT_DIM]]
+        except Exception as e:
+            print(f"Gemini Multimodal Embedding API fallback: {e}")
+
+    # 2. Voyage AI (voyage-3-lite)
     voyage_key = os.getenv("VOYAGE_API_KEY")
-    if voyage_key:
+    if voyage_key and text:
         try:
             req = urllib.request.Request(
                 "https://api.voyageai.com/v1/embeddings",
@@ -32,29 +69,9 @@ def generate_embedding(text: str) -> List[float]:
         except Exception as e:
             print(f"Voyage AI embedding fallback: {e}")
 
-    # 2. Google Gemini Embeddings API (FREE 1,500 req/min via text-embedding-004)
-    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if gemini_key:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={gemini_key}"
-            req = urllib.request.Request(
-                url,
-                data=json.dumps({
-                    "model": "models/text-embedding-004",
-                    "content": {"parts": [{"text": text}]}
-                }).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                values = data["embedding"]["values"]
-                return [float(x) for x in values[:DEFAULT_DIM]]
-        except Exception as e:
-            print(f"Gemini embedding fallback: {e}")
-
     # 3. HuggingFace Cloud Inference API (BAAI bge-small-en-v1.5)
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY")
-    if hf_token:
+    if hf_token and text:
         try:
             url = "https://api-inference.huggingface.co/pipeline/feature-extraction/BAAI/bge-small-en-v1.5"
             req = urllib.request.Request(
@@ -76,7 +93,7 @@ def generate_embedding(text: str) -> List[float]:
 
     # 4. OpenAI Embedding API (text-embedding-3-small)
     openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key:
+    if openai_key and text:
         try:
             req = urllib.request.Request(
                 "https://api.openai.com/v1/embeddings",
@@ -98,7 +115,7 @@ def generate_embedding(text: str) -> List[float]:
 
     # 5. Zero-memory deterministic normalized feature vector (<10MB RAM, 1ms execution)
     vector = [0.0] * DEFAULT_DIM
-    normalized_text = text.lower().replace(",", " ").replace(".", " ").replace(";", " ")
+    normalized_text = (text or "").lower().replace(",", " ").replace(".", " ").replace(";", " ")
     tokens = [t for t in normalized_text.split() if t]
 
     if not tokens:
