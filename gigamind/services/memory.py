@@ -160,3 +160,131 @@ def add_conversation_log(platform: str, title: str, summary: str, messages: List
         session.commit()
 
     return {"id": conv_id, "platform": platform, "title": title, "summary": summary, "created_at": now_str}
+
+def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None) -> Dict[str, Any]:
+    with Session(engine) as session:
+        stmt = select(MemoryItem)
+        if category:
+            stmt = stmt.where(MemoryItem.category == category)
+
+        all_items = session.exec(stmt).all()
+        total = len(all_items)
+
+        offset = (page - 1) * limit
+        items = session.exec(stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)).all()
+
+        res_memories = []
+        for mem in items:
+            res_memories.append({
+                "id": mem.id,
+                "content": mem.content,
+                "category": mem.category,
+                "media_type": mem.media_type,
+                "media_url": mem.media_url,
+                "tags": json.loads(mem.tags_json or "[]"),
+                "created_at": mem.created_at,
+                "last_accessed": mem.last_accessed
+            })
+
+        pages = (total + limit - 1) // limit if limit > 0 else 1
+        return {
+            "memories": res_memories,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": pages
+        }
+
+def delete_memory(memory_id: str) -> bool:
+    with Session(engine) as session:
+        item = session.exec(select(MemoryItem).where(MemoryItem.id == memory_id)).first()
+        if not item:
+            return False
+        session.delete(item)
+        session.commit()
+        return True
+
+def update_memory(memory_id: str, content: Optional[str] = None, category: Optional[str] = None, tags: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    with Session(engine) as session:
+        item = session.exec(select(MemoryItem).where(MemoryItem.id == memory_id)).first()
+        if not item:
+            return None
+
+        if content is not None:
+            item.content = content
+            item.embedding_json = json.dumps(generate_embedding(content))
+        if category is not None:
+            item.category = category
+        if tags is not None:
+            item.tags_json = json.dumps(tags)
+
+        now_str = datetime.now(timezone.utc).isoformat()
+        item.last_accessed = now_str
+        session.commit()
+
+        return {
+            "id": item.id,
+            "content": item.content,
+            "category": item.category,
+            "media_type": item.media_type,
+            "media_url": item.media_url,
+            "tags": json.loads(item.tags_json or "[]"),
+            "created_at": item.created_at,
+            "last_accessed": item.last_accessed
+        }
+
+def get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = None) -> Dict[str, Any]:
+    with Session(engine) as session:
+        stmt = select(ConversationItem)
+        if platform:
+            stmt = stmt.where(ConversationItem.platform == platform)
+
+        all_items = session.exec(stmt).all()
+        total = len(all_items)
+
+        offset = (page - 1) * limit
+        items = session.exec(stmt.order_by(ConversationItem.created_at.desc()).offset(offset).limit(limit)).all()
+
+        res_convs = []
+        for conv in items:
+            res_convs.append({
+                "id": conv.id,
+                "platform": conv.platform,
+                "title": conv.title,
+                "summary": conv.summary,
+                "messages": json.loads(conv.messages_json or "[]"),
+                "created_at": conv.created_at
+            })
+
+        pages = (total + limit - 1) // limit if limit > 0 else 1
+        return {
+            "conversations": res_convs,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": pages
+        }
+
+def delete_profile_rule(rule_id: str) -> bool:
+    with Session(engine) as session:
+        item = session.exec(select(ProfileItem).where((ProfileItem.id == rule_id) | (ProfileItem.key == rule_id))).first()
+        if not item:
+            return False
+        session.delete(item)
+        session.commit()
+        return True
+
+def get_stats() -> Dict[str, Any]:
+    with Session(engine) as session:
+        total_memories = len(session.exec(select(MemoryItem)).all())
+        total_profile_rules = len(session.exec(select(ProfileItem)).all())
+        total_chat_logs = len(session.exec(select(ConversationItem)).all())
+        total_task_sessions = len(session.exec(select(TaskSessionItem)).all())
+
+        return {
+            "total_memories": total_memories,
+            "total_profile_rules": total_profile_rules,
+            "total_chat_logs": total_chat_logs,
+            "total_task_sessions": total_task_sessions
+        }
+
