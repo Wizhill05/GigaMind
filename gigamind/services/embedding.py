@@ -5,13 +5,34 @@ import urllib.request
 import json
 from typing import List
 
-VECTOR_DIM = 384
+DEFAULT_DIM = 512
 
 def _hash_token(token: str) -> int:
     return int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16)
 
 def generate_embedding(text: str) -> List[float]:
-    # 1. Google Gemini Embeddings API (FREE 1,500 requests/min via Google AI Studio key)
+    # 1. Voyage AI (Top MTEB Retrieval Model: voyage-3-lite)
+    voyage_key = os.getenv("VOYAGE_API_KEY")
+    if voyage_key:
+        try:
+            req = urllib.request.Request(
+                "https://api.voyageai.com/v1/embeddings",
+                data=json.dumps({
+                    "model": "voyage-3-lite",
+                    "input": [text]
+                }).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {voyage_key}"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return [float(x) for x in data["data"][0]["embedding"][:DEFAULT_DIM]]
+        except Exception as e:
+            print(f"Voyage AI embedding fallback: {e}")
+
+    # 2. Google Gemini Embeddings API (FREE 1,500 req/min via text-embedding-004)
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if gemini_key:
         try:
@@ -27,16 +48,15 @@ def generate_embedding(text: str) -> List[float]:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 values = data["embedding"]["values"]
-                # Truncate/slice or project to 384 dims for consistency if needed
-                return [float(x) for x in values[:VECTOR_DIM]]
+                return [float(x) for x in values[:DEFAULT_DIM]]
         except Exception as e:
-            print(f"Gemini SaaS Embedding API fallback: {e}")
+            print(f"Gemini embedding fallback: {e}")
 
-    # 2. HuggingFace Free Cloud Inference API (sentence-transformers/all-MiniLM-L6-v2)
+    # 3. HuggingFace Cloud Inference API (BAAI bge-small-en-v1.5)
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY")
     if hf_token:
         try:
-            url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+            url = "https://api-inference.huggingface.co/pipeline/feature-extraction/BAAI/bge-small-en-v1.5"
             req = urllib.request.Request(
                 url,
                 data=json.dumps({"inputs": text}).encode("utf-8"),
@@ -48,13 +68,13 @@ def generate_embedding(text: str) -> List[float]:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if isinstance(data, list) and isinstance(data[0], float):
-                    return [float(x) for x in data[:VECTOR_DIM]]
+                    return [float(x) for x in data[:DEFAULT_DIM]]
                 elif isinstance(data, list) and isinstance(data[0], list):
-                    return [float(x) for x in data[0][:VECTOR_DIM]]
+                    return [float(x) for x in data[0][:DEFAULT_DIM]]
         except Exception as e:
-            print(f"HuggingFace SaaS Embedding API fallback: {e}")
+            print(f"HuggingFace BGE embedding fallback: {e}")
 
-    # 3. OpenAI Embedding API (text-embedding-3-small)
+    # 4. OpenAI Embedding API (text-embedding-3-small)
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key:
         try:
@@ -63,7 +83,7 @@ def generate_embedding(text: str) -> List[float]:
                 data=json.dumps({
                     "model": "text-embedding-3-small",
                     "input": text,
-                    "dimensions": VECTOR_DIM
+                    "dimensions": DEFAULT_DIM
                 }).encode("utf-8"),
                 headers={
                     "Content-Type": "application/json",
@@ -74,10 +94,10 @@ def generate_embedding(text: str) -> List[float]:
                 data = json.loads(resp.read().decode("utf-8"))
                 return [float(x) for x in data["data"][0]["embedding"]]
         except Exception as e:
-            print(f"OpenAI SaaS Embedding API fallback: {e}")
+            print(f"OpenAI embedding fallback: {e}")
 
-    # 4. Zero-memory deterministic normalized feature vector (Runs in 1ms, < 10MB RAM)
-    vector = [0.0] * VECTOR_DIM
+    # 5. Zero-memory deterministic normalized feature vector (<10MB RAM, 1ms execution)
+    vector = [0.0] * DEFAULT_DIM
     normalized_text = text.lower().replace(",", " ").replace(".", " ").replace(";", " ")
     tokens = [t for t in normalized_text.split() if t]
 
@@ -85,14 +105,13 @@ def generate_embedding(text: str) -> List[float]:
         return vector
 
     for i, token in enumerate(tokens):
-        idx = _hash_token(token) % VECTOR_DIM
+        idx = _hash_token(token) % DEFAULT_DIM
         vector[idx] += 1.0
         if i < len(tokens) - 1:
             bigram = f"{token}_{tokens[i+1]}"
-            idx2 = _hash_token(bigram) % VECTOR_DIM
+            idx2 = _hash_token(bigram) % DEFAULT_DIM
             vector[idx2] += 0.5
 
-    # L2 Normalization (unit vector)
     norm = math.sqrt(sum(x * x for x in vector)) or 1.0
     return [x / norm for x in vector]
 
