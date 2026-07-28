@@ -1,10 +1,10 @@
-# GigaMind: Personal Memory Engine for AI
+# 🧠 GigaMind: Personal Memory Engine for AI
 
-<img width="1440" height="360" alt="artworks-000623298505-jqoikf-t1080x1080" src="https://github.com/user-attachments/assets/e84bb1b9-4026-433c-a98e-94cf769d443c" />
+<img width="1440" height="360" alt="GigaMind Header Banner" src="https://github.com/user-attachments/assets/e84bb1b9-4026-433c-a98e-94cf769d443c" />
 
 ---
 
-## Features
+## ✨ Features
 
 - **Universal Multi-Protocol Engine**:
   - **FastMCP SSE & Stdio** (`/sse`, `/messages`) for Claude Desktop, Cursor, and Windsurf.
@@ -16,7 +16,7 @@
 
 ---
 
-## Quick Start (Local Development)
+## 🛠️ Quick Start (Local Development)
 
 ### 1. Install Dependencies
 ```bash
@@ -66,6 +66,18 @@ Render will host GigaMind 24/7 with free SSL: `https://gigamind.onrender.com`.
 
 ---
 
+## 📄 GigaMind System Directive & Skill Prompt (`SKILL.md`)
+
+To instruct any AI model (ChatGPT, Claude, Cursor, Windsurf) **when and how to automatically query or save to GigaMind**, see **[`SKILL.md`](./SKILL.md)**.
+
+Paste the system directive from [`SKILL.md`](./SKILL.md) into:
+- **ChatGPT**: Custom GPT **Instructions** box.
+- **Cursor**: `.cursorrules` file in your workspace root.
+- **Windsurf**: `.windsurfrules` file in your workspace root.
+- **Claude**: Project System Instructions in `claude.ai`.
+
+---
+
 ## 📥 Ingest Existing Chat History
 
 GigaMind includes a bulk importer CLI for parsing past chat exports:
@@ -88,10 +100,11 @@ python -m gigamind.cli.importer --chatgpt ./conversations.json --claude ./claude
 
 ---
 
-### 2. ChatGPT (Custom GPT Actions)
+### 2. ChatGPT (Custom GPT Actions & MCP Plugin)
 1. Create a Custom GPT -> **Actions** -> **Import from URL**.
 2. Paste: `https://gigamind.onrender.com/openapi.json`.
 3. Set Authentication to **API Key** -> **Bearer** and paste `GIGAMIND_API_KEY`.
+4. Copy instructions from **[`SKILL.md`](./SKILL.md)** into the GPT Instructions!
 
 ---
 
@@ -114,5 +127,5 @@ Add to your `claude_desktop_config.json`:
 
 ---
 
-## License
+## 📄 License
 MIT License.
