@@ -1,6 +1,7 @@
-# 🧠 GigaMind: Personal Memory Engine for AI (Python + FastMCP)
+# 🧠 GigaMind: Personal Memory Engine for AI
 
-> **Single Source of Truth (SSOT) personal memory database built with Python, FastAPI, SQLModel, and FastMCP — 100% free deployment on Render.**
+<img width="105" height="105" alt="artworks-000623298505-jfad qoikf-t1080x1080" src="https://github.com/user-attachments/assets/a5875dd1-418d-4af5-b304-98d67af2e65d" />
+
 
 ---
 
