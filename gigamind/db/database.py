@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime, timezone
 from typing import Optional, List
-from sqlmodel import SQLModel, Field, create_engine, Session, select
+from sqlmodel import SQLModel, Field, create_engine, Session, select, text
 
 # Models
 class ProfileItem(SQLModel, table=True):
@@ -43,7 +43,7 @@ class TaskSessionItem(SQLModel, table=True):
     status: str = Field(default="active")
     updated_at: str
 
-# Database Engine initialization
+# Database Engine initialization (Supports Supabase Postgres + SQLite)
 database_url = os.getenv("DATABASE_URL")
 if not database_url:
     db_path = os.getenv("DB_PATH", "./gigamind.db")
@@ -52,12 +52,22 @@ if not database_url:
 if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
-connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+is_postgres = database_url.startswith("postgresql")
+connect_args = {"check_same_thread": False} if not is_postgres else {}
 engine = create_engine(database_url, connect_args=connect_args)
 
 def init_db():
+    if is_postgres:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                conn.commit()
+                print("⚡ Supabase pgvector extension verified.")
+        except Exception as e:
+            print(f"PostgreSQL extension setup note: {e}")
+
     SQLModel.metadata.create_all(engine)
-    print("✅ GigaMind SQLModel database initialized successfully.")
+    print(f"✅ GigaMind database initialized on {'Supabase PostgreSQL' if is_postgres else 'SQLite'}.")
 
 def get_session():
     with Session(engine) as session:
