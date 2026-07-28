@@ -208,10 +208,7 @@ async def mcp_sse_endpoint(request: Request):
 
     async def event_generator():
         try:
-            # 1. Send initial endpoint event
             yield f"event: endpoint\ndata: {message_endpoint}\n\n"
-
-            # 2. Yield messages from queue or periodic keep-alive ping
             while True:
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=15.0)
@@ -253,7 +250,6 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
 
         payload_json = json.dumps(payload)
 
-        # Emit over open SSE stream if session exists
         if queue:
             await queue.put(payload_json)
 
@@ -433,10 +429,6 @@ def dashboard_ui():
     body { font-family: 'Inter', sans-serif; background-color: #09090b; color: #f4f4f5; }
     .font-mono { font-family: 'JetBrains Mono', monospace; }
     * { border-radius: 0px !important; }
-    .scanline {
-      background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0, 0, 0, 0.3) 50%, rgba(0, 0, 0, 0.3));
-      background-size: 100% 4px;
-    }
   </style>
 </head>
 <body class="min-h-screen bg-[#09090b] text-[#f4f4f5] font-sans antialiased border-t-2 border-[#e61919]">
@@ -453,10 +445,17 @@ def dashboard_ui():
       </div>
       <div class="flex items-center gap-2 font-mono text-xs">
         <span class="text-[#a1a1aa]">API KEY:</span>
-        <input type="password" id="apiKeyInput" value="gigamind-secret-key-change-me" class="bg-[#09090b] border border-[#27272a] px-2 py-1 text-white font-mono text-xs focus:border-[#38bdf8] outline-none">
-        <button onclick="fetchStats(); fetchMemories(); fetchProfileRules(); fetchConversations();" class="bg-[#27272a] hover:bg-[#3f3f46] text-white px-3 py-1 font-mono uppercase text-xs border border-[#3f3f46]">CONNECT</button>
+        <input type="password" id="apiKeyInput" value="" placeholder="Enter Master Password" class="bg-[#09090b] border border-[#27272a] px-2 py-1 text-white font-mono text-xs focus:border-[#38bdf8] outline-none">
+        <button onclick="saveAndConnectKey()" class="bg-[#38bdf8] hover:bg-[#0284c7] text-[#09090b] font-bold px-3 py-1 font-mono uppercase text-xs">CONNECT</button>
+        <button onclick="logoutKey()" class="bg-[#27272a] hover:bg-[#e61919] text-white px-2 py-1 font-mono uppercase text-xs">[ LOCK ]</button>
       </div>
     </header>
+
+    <!-- AUTH STATUS NOTICE BAR -->
+    <div id="authNotice" class="hidden mb-6 bg-[#e61919]/10 border border-[#e61919] p-3 text-xs font-mono text-[#e61919] flex justify-between items-center">
+      <span>❌ 401 UNAUTHORIZED // MISSING OR INVALID MASTER API KEY</span>
+      <span class="text-white">ENTER YOUR GIGAMIND MASTER KEY ABOVE</span>
+    </div>
 
     <!-- TELEMETRY STATS BANNER -->
     <div id="statsBanner" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -561,6 +560,29 @@ def dashboard_ui():
 
   </div>
 
+  <!-- INITIAL AUTH GATE OVERLAY MODAL -->
+  <div id="authGateModal" class="fixed inset-0 bg-[#09090b] flex items-center justify-center p-4 z-50">
+    <div class="bg-[#18181b] border-2 border-[#e61919] max-w-md w-full p-8 shadow-2xl">
+      <div class="text-center mb-6">
+        <span class="bg-[#e61919] text-white px-2 py-0.5 font-mono text-xs font-bold uppercase tracking-wider">RESTRICTED ACCESS</span>
+        <h2 class="text-xl font-extrabold font-mono text-white uppercase mt-2">GIGAMIND AUTHORIZATION GATE</h2>
+        <p class="text-xs font-mono text-[#a1a1aa] mt-1">ENTER GIGAMIND MASTER API KEY TO ACCESS DASHBOARD TELEMETRY AND MEMORY REPOSITORY.</p>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-mono text-[#a1a1aa] mb-1">MASTER API KEY</label>
+          <input type="password" id="gateKeyInput" onkeyup="if(event.key==='Enter') submitGateAuth()" placeholder="Enter GIGAMIND_API_KEY..." class="w-full bg-[#09090b] border border-[#27272a] p-3 text-white font-mono text-sm focus:border-[#38bdf8] outline-none">
+        </div>
+        <div id="gateErrorNotice" class="hidden text-xs font-mono text-[#e61919] bg-[#e61919]/10 p-2 border border-[#e61919] text-center">
+          ❌ 401 UNAUTHORIZED // INVALID MASTER KEY
+        </div>
+        <button onclick="submitGateAuth()" class="w-full bg-[#38bdf8] hover:bg-[#0284c7] text-[#09090b] font-bold py-3 font-mono uppercase text-xs tracking-wider">
+          UNLOCK DASHBOARD
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- INTERACTIVE EDIT MODAL -->
   <div id="editorModal" class="fixed inset-0 bg-black/80 flex items-center justify-center hidden p-4 z-50">
     <div class="bg-[#18181b] border-2 border-[#38bdf8] max-w-xl w-full p-6 shadow-2xl">
@@ -582,24 +604,66 @@ def dashboard_ui():
   <script>
     let currentMemoriesPage = 1;
     let totalMemoriesPages = 1;
-    let editingItemType = null; // 'memory', 'rule', 'new_memory', 'new_rule'
+    let editingItemType = null;
     let editingItemId = null;
 
     function getAuthHeader() {
-      const apiKey = document.getElementById('apiKeyInput').value;
+      const apiKey = document.getElementById('apiKeyInput').value || localStorage.getItem('gigamind_key') || '';
       return { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' };
+    }
+
+    function saveAndConnectKey() {
+      const k = document.getElementById('apiKeyInput').value.trim();
+      if (k) {
+        localStorage.setItem('gigamind_key', k);
+        refreshDashboard();
+      }
+    }
+
+    function logoutKey() {
+      localStorage.removeItem('gigamind_key');
+      document.getElementById('apiKeyInput').value = '';
+      document.getElementById('authGateModal').classList.remove('hidden');
+    }
+
+    function submitGateAuth() {
+      const k = document.getElementById('gateKeyInput').value.trim();
+      if (!k) return;
+      document.getElementById('apiKeyInput').value = k;
+      localStorage.setItem('gigamind_key', k);
+      refreshDashboard();
+    }
+
+    async function refreshDashboard() {
+      const ok = await fetchStats();
+      if (ok) {
+        document.getElementById('authGateModal').classList.add('hidden');
+        document.getElementById('authNotice').classList.add('hidden');
+        document.getElementById('gateErrorNotice').classList.add('hidden');
+        fetchMemories();
+        fetchProfileRules();
+        fetchConversations();
+      } else {
+        document.getElementById('authGateModal').classList.remove('hidden');
+        document.getElementById('gateErrorNotice').classList.remove('hidden');
+        document.getElementById('authNotice').classList.remove('hidden');
+      }
     }
 
     async function fetchStats() {
       try {
         const res = await fetch('/api/v1/stats', { headers: getAuthHeader() });
-        if (!res.ok) return;
+        if (!res.ok) return false;
         const data = await res.json();
         document.getElementById('statMemories').innerText = data.total_memories || 0;
         document.getElementById('statRules').innerText = data.total_profile_rules || 0;
         document.getElementById('statLogs').innerText = data.total_chat_logs || 0;
         document.getElementById('statSessions').innerText = data.total_task_sessions || 0;
-      } catch (e) { console.error('Stats error:', e); }
+        return true;
+      } catch (e) {
+        console.error('Stats error:', e);
+        return false;
+      }
     }
 
     async function fetchMemories() {
@@ -730,7 +794,6 @@ def dashboard_ui():
       if (currentMemoriesPage < totalMemoriesPages) { currentMemoriesPage++; fetchMemories(); }
     }
 
-    // Delete handlers
     async function deleteMemory(id) {
       if (!confirm(`Confirm deletion of Memory ID: ${id}?`)) return;
       try {
@@ -747,7 +810,6 @@ def dashboard_ui():
       } catch (e) { console.error(e); }
     }
 
-    // Modal handlers
     function openNewMemoryModal() {
       editingItemType = 'new_memory';
       document.getElementById('modalTitle').innerText = '[ CREATE NEW MEMORY RECORD ]';
@@ -852,16 +914,17 @@ def dashboard_ui():
       return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
     }
 
-    // Init fetch on load
     window.onload = function() {
-      fetchStats();
-      fetchMemories();
-      fetchProfileRules();
-      fetchConversations();
+      const savedKey = localStorage.getItem('gigamind_key');
+      if (savedKey) {
+        document.getElementById('apiKeyInput').value = savedKey;
+        refreshDashboard();
+      } else {
+        document.getElementById('authGateModal').classList.remove('hidden');
+      }
     };
   </script>
 </body>
 </html>
 """
     return HTMLResponse(content=html_content)
-
