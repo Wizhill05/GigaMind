@@ -43,7 +43,7 @@ sse_queues: Dict[str, asyncio.Queue] = {}
 # Auth Middleware Helper
 def verify_auth(authorization: Optional[str] = Header(None), api_key: Optional[str] = None):
     token = ""
-    if authorization and authorization.startsWith("Bearer "):
+    if authorization and authorization.startswith("Bearer "):
         token = authorization.split("Bearer ")[1].strip()
     elif api_key:
         token = api_key
