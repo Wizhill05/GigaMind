@@ -43,18 +43,29 @@ class TaskSessionItem(SQLModel, table=True):
     status: str = Field(default="active")
     updated_at: str
 
-# Database Engine initialization (Supports Supabase Postgres + SQLite)
-database_url = os.getenv("DATABASE_URL")
-if not database_url:
+# Database Engine initialization with automatic fallback
+raw_db_url = os.getenv("DATABASE_URL")
+if raw_db_url and raw_db_url.startswith("postgres://"):
+    raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+
+def get_db_engine():
+    global raw_db_url
+    if raw_db_url and raw_db_url.startswith("postgresql"):
+        try:
+            pg_engine = create_engine(raw_db_url, pool_pre_ping=True)
+            with pg_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            print("⚡ Connected successfully to Supabase PostgreSQL.")
+            return pg_engine, True
+        except Exception as e:
+            print(f"⚠️ PostgreSQL connection failed ({e}). Falling back to local SQLite database.")
+
     db_path = os.getenv("DB_PATH", "./gigamind.db")
-    database_url = f"sqlite:///{db_path}"
+    sqlite_url = f"sqlite:///{db_path}"
+    sqlite_engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
+    return sqlite_engine, False
 
-if database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
-
-is_postgres = database_url.startswith("postgresql")
-connect_args = {"check_same_thread": False} if not is_postgres else {}
-engine = create_engine(database_url, connect_args=connect_args)
+engine, is_postgres = get_db_engine()
 
 def init_db():
     if is_postgres:
@@ -62,9 +73,8 @@ def init_db():
             with engine.connect() as conn:
                 conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
                 conn.commit()
-                print("⚡ Supabase pgvector extension verified.")
         except Exception as e:
-            print(f"PostgreSQL extension setup note: {e}")
+            print(f"pgvector extension note: {e}")
 
     SQLModel.metadata.create_all(engine)
     print(f"✅ GigaMind database initialized on {'Supabase PostgreSQL' if is_postgres else 'SQLite'}.")
