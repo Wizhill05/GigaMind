@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 import uuid
-from typing import Optional, List
+from typing import Optional, List, Dict
 from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -37,13 +37,13 @@ app.add_middleware(
 
 API_KEY = os.getenv("GIGAMIND_API_KEY", "gigamind-secret-key-change-me")
 
-# Active SSE Client Streams Map
-active_sse_clients = {}
+# Active SSE Session Queues Map: session_id -> asyncio.Queue
+sse_queues: Dict[str, asyncio.Queue] = {}
 
 # Auth Middleware Helper
 def verify_auth(authorization: Optional[str] = Header(None), api_key: Optional[str] = None):
     token = ""
-    if authorization and authorization.startswith("Bearer "):
+    if authorization and authorization.startsWith("Bearer "):
         token = authorization.split("Bearer ")[1].strip()
     elif api_key:
         token = api_key
@@ -187,11 +187,23 @@ async def mcp_sse_endpoint(request: Request):
     base_url = str(request.base_url).rstrip("/")
     message_endpoint = f"{base_url}/messages?sessionId={session_id}"
 
+    queue = asyncio.Queue()
+    sse_queues[session_id] = queue
+
     async def event_generator():
-        yield f"event: endpoint\ndata: {message_endpoint}\n\n"
-        while True:
-            await asyncio.sleep(15)
-            yield ": ping\n\n"
+        try:
+            # 1. Send initial endpoint event
+            yield f"event: endpoint\ndata: {message_endpoint}\n\n"
+
+            # 2. Yield messages from queue or periodic keep-alive ping
+            while True:
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"event: message\ndata: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            sse_queues.pop(session_id, None)
 
     return StreamingResponse(
         event_generator(),
@@ -199,7 +211,9 @@ async def mcp_sse_endpoint(request: Request):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*"
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         }
     )
 
@@ -210,75 +224,87 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
     method = body.get("method")
     params = body.get("params", {})
 
+    queue = sse_queues.get(sessionId)
+
+    async def send_rpc_response(result=None, error=None):
+        payload = {"jsonrpc": "2.0"}
+        if msg_id is not None:
+            payload["id"] = msg_id
+        if error:
+            payload["error"] = error
+        else:
+            payload["result"] = result
+
+        payload_json = json.dumps(payload)
+
+        # Emit over open SSE stream if session exists
+        if queue:
+            await queue.put(payload_json)
+
+        return payload
+
     if method == "initialize":
-        return {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "gigamind-mcp-server", "version": "1.0.0"}
-            }
-        }
+        res = await send_rpc_response(result={
+            "protocolVersion": params.get("protocolVersion", "2024-11-05"),
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "gigamind-mcp-server", "version": "1.0.0"}
+        })
+        return res
 
     if method == "notifications/initialized":
-        return JSONResponse(content="OK", status_code=200)
+        return JSONResponse(content="OK", status_code=202)
 
     if method == "tools/list":
-        return {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "result": {
-                "tools": [
-                    {
-                        "name": "search_memory",
-                        "description": "Search user GigaMind personal memory database for facts, rules, and history.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": {"type": "string", "description": "Search term or query"},
-                                "category": {"type": "string", "description": "Optional category filter"},
-                                "limit": {"type": "integer", "default": 5}
-                            },
-                            "required": ["query"]
-                        }
+        tools_list = [
+            {
+                "name": "search_memory",
+                "description": "Search user GigaMind personal memory database for facts, rules, and history.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search term or query"},
+                        "category": {"type": "string", "description": "Optional category filter"},
+                        "limit": {"type": "integer", "default": 5}
                     },
-                    {
-                        "name": "get_user_profile",
-                        "description": "Get permanent user profile identity rules and coding preferences.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {"category": {"type": "string"}}
-                        }
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "get_user_profile",
+                "description": "Get permanent user profile identity rules and coding preferences.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"category": {"type": "string"}}
+                }
+            },
+            {
+                "name": "add_memory",
+                "description": "Save a new fact or preference to GigaMind memory.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string"},
+                        "category": {"type": "string", "default": "general"}
                     },
-                    {
-                        "name": "add_memory",
-                        "description": "Save a new fact or preference to GigaMind memory.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "content": {"type": "string"},
-                                "category": {"type": "string", "default": "general"}
-                            },
-                            "required": ["content"]
-                        }
+                    "required": ["content"]
+                }
+            },
+            {
+                "name": "set_profile_rule",
+                "description": "Store or update a permanent profile key-value rule.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string"},
+                        "value": {"type": "string"},
+                        "category": {"type": "string", "default": "general"}
                     },
-                    {
-                        "name": "set_profile_rule",
-                        "description": "Store or update a permanent profile key-value rule.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "key": {"type": "string"},
-                                "value": {"type": "string"},
-                                "category": {"type": "string", "default": "general"}
-                            },
-                            "required": ["key", "value"]
-                        }
-                    }
-                ]
+                    "required": ["key", "value"]
+                }
             }
-        }
+        ]
+        res = await send_rpc_response(result={"tools": tools_list})
+        return res
 
     if method == "tools/call":
         name = params.get("name")
@@ -286,45 +312,34 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
 
         if name == "search_memory":
             results = search_memory(query=args.get("query", ""), category=args.get("category"), limit=args.get("limit", 5))
-            return {
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": {
-                    "content": [{"type": "text", "text": json.dumps({"_privacy_notice": "Ephemeral context.", "results": results}, indent=2)}]
-                }
-            }
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": json.dumps({"_privacy_notice": "Ephemeral context.", "results": results}, indent=2)}]
+            })
+            return res
 
         if name == "get_user_profile":
             rules = get_profile_rules(category=args.get("category"))
-            return {
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": {
-                    "content": [{"type": "text", "text": json.dumps({"profile": rules}, indent=2)}]
-                }
-            }
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": json.dumps({"profile": rules}, indent=2)}]
+            })
+            return res
 
         if name == "add_memory":
             mem = add_memory(content=args.get("content", ""), category=args.get("category", "general"))
-            return {
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": {
-                    "content": [{"type": "text", "text": json.dumps({"success": True, "memory": mem}, indent=2)}]
-                }
-            }
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": json.dumps({"success": True, "memory": mem}, indent=2)}]
+            })
+            return res
 
         if name == "set_profile_rule":
             rule = set_profile_rule(key=args.get("key", ""), value=args.get("value", ""), category=args.get("category", "general"))
-            return {
-                "jsonrpc": "2.0",
-                "id": msg_id,
-                "result": {
-                    "content": [{"type": "text", "text": json.dumps({"success": True, "rule": rule}, indent=2)}]
-                }
-            }
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": json.dumps({"success": True, "rule": rule}, indent=2)}]
+            })
+            return res
 
-    return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": "Method not found"}}
+    res = await send_rpc_response(error={"code": -32601, "message": "Method not found"})
+    return res
 
 # ==========================================
 # REST API ENDPOINTS (ChatGPT & Gemini)
