@@ -1,11 +1,10 @@
-# 🧠 GigaMind: Personal Memory Engine for AI
+# GigaMind: Personal Memory Engine for AI
 
-<img width="105" height="105" alt="artworks-000623298505-jfad qoikf-t1080x1080" src="https://github.com/user-attachments/assets/a5875dd1-418d-4af5-b304-98d67af2e65d" />
-
+<img width="1440" height="360" alt="artworks-000623298505-jqoikf-t1080x1080" src="https://github.com/user-attachments/assets/e84bb1b9-4026-433c-a98e-94cf769d443c" />
 
 ---
 
-## ✨ Features
+## Features
 
 - **Universal Multi-Protocol Engine**:
   - **FastMCP SSE & Stdio** (`/sse`, `/messages`) for Claude Desktop, Cursor, and Windsurf.
@@ -17,7 +16,7 @@
 
 ---
 
-## 🛠️ Quick Start (Local Development)
+## Quick Start (Local Development)
 
 ### 1. Install Dependencies
 ```bash
@@ -115,5 +114,5 @@ Add to your `claude_desktop_config.json`:
 
 ---
 
-## 📄 License
+## License
 MIT License.
