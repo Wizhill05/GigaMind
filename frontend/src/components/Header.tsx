@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
-import { PixelKey } from './ui/PixelIcons';
+import { PixelBrain, PixelKey } from './ui/PixelIcons';
 import { getApiKey, setApiKey } from '../api';
 
 interface HeaderProps {
@@ -12,11 +12,31 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOpenNewMemoryModal }) => {
   const [keyInput, setKeyInput] = useState(getApiKey());
   const [showKeyModal, setShowKeyModal] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+
+  // Handle ESC key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showKeyModal && !isExiting) {
+        handleAnimatedClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showKeyModal, isExiting]);
+
+  const handleAnimatedClose = () => {
+    setIsExiting(true);
+    setTimeout(() => {
+      setIsExiting(false);
+      setShowKeyModal(false);
+    }, 180);
+  };
 
   const handleConnect = () => {
     if (keyInput.trim()) {
       setApiKey(keyInput.trim());
-      setShowKeyModal(false);
+      handleAnimatedClose();
       onRefresh();
     }
   };
@@ -24,7 +44,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOp
   const handleLock = () => {
     setApiKey('');
     setKeyInput('');
-    setShowKeyModal(false);
+    handleAnimatedClose();
     onRefresh();
   };
 
@@ -75,8 +95,18 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOp
 
       {/* MASTER KEY POPUP MODAL WITH SMOOTH FADE & BACKDROP BLUR */}
       {showKeyModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 transition-all duration-300 animate-fade-in">
-          <div className="bg-[#13151c] border border-[#1e2029] max-w-sm w-full p-6 rounded-none shadow-2xl space-y-4 animate-scale-in">
+        <div
+          onClick={handleAnimatedClose}
+          className={`fixed inset-0 bg-black/70 backdrop-blur-md z-50 flex items-center justify-center p-4 transition-all duration-200 ${
+            isExiting ? 'animate-fade-out' : 'animate-fade-in'
+          }`}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`bg-[#13151c] border border-[#1e2029] max-w-sm w-full p-6 rounded-none shadow-2xl space-y-4 ${
+              isExiting ? 'animate-scale-out' : 'animate-scale-in'
+            }`}
+          >
             <h3 className="text-sm font-semibold text-white flex items-center gap-2">
               <PixelKey className="w-4 h-4 text-[#ff6b00]" />
               Master API Key Settings
@@ -103,7 +133,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOp
                 </button>
               )}
               <button
-                onClick={() => setShowKeyModal(false)}
+                onClick={handleAnimatedClose}
                 className="bg-[#181a24] text-[#8a8f9e] hover:text-white px-3 py-1.5 rounded-none text-xs btn-press"
               >
                 Cancel

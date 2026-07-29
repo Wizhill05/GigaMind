@@ -12,21 +12,24 @@ import { SettingsTab } from './components/tabs/SettingsTab';
 import { MemoryModal } from './components/modals/MemoryModal';
 import { RuleModal } from './components/modals/RuleModal';
 import { TranscriptDrawer } from './components/modals/TranscriptDrawer';
+import { CommandPalette } from './components/CommandPalette';
+import { ToastProvider } from './components/ui/Toast';
 import { Stats, Memory, Conversation } from './types';
 import { fetchStats, addMemory, updateMemory, setProfileRule, getApiKey } from './api';
 
-export const App: React.FC = () => {
+export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [stats, setStats] = useState<Stats | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
 
-  // Modals state
+  // Modals & Palette state
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
   const [editingMemory, setEditingMemory] = useState<Memory | null>(null);
 
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [activeTranscript, setActiveTranscript] = useState<Conversation | null>(null);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   const loadStats = async () => {
     const key = getApiKey();
@@ -154,6 +157,19 @@ export const App: React.FC = () => {
         conversation={activeTranscript}
         onClose={() => setActiveTranscript(null)}
       />
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+      />
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 };

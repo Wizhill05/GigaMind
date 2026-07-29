@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Copy, Check, User, Bot } from 'lucide-react';
 import { Conversation } from '../../types';
 import { AgentBadge } from '../ui/Badge';
@@ -10,6 +10,26 @@ interface TranscriptDrawerProps {
 
 export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation, onClose }) => {
   const [copied, setCopied] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+
+  // Handle ESC key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && conversation && !isExiting) {
+        handleAnimatedClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [conversation, isExiting]);
+
+  const handleAnimatedClose = () => {
+    setIsExiting(true);
+    setTimeout(() => {
+      setIsExiting(false);
+      onClose();
+    }, 200);
+  };
 
   if (!conversation) return null;
 
@@ -24,8 +44,18 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex justify-end font-sans select-none transition-all duration-300 animate-fade-in">
-      <div className="bg-[#13151c] border-l border-[#1e2029] w-full max-w-2xl h-full flex flex-col shadow-2xl animate-slide-right">
+    <div
+      onClick={handleAnimatedClose}
+      className={`fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex justify-end font-sans select-none transition-all duration-200 ${
+        isExiting ? 'animate-fade-out' : 'animate-fade-in'
+      }`}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`bg-[#13151c] border-l border-[#1e2029] w-full max-w-2xl h-full flex flex-col shadow-2xl ${
+          isExiting ? 'animate-slide-out-right' : 'animate-slide-right'
+        }`}
+      >
         {/* DRAWER HEADER */}
         <div className="p-6 border-b border-[#1e2029] bg-[#0f1015] flex justify-between items-start gap-4">
           <div className="space-y-2">
@@ -50,7 +80,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
               {copied ? <Check className="w-4 h-4 text-amber-400" /> : <Copy className="w-4 h-4" />}
             </button>
             <button
-              onClick={onClose}
+              onClick={handleAnimatedClose}
               className="p-2 bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 rounded-none transition-colors btn-press"
               title="Close Drawer"
             >

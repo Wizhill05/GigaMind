@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { PixelShield } from '../ui/PixelIcons';
 
@@ -13,6 +13,26 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
   const [value, setValue] = useState('');
   const [category, setCategory] = useState('general');
   const [sourceAgent, setSourceAgent] = useState('user');
+  const [isExiting, setIsExiting] = useState(false);
+
+  // Handle ESC key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen && !isExiting) {
+        handleAnimatedClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isExiting]);
+
+  const handleAnimatedClose = () => {
+    setIsExiting(true);
+    setTimeout(() => {
+      setIsExiting(false);
+      onClose();
+    }, 180);
+  };
 
   if (!isOpen) return null;
 
@@ -30,18 +50,28 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
     setValue('');
     setCategory('general');
     setSourceAgent('user');
-    onClose();
+    handleAnimatedClose();
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans select-none transition-all duration-300 animate-fade-in">
-      <div className="bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 animate-scale-in">
+    <div
+      onClick={handleAnimatedClose}
+      className={`fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans select-none transition-all duration-200 ${
+        isExiting ? 'animate-fade-out' : 'animate-fade-in'
+      }`}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 ${
+          isExiting ? 'animate-scale-out' : 'animate-scale-in'
+        }`}
+      >
         <div className="flex justify-between items-center border-b border-[#1e2029] pb-3">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
             <PixelShield className="w-4 h-4 text-[#ff6b00]" />
             <span>Define Identity & Profile Rule</span>
           </h3>
-          <button onClick={onClose} className="text-[#8a8f9e] hover:text-white transition-colors btn-press">
+          <button onClick={handleAnimatedClose} className="text-[#8a8f9e] hover:text-white transition-colors btn-press">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -106,7 +136,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
           <div className="flex justify-end gap-2 pt-2 border-t border-[#1e2029]">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleAnimatedClose}
               className="bg-[#181a24] text-[#8a8f9e] hover:text-white px-4 py-2 rounded-none font-medium btn-press"
             >
               Cancel

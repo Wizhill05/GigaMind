@@ -4,6 +4,7 @@ import { PixelDatabase } from '../ui/PixelIcons';
 import { Memory } from '../../types';
 import { fetchMemories, deleteMemory } from '../../api';
 import { AgentBadge, CategoryBadge } from '../ui/Badge';
+import { useToast } from '../ui/Toast';
 
 interface MemoriesTabProps {
   onOpenNewModal: () => void;
@@ -16,18 +17,24 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
+  const [isLoading, setIsLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+
+  const { toast } = useToast();
 
   const loadMemories = async () => {
+    setIsLoading(true);
     const res = await fetchMemories(page, 10, categoryFilter || undefined, sourceAgentFilter || undefined);
     if (res) {
       setMemories(res.memories);
       setTotalPages(res.pages || 1);
       setTotalCount(res.total || 0);
     }
+    setIsLoading(false);
   };
 
   useEffect(() => {
@@ -37,13 +44,17 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   const handleDelete = async (id: string) => {
     if (window.confirm(`Confirm deletion of memory item: ${id}?`)) {
       const ok = await deleteMemory(id);
-      if (ok) loadMemories();
+      if (ok) {
+        toast(`Memory ${id} deleted successfully`, 'success');
+        loadMemories();
+      }
     }
   };
 
   const handleCopyJson = (mem: Memory) => {
     navigator.clipboard.writeText(JSON.stringify(mem, null, 2));
     setCopiedId(mem.id);
+    toast(`Copied memory JSON to clipboard`, 'success');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -55,6 +66,27 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
       mem.tags.some((t) => t.toLowerCase().includes(searchFilter.toLowerCase()))
     );
   });
+
+  // Keyboard Arrow Navigation inside list
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (filteredMemories.length === 0) return;
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev + 1) % filteredMemories.length);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex((prev) => (prev - 1 + filteredMemories.length) % filteredMemories.length);
+      } else if (e.key === 'Enter' && selectedIndex >= 0 && selectedIndex < filteredMemories.length) {
+        e.preventDefault();
+        onOpenEditModal(filteredMemories[selectedIndex]);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [filteredMemories, selectedIndex, onOpenEditModal]);
 
   return (
     <div className="space-y-6 font-sans text-xs">
@@ -69,7 +101,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
 
         <button
           onClick={onOpenNewModal}
-          className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm"
+          className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm btn-press"
         >
           <Plus className="w-4 h-4" />
           <span>New Memory</span>
@@ -86,8 +118,8 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
               type="text"
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Filter memory records..."
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none font-sans"
+              placeholder="Filter memory records... (Use ↑ ↓ arrow keys to navigate)"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none font-sans transition-colors"
             />
           </div>
 
@@ -131,69 +163,90 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
           </div>
         </div>
 
-        {/* ROWS STACK */}
-        {filteredMemories.length === 0 ? (
+        {/* SKELETON LOADING OR ROWS STACK */}
+        {isLoading ? (
+          <div className="divide-y divide-[#1e2029] p-2 space-y-2">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="p-4 bg-[#0a0b0e] border border-[#1e2029] animate-pulse space-y-3">
+                <div className="h-4 bg-[#1e2029] rounded-none w-3/4" />
+                <div className="flex items-center gap-3">
+                  <div className="h-3 bg-[#181a24] w-16" />
+                  <div className="h-3 bg-[#181a24] w-12" />
+                  <div className="h-3 bg-[#181a24] w-24" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredMemories.length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e]">
             No memory records match the selected filter criteria
           </div>
         ) : (
           <div className="divide-y divide-[#1e2029]">
-            {filteredMemories.map((mem) => (
-              <div
-                key={mem.id}
-                className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:bg-[#181a24] transition-colors group"
-              >
-                <div className="flex items-start gap-3 flex-1">
-                  <div className="w-7 h-7 rounded-none bg-[#ff6b00]/10 border border-[#ff6b00]/30 text-[#ff6b00] flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <PixelDatabase className="w-4 h-4 text-[#ff6b00]" />
-                  </div>
-
-                  <div className="space-y-1.5 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-white font-medium text-xs">
-                        {mem.content}
-                      </span>
+            {filteredMemories.map((mem, idx) => {
+              const isSelected = selectedIndex === idx;
+              return (
+                <div
+                  key={mem.id}
+                  onClick={() => setSelectedIndex(idx)}
+                  className={`p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all group ${
+                    isSelected
+                      ? 'bg-[#181a24] border-l-2 border-l-[#ff6b00]'
+                      : 'hover:bg-[#181a24]'
+                  }`}
+                >
+                  <div className="flex items-start gap-3 flex-1">
+                    <div className="w-7 h-7 rounded-none bg-[#ff6b00]/10 border border-[#ff6b00]/30 text-[#ff6b00] flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <PixelDatabase className="w-4 h-4 text-[#ff6b00]" />
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3 text-[#8a8f9e] text-xs">
-                      <CategoryBadge category={mem.category} />
-                      <AgentBadge agent={mem.source_agent} />
-                      <span className="font-mono text-[11px]">id: {mem.id}</span>
-                      {mem.created_at && (
-                        <span>{new Date(mem.created_at).toLocaleString()}</span>
-                      )}
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-white font-medium text-xs">
+                          {mem.content}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-[#8a8f9e] text-xs">
+                        <CategoryBadge category={mem.category} />
+                        <AgentBadge agent={mem.source_agent} />
+                        <span className="font-mono text-[11px]">id: {mem.id}</span>
+                        {mem.created_at && (
+                          <span>{new Date(mem.created_at).toLocaleString()}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
+
+                  {/* ROW ACTIONS */}
+                  <div className="flex items-center gap-2 opacity-90 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => handleCopyJson(mem)}
+                      className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 btn-press"
+                    >
+                      {copiedId === mem.id ? <Check className="w-3.5 h-3.5 text-amber-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedId === mem.id ? 'Copied' : 'JSON'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => onOpenEditModal(mem)}
+                      className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 btn-press"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleDelete(mem.id)}
+                      className="bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 btn-press"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </button>
+                  </div>
                 </div>
-
-                {/* ROW ACTIONS */}
-                <div className="flex items-center gap-2 opacity-90 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => handleCopyJson(mem)}
-                    className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5"
-                  >
-                    {copiedId === mem.id ? <Check className="w-3.5 h-3.5 text-amber-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedId === mem.id ? 'Copied' : 'JSON'}</span>
-                  </button>
-
-                  <button
-                    onClick={() => onOpenEditModal(mem)}
-                    className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>Edit</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleDelete(mem.id)}
-                    className="bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete</span>
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -202,7 +255,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="flex items-center gap-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed btn-press"
           >
             <ChevronLeft className="w-4 h-4" /> Previous
           </button>
@@ -212,7 +265,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="flex items-center gap-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed btn-press"
           >
             Next <ChevronRight className="w-4 h-4" />
           </button>

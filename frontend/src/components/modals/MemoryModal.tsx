@@ -19,6 +19,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
   const [category, setCategory] = useState('general');
   const [sourceAgent, setSourceAgent] = useState('user');
   const [tagsInput, setTagsInput] = useState('');
+  const [isExiting, setIsExiting] = useState(false);
 
   useEffect(() => {
     if (initialMemory) {
@@ -33,6 +34,25 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
       setTagsInput('');
     }
   }, [initialMemory, isOpen]);
+
+  // Handle ESC key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen && !isExiting) {
+        handleAnimatedClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isExiting]);
+
+  const handleAnimatedClose = () => {
+    setIsExiting(true);
+    setTimeout(() => {
+      setIsExiting(false);
+      onClose();
+    }, 180);
+  };
 
   if (!isOpen) return null;
 
@@ -51,21 +71,31 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
       source_agent: sourceAgent.trim() || 'user',
       tags,
     });
-    onClose();
+    handleAnimatedClose();
   };
 
   const isEdit = !!initialMemory;
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans select-none transition-all duration-300 animate-fade-in">
-      <div className="bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 animate-scale-in">
+    <div
+      onClick={handleAnimatedClose}
+      className={`fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans select-none transition-all duration-200 ${
+        isExiting ? 'animate-fade-out' : 'animate-fade-in'
+      }`}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 ${
+          isExiting ? 'animate-scale-out' : 'animate-scale-in'
+        }`}
+      >
         <div className="flex justify-between items-center border-b border-[#1e2029] pb-3">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
             {isEdit ? <Save className="w-4 h-4 text-[#ff6b00]" /> : <Plus className="w-4 h-4 text-[#ff6b00]" />}
             <span>{isEdit ? `Edit Memory Record (${initialMemory.id})` : 'Create New Memory Record'}</span>
           </h3>
           <button
-            onClick={onClose}
+            onClick={handleAnimatedClose}
             className="text-[#8a8f9e] hover:text-white transition-colors btn-press"
           >
             <X className="w-4 h-4" />
@@ -131,7 +161,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
           <div className="flex justify-end gap-2 pt-2 border-t border-[#1e2029]">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleAnimatedClose}
               className="bg-[#181a24] text-[#8a8f9e] hover:text-white px-4 py-2 rounded-none font-medium btn-press"
             >
               Cancel

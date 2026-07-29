@@ -76,12 +76,12 @@ export const PixelSettings: React.FC<PixelIconProps> = ({ className = "w-4 h-4 t
 
 export const PixelKey: React.FC<PixelIconProps> = ({ className = "w-4 h-4 text-[#ff6b00]", size = 16 }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>
-    {/* 8-bit Pixel Key */}
-    <rect x="2" y="2" width="6" height="6" />
-    <rect x="4" y="4" width="2" height="2" fill="#0a0b0e" />
-    <rect x="7" y="4" width="7" height="2" />
-    <rect x="10" y="6" width="2" height="2" />
-    <rect x="13" y="6" width="1" height="2" />
+    {/* 8-bit Pixel Key - Centered */}
+    <rect x="2" y="5" width="5" height="6" />
+    <rect x="3" y="7" width="2" height="2" fill="#0a0b0e" />
+    <rect x="7" y="7" width="7" height="2" />
+    <rect x="10" y="9" width="2" height="2" />
+    <rect x="13" y="9" width="1" height="2" />
   </svg>
 );
 

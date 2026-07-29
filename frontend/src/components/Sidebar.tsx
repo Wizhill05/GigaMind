@@ -50,11 +50,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
     if (!containerRef.current) return;
     const activeEl = containerRef.current.querySelector<HTMLElement>(`[data-tab-id="${activeTab}"]`);
     if (activeEl) {
-      const containerTop = containerRef.current.getBoundingClientRect().top;
-      const activeRect = activeEl.getBoundingClientRect();
       setSliderStyle({
-        top: activeRect.top - containerTop,
-        height: activeRect.height,
+        top: activeEl.offsetTop,
+        height: activeEl.offsetHeight,
         opacity: 1,
       });
     }
@@ -87,7 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
           <div
             className="absolute left-3 right-3 bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] rounded-none shadow-sm shadow-[#ff6b00]/20 pointer-events-none transition-all duration-200 ease-out"
             style={{
-              transform: `translateY(${sliderStyle.top}px)`,
+              top: `${sliderStyle.top}px`,
               height: `${sliderStyle.height}px`,
               opacity: sliderStyle.opacity,
             }}
