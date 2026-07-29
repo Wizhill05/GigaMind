@@ -34,7 +34,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 font-sans select-none animate-fade-in">
+    <div className="fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans select-none transition-all duration-300 animate-fade-in">
       <div className="bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 animate-scale-in">
         <div className="flex justify-between items-center border-b border-[#1e2029] pb-3">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">

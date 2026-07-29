@@ -20,8 +20,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/90 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans select-none">
-      <div className="bg-[#13151c] border border-[#1e2029] max-w-md w-full p-8 rounded-none shadow-2xl space-y-6">
+    <div className="fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans select-none transition-all duration-300 animate-fade-in">
+      <div className="bg-[#13151c] border border-[#1e2029] max-w-md w-full p-8 rounded-none shadow-2xl space-y-6 animate-scale-in">
         <div className="text-center space-y-2">
           <div className="w-12 h-12 bg-[#ff6b00]/20 border border-[#ff6b00]/40 text-[#ff6b00] mx-auto rounded-none flex items-center justify-center">
             <PixelKey className="w-6 h-6 text-[#ff6b00]" />
@@ -57,7 +57,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
 
           <button
             type="submit"
-            className="w-full bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold py-3 rounded-none text-xs tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-[#ff6b00]/20 transition-all"
+            className="w-full bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold py-3 rounded-none text-xs tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-[#ff6b00]/20 transition-all btn-press"
           >
             <span>Authorize Connection</span>
             <ArrowRight className="w-4 h-4" />

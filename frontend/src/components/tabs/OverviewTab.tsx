@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  PixelBrain,
   PixelDatabase,
   PixelShield,
   PixelTerminal,
@@ -9,7 +8,8 @@ import {
 import { Search, Copy, Check, ExternalLink, Cpu } from 'lucide-react';
 import { Stats, SearchResult } from '../../types';
 import { searchMemory } from '../../api';
-import { AgentBadge, CategoryBadge, RenderPill } from '../ui/Badge';
+import { CategoryBadge, AgentBadge, RenderPill } from '../ui/Badge';
+import { MemoryChart } from '../ui/MemoryChart';
 
 interface OverviewTabProps {
   stats: Stats | null;
@@ -214,33 +214,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
         )}
       </div>
 
-      {/* SOURCE CREATOR BREAKDOWN */}
-      <div className="bg-[#13151c] border border-[#1e2029] rounded-none overflow-hidden">
-        <div className="p-4 border-b border-[#1e2029] flex justify-between items-center">
-          <h2 className="font-semibold text-white text-xs">Memory Creator Breakdown</h2>
-          <span className="text-[#8a8f9e] text-xs">Tracked Source Agents</span>
-        </div>
-
-        <div className="divide-y divide-[#1e2029]">
-          {['claude', 'gpt', 'gemini', 'user', 'system'].map((agentKey) => {
-            const count = sourceCounts[agentKey] || 0;
-            const total = stats?.total_memories || 1;
-            const pct = Math.round((count / total) * 100);
-
-            return (
-              <div key={agentKey} className="p-4 flex items-center justify-between hover:bg-[#181a24] transition-colors">
-                <div className="flex items-center gap-3">
-                  <AgentBadge agent={agentKey} />
-                </div>
-                <div className="flex items-center gap-4 text-xs">
-                  <span className="text-white font-medium">{count} memories</span>
-                  <span className="text-[#8a8f9e] w-12 text-right">{pct}%</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* DATA VISUALIZATION CHART (REPLACING TEXT BREAKDOWN) */}
+      <MemoryChart
+        sourceDistribution={sourceCounts}
+        totalMemories={stats?.total_memories || 0}
+      />
     </div>
   );
 };

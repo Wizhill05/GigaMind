@@ -24,7 +24,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/80 backdrop-blur-xs z-50 flex justify-end font-sans select-none animate-fade-in">
+    <div className="fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex justify-end font-sans select-none transition-all duration-300 animate-fade-in">
       <div className="bg-[#13151c] border-l border-[#1e2029] w-full max-w-2xl h-full flex flex-col shadow-2xl animate-slide-right">
         {/* DRAWER HEADER */}
         <div className="p-6 border-b border-[#1e2029] bg-[#0f1015] flex justify-between items-start gap-4">
