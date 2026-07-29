@@ -272,7 +272,7 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
         tools_list = [
             {
                 "name": "search_memory",
-                "description": "Search user GigaMind personal memory database for facts, rules, and history.",
+                "description": "Search user GigaMind personal memory database using a 2-stage RAG engine (Vector Candidate Search + Cross-Encoder Reranker).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
