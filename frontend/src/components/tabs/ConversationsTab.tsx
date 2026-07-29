@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Terminal, Filter, Eye, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
+import { Filter, Eye, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
+import { PixelTerminal } from '../ui/PixelIcons';
 import { Conversation } from '../../types';
 import { fetchConversations } from '../../api';
 import { AgentBadge } from '../ui/Badge';
@@ -41,17 +42,17 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
         </div>
       </div>
 
-      {/* RENDER SERVICE STACK CARD (Matching Image 2 Log View Header) */}
-      <div className="bg-[#13151c] border border-[#1e2029] rounded-lg overflow-hidden space-y-0">
-        {/* LOG FILTER HEADER (Matching Image 2) */}
+      {/* RENDER SERVICE STACK CARD */}
+      <div className="bg-[#13151c] border border-[#1e2029] rounded-none overflow-hidden space-y-0">
+        {/* LOG FILTER HEADER */}
         <div className="p-4 border-b border-[#1e2029] bg-[#101216] flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
           <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-emerald-400" />
+            <PixelTerminal className="w-4 h-4 text-[#ff6b00]" />
             <span className="font-semibold text-white">Application Transcript Logs</span>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-md text-xs text-[#8a8f9e]">
+            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-none text-xs text-[#8a8f9e]">
               <Filter className="w-3.5 h-3.5" />
               <select
                 value={platformFilter}
@@ -68,7 +69,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-md text-xs text-[#8a8f9e]">
+            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-none text-xs text-[#8a8f9e]">
               <select
                 value={sourceAgentFilter}
                 onChange={(e) => {
@@ -100,16 +101,16 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                 className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:bg-[#181a24] cursor-pointer transition-colors group"
               >
                 <div className="flex items-start gap-3 flex-1">
-                  <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <div className="w-7 h-7 rounded-none bg-[#ff6b00]/10 border border-[#ff6b00]/30 text-[#ff6b00] flex items-center justify-center flex-shrink-0 mt-0.5">
                     <MessageSquare className="w-3.5 h-3.5" />
                   </div>
 
                   <div className="space-y-1.5 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-white text-xs group-hover:text-emerald-400 transition-colors">
+                      <span className="font-semibold text-white text-xs group-hover:text-[#ff6b00] transition-colors">
                         {conv.title}
                       </span>
-                      <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                      <span className="text-[11px] font-mono text-[#ff6b00] bg-[#ff6b00]/10 border border-[#ff6b00]/20 px-2 py-0.5 rounded-none">
                         {conv.platform}
                       </span>
                       <AgentBadge agent={conv.source_agent} />
@@ -131,7 +132,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                       e.stopPropagation();
                       onOpenTranscript(conv);
                     }}
-                    className="bg-[#101216] border border-[#262936] hover:border-emerald-500/40 text-emerald-400 hover:text-emerald-300 px-3 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5 font-medium"
+                    className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#ff6b00] hover:text-[#ff8800] px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 font-medium"
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>Inspect Log</span>

@@ -4,7 +4,12 @@
 
 @layer base {
   body {
-    @apply bg-[#0a0b0e] text-[#f4f5f8] font-sans antialiased selection:bg-[#5b0e89] selection:text-white;
+    @apply bg-[#0a0b0e] text-[#f4f5f8] font-sans antialiased selection:bg-[#ff6b00] selection:text-white;
+    font-family: 'Lexend', sans-serif;
+  }
+
+  * {
+    border-radius: 2px !important;
   }
 }
 
@@ -18,7 +23,7 @@
 }
 ::-webkit-scrollbar-thumb {
   background: #1e2029;
-  border-radius: 4px;
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #262936;

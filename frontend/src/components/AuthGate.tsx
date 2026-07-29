@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ShieldAlert, Key, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
+import { PixelKey } from './ui/PixelIcons';
 import { setApiKey } from '../api';
 
 interface AuthGateProps {
@@ -20,10 +21,10 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
 
   return (
     <div className="fixed inset-0 bg-[#0a0b0e]/90 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans select-none">
-      <div className="bg-[#13151c] border border-[#1e2029] max-w-md w-full p-8 rounded-xl shadow-2xl space-y-6">
+      <div className="bg-[#13151c] border border-[#1e2029] max-w-md w-full p-8 rounded-none shadow-2xl space-y-6">
         <div className="text-center space-y-2">
-          <div className="w-12 h-12 bg-[#5b0e89]/20 border border-[#5b0e89]/40 text-[#a855f7] mx-auto rounded-full flex items-center justify-center">
-            <Key className="w-6 h-6" />
+          <div className="w-12 h-12 bg-[#ff6b00]/20 border border-[#ff6b00]/40 text-[#ff6b00] mx-auto rounded-none flex items-center justify-center">
+            <PixelKey className="w-6 h-6 text-[#ff6b00]" />
           </div>
           <h2 className="text-xl font-bold text-white tracking-tight">
             Authenticate Connection
@@ -44,19 +45,19 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
               onChange={(e) => setKeyInput(e.target.value)}
               placeholder="Enter GIGAMIND_API_KEY..."
               autoFocus
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#a855f7] p-3 text-white font-mono text-xs rounded-md outline-none transition-colors"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-3 text-white font-mono text-xs rounded-none outline-none transition-colors"
             />
           </div>
 
           {errorNotice && (
-            <div className="bg-rose-500/10 border border-rose-500/30 p-3 text-xs text-rose-400 rounded-md text-center">
+            <div className="bg-rose-500/10 border border-rose-500/30 p-3 text-xs text-rose-400 rounded-none text-center">
               Invalid Master Password. Please check your key and try again.
             </div>
           )}
 
           <button
             type="submit"
-            className="w-full bg-[#5b0e89] hover:bg-[#6d10a3] text-white font-semibold py-3 rounded-md text-xs tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-[#5b0e89]/20 transition-all"
+            className="w-full bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold py-3 rounded-none text-xs tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-[#ff6b00]/20 transition-all"
           >
             <span>Authorize Connection</span>
             <ArrowRight className="w-4 h-4" />

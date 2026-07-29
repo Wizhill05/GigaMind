@@ -1,14 +1,14 @@
 import React from 'react';
 import {
-  LayoutDashboard,
-  Database,
-  Shield,
-  Settings,
-  Terminal,
-  Sparkles,
-  ExternalLink,
-  Brain
-} from 'lucide-react';
+  PixelBrain,
+  PixelDatabase,
+  PixelShield,
+  PixelTerminal,
+  PixelSparkles,
+  PixelSettings,
+  PixelGlobe
+} from './ui/PixelIcons';
+import { ExternalLink } from 'lucide-react';
 import { TabType } from './NavigationTabs';
 
 interface SidebarProps {
@@ -25,20 +25,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
   return (
     <aside className="w-60 bg-[#0f1015] border-r border-[#1e2029] flex flex-col justify-between h-screen sticky top-0 flex-shrink-0 text-xs font-sans select-none">
       <div>
-        {/* BRANDING HEADER */}
-        <div className="p-4 border-b border-[#1e2029] flex items-center justify-between">
+        {/* BRANDING HEADER - EXACT h-14 ALIGNED WITH NAVBAR */}
+        <div className="h-14 px-4 border-b border-[#1e2029] flex items-center justify-between bg-[#0a0b0e]">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 bg-[#5b0e89] text-white rounded-md flex items-center justify-center font-bold text-sm shadow-sm">
-              <Brain className="w-4 h-4 text-white" />
+            <div className="w-7 h-7 bg-[#ff6b00] text-white rounded-none flex items-center justify-center font-bold text-sm shadow-sm shadow-[#ff6b00]/20">
+              <PixelBrain className="w-4 h-4 text-white" />
             </div>
             <div>
-              <span className="font-bold text-white text-sm tracking-tight block">GigaMind</span>
+              <span className="font-bold text-white text-xs tracking-tight block">GigaMind</span>
               <span className="text-[10px] text-[#8a8f9e] font-mono">Memory Engine</span>
             </div>
           </div>
 
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-medium rounded-md">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-medium rounded-none">
+            <span className="w-1.5 h-1.5 rounded-none bg-amber-400 animate-pulse" />
             Active
           </span>
         </div>
@@ -50,7 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
             <SidebarItem
               id="overview"
               label="Overview"
-              icon={LayoutDashboard}
+              icon={PixelBrain}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
             />
@@ -64,7 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
             <SidebarItem
               id="memories"
               label="Memories"
-              icon={Database}
+              icon={PixelDatabase}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
               badge={counts.memories}
@@ -72,7 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
             <SidebarItem
               id="rules"
               label="Profile Rules"
-              icon={Shield}
+              icon={PixelShield}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
               badge={counts.rules}
@@ -87,7 +87,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
             <SidebarItem
               id="transcripts"
               label="Chat Transcripts"
-              icon={Terminal}
+              icon={PixelTerminal}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
               badge={counts.transcripts}
@@ -95,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
             <SidebarItem
               id="vector-lab"
               label="Vector Search Lab"
-              icon={Sparkles}
+              icon={PixelSparkles}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
             />
@@ -109,7 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
             <SidebarItem
               id="settings"
               label="Settings & MCP Specs"
-              icon={Settings}
+              icon={PixelSettings}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
             />
@@ -147,9 +147,9 @@ const SidebarItem: React.FC<{
   return (
     <button
       onClick={() => setActiveTab(id)}
-      className={`w-full flex items-center justify-between px-3 py-2 rounded-md font-sans text-xs transition-colors ${
+      className={`w-full flex items-center justify-between px-3 py-2 rounded-none font-sans text-xs transition-colors ${
         isActive
-          ? 'bg-[#5b0e89] text-white font-medium shadow-sm'
+          ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white font-semibold shadow-sm shadow-[#ff6b00]/20'
           : 'text-[#c1c5d0] hover:text-white hover:bg-[#181a24]'
       }`}
     >
@@ -159,7 +159,7 @@ const SidebarItem: React.FC<{
       </div>
       {badge !== undefined && (
         <span
-          className={`px-1.5 py-0.2 text-[10px] font-mono rounded-full ${
+          className={`px-1.5 py-0.2 text-[10px] font-mono rounded-none ${
             isActive ? 'bg-white/20 text-white' : 'bg-[#1e2029] text-[#8a8f9e]'
           }`}
         >

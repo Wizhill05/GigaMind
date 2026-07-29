@@ -17,26 +17,26 @@ export default {
           textMuted: "#8a8f9e",
           textSecondary: "#c1c5d0",
           textPrimary: "#f4f5f8",
-          purple: "#5b0e89",
-          purpleActive: "#6d10a3",
-          purpleLight: "#a855f7",
-          purpleBanner: "#4d007d",
-          emerald: "#10b981",
+          orange: "#ff6b00",
+          orangeHover: "#e05e00",
+          orangeLight: "#ff8800",
           amber: "#f59e0b",
+          amberLight: "#fbbf24",
+          emerald: "#10b981",
           rose: "#f43f5e",
           cyan: "#06b6d4"
         }
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        sans: ['Lexend', 'system-ui', '-apple-system', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'Consolas', 'monospace'],
       },
       borderRadius: {
-        DEFAULT: '6px',
-        'sm': '4px',
-        'md': '6px',
-        'lg': '8px',
-        'xl': '12px',
+        DEFAULT: '2px',
+        'sm': '2px',
+        'md': '2px',
+        'lg': '2px',
+        'xl': '2px',
         'none': '0px'
       }
     },

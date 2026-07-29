@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check, CheckCircle2 } from 'lucide-react';
+import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check } from 'lucide-react';
+import { PixelDatabase } from '../ui/PixelIcons';
 import { Memory } from '../../types';
 import { fetchMemories, deleteMemory } from '../../api';
 import { AgentBadge, CategoryBadge } from '../ui/Badge';
@@ -68,15 +69,15 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
 
         <button
           onClick={onOpenNewModal}
-          className="bg-[#5b0e89] hover:bg-[#6d10a3] text-white font-medium px-4 py-2 rounded-md flex items-center gap-2 transition-colors shadow-sm"
+          className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm"
         >
           <Plus className="w-4 h-4" />
           <span>New Memory</span>
         </button>
       </div>
 
-      {/* RENDER SERVICE STACK CARD (Matching Image 1) */}
-      <div className="bg-[#13151c] border border-[#1e2029] rounded-lg overflow-hidden space-y-0">
+      {/* RENDER SERVICE STACK CARD */}
+      <div className="bg-[#13151c] border border-[#1e2029] rounded-none overflow-hidden space-y-0">
         {/* FILTER BAR HEADER */}
         <div className="p-4 border-b border-[#1e2029] bg-[#101216] flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
           <div className="relative flex-1">
@@ -86,12 +87,12 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Filter memory records..."
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-md"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none font-sans"
             />
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-md text-xs text-[#8a8f9e]">
+            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-none text-xs text-[#8a8f9e]">
               <Filter className="w-3.5 h-3.5" />
               <select
                 value={categoryFilter}
@@ -111,7 +112,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-md text-xs text-[#8a8f9e]">
+            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-none text-xs text-[#8a8f9e]">
               <select
                 value={sourceAgentFilter}
                 onChange={(e) => {
@@ -130,7 +131,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
           </div>
         </div>
 
-        {/* ROWS STACK (Matching Image 1 Render Deploy Feed) */}
+        {/* ROWS STACK */}
         {filteredMemories.length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e]">
             No memory records match the selected filter criteria
@@ -143,8 +144,8 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
                 className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:bg-[#181a24] transition-colors group"
               >
                 <div className="flex items-start gap-3 flex-1">
-                  <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <CheckCircle2 className="w-4 h-4" />
+                  <div className="w-7 h-7 rounded-none bg-[#ff6b00]/10 border border-[#ff6b00]/30 text-[#ff6b00] flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <PixelDatabase className="w-4 h-4 text-[#ff6b00]" />
                   </div>
 
                   <div className="space-y-1.5 flex-1">
@@ -169,15 +170,15 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
                 <div className="flex items-center gap-2 opacity-90 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => handleCopyJson(mem)}
-                    className="bg-[#101216] border border-[#262936] hover:border-[#3f4357] text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5"
+                    className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5"
                   >
-                    {copiedId === mem.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedId === mem.id ? <Check className="w-3.5 h-3.5 text-amber-400" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedId === mem.id ? 'Copied' : 'JSON'}</span>
                   </button>
 
                   <button
                     onClick={() => onOpenEditModal(mem)}
-                    className="bg-[#101216] border border-[#262936] hover:border-[#3f4357] text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5"
+                    className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                     <span>Edit</span>
@@ -185,7 +186,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
 
                   <button
                     onClick={() => handleDelete(mem.id)}
-                    className="bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5"
+                    className="bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Delete</span>

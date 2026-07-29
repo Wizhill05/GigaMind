@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Shield, Trash2, Filter, Search, Key } from 'lucide-react';
+import { Plus, Filter, Search, Trash2 } from 'lucide-react';
+import { PixelShield } from '../ui/PixelIcons';
 import { ProfileRule } from '../../types';
 import { fetchProfileRules, deleteProfileRule } from '../../api';
 import { AgentBadge, CategoryBadge } from '../ui/Badge';
@@ -54,7 +55,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
 
         <button
           onClick={onOpenNewRuleModal}
-          className="bg-[#5b0e89] hover:bg-[#6d10a3] text-white font-medium px-4 py-2 rounded-md flex items-center gap-2 transition-colors shadow-sm"
+          className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm"
         >
           <Plus className="w-4 h-4" />
           <span>Add Rule</span>
@@ -62,7 +63,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
       </div>
 
       {/* RENDER SERVICE STACK CARD */}
-      <div className="bg-[#13151c] border border-[#1e2029] rounded-lg overflow-hidden space-y-0">
+      <div className="bg-[#13151c] border border-[#1e2029] rounded-none overflow-hidden space-y-0">
         {/* FILTER BAR HEADER */}
         <div className="p-4 border-b border-[#1e2029] bg-[#101216] flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
           <div className="relative flex-1">
@@ -72,12 +73,12 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Search rule keys or values..."
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-md"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none font-sans"
             />
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-md text-xs text-[#8a8f9e]">
+            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-none text-xs text-[#8a8f9e]">
               <Filter className="w-3.5 h-3.5" />
               <select
                 value={categoryFilter}
@@ -91,7 +92,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
               </select>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-md text-xs text-[#8a8f9e]">
+            <div className="flex items-center gap-1.5 bg-[#0a0b0e] border border-[#1e2029] px-2.5 py-1.5 rounded-none text-xs text-[#8a8f9e]">
               <select
                 value={sourceAgentFilter}
                 onChange={(e) => setSourceAgentFilter(e.target.value)}
@@ -120,8 +121,8 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
                 className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:bg-[#181a24] transition-colors group"
               >
                 <div className="flex items-start gap-3 flex-1">
-                  <div className="w-7 h-7 rounded-full bg-[#5b0e89]/20 border border-[#5b0e89]/40 text-[#a855f7] flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Shield className="w-3.5 h-3.5" />
+                  <div className="w-7 h-7 rounded-none bg-[#ff6b00]/10 border border-[#ff6b00]/30 text-[#ff6b00] flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <PixelShield className="w-3.5 h-3.5 text-[#ff6b00]" />
                   </div>
 
                   <div className="space-y-1.5 flex-1">
@@ -147,7 +148,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
                 {/* ROW ACTION */}
                 <button
                   onClick={() => handleDelete(rule.id)}
-                  className="bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5 opacity-90 group-hover:opacity-100"
+                  className="bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 opacity-90 group-hover:opacity-100"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Delete</span>
