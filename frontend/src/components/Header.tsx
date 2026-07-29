@@ -1,18 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, RefreshCw } from 'lucide-react';
-import { PixelBrain, PixelKey } from './ui/PixelIcons';
+import { Plus, RefreshCw, Search } from 'lucide-react';
+import { PixelKey } from './ui/PixelIcons';
 import { getApiKey, setApiKey } from '../api';
+import { useToast } from './ui/Toast';
 
 interface HeaderProps {
   onRefresh: () => void;
   isAuthenticated: boolean;
   onOpenNewMemoryModal: () => void;
+  onOpenCommandPalette: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOpenNewMemoryModal }) => {
+export const Header: React.FC<HeaderProps> = ({
+  onRefresh,
+  isAuthenticated,
+  onOpenNewMemoryModal,
+  onOpenCommandPalette,
+}) => {
   const [keyInput, setKeyInput] = useState(getApiKey());
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
+
+  const { toast } = useToast();
 
   // Handle ESC key press
   useEffect(() => {
@@ -37,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOp
     if (keyInput.trim()) {
       setApiKey(keyInput.trim());
       handleAnimatedClose();
+      toast('Master Key saved & authenticated', 'success');
       onRefresh();
     }
   };
@@ -45,6 +55,7 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOp
     setApiKey('');
     setKeyInput('');
     handleAnimatedClose();
+    toast('Disconnected Master Key', 'info');
     onRefresh();
   };
 
@@ -59,6 +70,19 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOp
 
       {/* RIGHT ACTIONS */}
       <div className="flex items-center gap-3">
+        {/* CMD+K SPOTLIGHT SEARCH BUTTON */}
+        <button
+          onClick={onOpenCommandPalette}
+          className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white px-3 py-1.5 rounded-none flex items-center gap-2 font-medium transition-all btn-press"
+          title="Search (Cmd+K / Ctrl+K)"
+        >
+          <Search className="w-3.5 h-3.5 text-[#ff6b00]" />
+          <span className="text-xs">Search</span>
+          <span className="bg-[#181a24] border border-[#262936] text-[10px] font-mono px-1.5 py-0.5 rounded-none text-[#8a8f9e]">
+            ⌘K
+          </span>
+        </button>
+
         {/* + NEW MEMORY BUTTON */}
         <button
           onClick={onOpenNewMemoryModal}
@@ -85,7 +109,10 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOp
 
         {/* REFRESH */}
         <button
-          onClick={onRefresh}
+          onClick={() => {
+            onRefresh();
+            toast('Refreshed system telemetry', 'info');
+          }}
           className="p-1.5 text-[#8a8f9e] hover:text-white border border-[#262936] bg-[#101216] rounded-none transition-all btn-press"
           title="Refresh telemetry"
         >

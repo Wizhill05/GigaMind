@@ -4,6 +4,7 @@ import { PixelShield } from '../ui/PixelIcons';
 import { ProfileRule } from '../../types';
 import { fetchProfileRules, deleteProfileRule } from '../../api';
 import { AgentBadge, CategoryBadge } from '../ui/Badge';
+import { useToast } from '../ui/Toast';
 
 interface ProfileRulesTabProps {
   onOpenNewRuleModal: () => void;
@@ -14,6 +15,8 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
+
+  const { toast } = useToast();
 
   const loadRules = async () => {
     const res = await fetchProfileRules(categoryFilter || undefined, sourceAgentFilter || undefined);
@@ -29,7 +32,10 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
   const handleDelete = async (id: string) => {
     if (window.confirm(`Confirm deletion of profile rule: ${id}?`)) {
       const ok = await deleteProfileRule(id);
-      if (ok) loadRules();
+      if (ok) {
+        toast(`Profile rule deleted`, 'success');
+        loadRules();
+      }
     }
   };
 
@@ -55,7 +61,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
 
         <button
           onClick={onOpenNewRuleModal}
-          className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm"
+          className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm btn-press"
         >
           <Plus className="w-4 h-4" />
           <span>Add Rule</span>
@@ -148,7 +154,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
                 {/* ROW ACTION */}
                 <button
                   onClick={() => handleDelete(rule.id)}
-                  className="bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 opacity-90 group-hover:opacity-100"
+                  className="bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 opacity-90 group-hover:opacity-100 btn-press"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Delete</span>

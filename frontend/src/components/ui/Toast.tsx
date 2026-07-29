@@ -39,29 +39,29 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <ToastContext.Provider value={{ toast }}>
       {children}
 
-      {/* TOAST CONTAINER CONTAINER */}
-      <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none select-none">
+      {/* TOAST CONTAINER - HIGHEST Z-INDEX OVER ALL OVERLAYS */}
+      <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2.5 pointer-events-none select-none">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto flex items-center justify-between gap-3 px-4 py-3 bg-[#13151c] border rounded-none shadow-xl text-xs font-sans animate-slide-up transition-all ${
+            className={`pointer-events-auto flex items-center justify-between gap-3 px-4 py-3 bg-[#13151c] border rounded-none shadow-2xl shadow-black/80 text-xs font-sans animate-slide-up transition-all ${
               t.type === 'success'
-                ? 'border-emerald-500/40 text-white'
+                ? 'border-emerald-500/50 text-white'
                 : t.type === 'error'
-                ? 'border-rose-500/40 text-white'
-                : 'border-[#ff6b00]/40 text-white'
+                ? 'border-rose-500/50 text-white'
+                : 'border-[#ff6b00]/50 text-white'
             }`}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               {t.type === 'success' && <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
               {t.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />}
               {t.type === 'info' && <Info className="w-4 h-4 text-[#ff6b00] flex-shrink-0" />}
-              <span>{t.message}</span>
+              <span className="font-medium text-[#f4f5f8]">{t.message}</span>
             </div>
 
             <button
               onClick={() => removeToast(t.id)}
-              className="text-[#8a8f9e] hover:text-white transition-colors"
+              className="text-[#8a8f9e] hover:text-white transition-colors p-0.5 rounded-none"
             >
               <X className="w-3.5 h-3.5" />
             </button>

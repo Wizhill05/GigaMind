@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React from 'react';
 import {
   PixelBrain,
   PixelDatabase,
@@ -29,13 +29,6 @@ interface NavItemDef {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, counts }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [sliderStyle, setSliderStyle] = useState<{ top: number; height: number; opacity: number }>({
-    top: 0,
-    height: 0,
-    opacity: 0,
-  });
-
   const navItems: NavItemDef[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'OVERVIEW' },
     { id: 'memories', label: 'Memories', icon: PixelDatabase, group: 'KNOWLEDGE BASE', badge: counts.memories },
@@ -44,19 +37,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
     { id: 'vector-lab', label: 'Vector Search Lab', icon: PixelSparkles, group: 'MONITOR & LAB' },
     { id: 'settings', label: 'Settings & MCP Specs', icon: PixelSettings, group: 'SETTINGS & SPECS' },
   ];
-
-  // Update slider position whenever activeTab changes
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const activeEl = containerRef.current.querySelector<HTMLElement>(`[data-tab-id="${activeTab}"]`);
-    if (activeEl) {
-      setSliderStyle({
-        top: activeEl.offsetTop,
-        height: activeEl.offsetHeight,
-        opacity: 1,
-      });
-    }
-  }, [activeTab]);
 
   return (
     <aside className="w-60 bg-[#0f1015] border-r border-[#1e2029] flex flex-col justify-between h-screen sticky top-0 flex-shrink-0 text-xs font-sans select-none">
@@ -79,27 +59,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
           </span>
         </div>
 
-        {/* NAVIGATION CONTAINER WITH SMOOTH SLIDING ACTIVE HIGHLIGHT */}
-        <div ref={containerRef} className="relative px-3 py-4 space-y-6 overflow-y-auto max-h-[calc(100vh-140px)]">
-          {/* SMOOTH FAST SLIDING HIGHLIGHT PILL */}
-          <div
-            className="absolute left-3 right-3 bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] rounded-none shadow-sm shadow-[#ff6b00]/20 pointer-events-none transition-all duration-200 ease-out"
-            style={{
-              top: `${sliderStyle.top}px`,
-              height: `${sliderStyle.height}px`,
-              opacity: sliderStyle.opacity,
-            }}
-          />
-
+        {/* NAVIGATION CONTAINER WITH SMOOTH ACTIVE HIGHLIGHT */}
+        <div className="px-3 py-4 space-y-6 overflow-y-auto max-h-[calc(100vh-140px)]">
           {/* OVERVIEW GROUP */}
-          <div className="space-y-1 relative z-10">
+          <div className="space-y-1">
             {navItems.filter(i => i.group === 'OVERVIEW').map(item => (
               <SidebarNavItem key={item.id} item={item} activeTab={activeTab} setActiveTab={setActiveTab} />
             ))}
           </div>
 
           {/* KNOWLEDGE GROUP */}
-          <div className="space-y-1 relative z-10">
+          <div className="space-y-1">
             <div className="px-3 text-[10px] font-semibold text-[#8a8f9e] uppercase tracking-wider mb-1">
               KNOWLEDGE BASE
             </div>
@@ -109,7 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
           </div>
 
           {/* MONITOR GROUP */}
-          <div className="space-y-1 relative z-10">
+          <div className="space-y-1">
             <div className="px-3 text-[10px] font-semibold text-[#8a8f9e] uppercase tracking-wider mb-1">
               MONITOR & LAB
             </div>
@@ -119,7 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
           </div>
 
           {/* MANAGE GROUP */}
-          <div className="space-y-1 relative z-10">
+          <div className="space-y-1">
             <div className="px-3 text-[10px] font-semibold text-[#8a8f9e] uppercase tracking-wider mb-1">
               SETTINGS & SPECS
             </div>
@@ -157,21 +127,20 @@ const SidebarNavItem: React.FC<{
 
   return (
     <button
-      data-tab-id={item.id}
       onClick={() => setActiveTab(item.id)}
-      className={`w-full flex items-center justify-between px-3 py-2 rounded-none font-sans text-xs transition-colors btn-press ${
+      className={`w-full flex items-center justify-between px-3 py-2 rounded-none font-sans text-xs transition-all duration-150 relative overflow-hidden btn-press ${
         isActive
-          ? 'text-white font-semibold'
-          : 'text-[#c1c5d0] hover:text-white hover:bg-[#181a24]/60'
+          ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white font-semibold shadow-md shadow-[#ff6b00]/20'
+          : 'text-[#c1c5d0] hover:text-white hover:bg-[#181a24]'
       }`}
     >
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 relative z-10">
         <Icon className={`w-4 h-4 transition-colors ${isActive ? 'text-white' : 'text-[#8a8f9e]'}`} />
         <span>{item.label}</span>
       </div>
       {item.badge !== undefined && (
         <span
-          className={`px-1.5 py-0.2 text-[10px] font-mono rounded-none transition-colors ${
+          className={`px-1.5 py-0.2 text-[10px] font-mono rounded-none transition-colors relative z-10 ${
             isActive ? 'bg-white/20 text-white' : 'bg-[#1e2029] text-[#8a8f9e]'
           }`}
         >

@@ -13,7 +13,7 @@ import { MemoryModal } from './components/modals/MemoryModal';
 import { RuleModal } from './components/modals/RuleModal';
 import { TranscriptDrawer } from './components/modals/TranscriptDrawer';
 import { CommandPalette } from './components/CommandPalette';
-import { ToastProvider } from './components/ui/Toast';
+import { ToastProvider, useToast } from './components/ui/Toast';
 import { Stats, Memory, Conversation } from './types';
 import { fetchStats, addMemory, updateMemory, setProfileRule, getApiKey } from './api';
 
@@ -30,6 +30,8 @@ export const AppContent: React.FC = () => {
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [activeTranscript, setActiveTranscript] = useState<Conversation | null>(null);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+
+  const { toast } = useToast();
 
   const loadStats = async () => {
     const key = getApiKey();
@@ -54,6 +56,18 @@ export const AppContent: React.FC = () => {
     loadStats();
   }, []);
 
+  // Global Cmd+K / Ctrl+K keyboard shortcut listener
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
   // Memory modal handlers
   const handleOpenNewMemoryModal = () => {
     setEditingMemory(null);
@@ -68,8 +82,10 @@ export const AppContent: React.FC = () => {
   const handleSaveMemory = async (data: { content: string; category: string; source_agent: string; tags: string[] }) => {
     if (editingMemory) {
       await updateMemory(editingMemory.id, data);
+      toast(`Memory ${editingMemory.id} updated successfully`, 'success');
     } else {
       await addMemory(data);
+      toast(`New memory saved to repository`, 'success');
     }
     loadStats();
   };
@@ -77,6 +93,7 @@ export const AppContent: React.FC = () => {
   // Rule modal handlers
   const handleSaveRule = async (data: { key: string; value: string; category: string; source_agent: string }) => {
     await setProfileRule(data);
+    toast(`Profile rule '${data.key}' saved successfully`, 'success');
     loadStats();
   };
 
@@ -108,6 +125,7 @@ export const AppContent: React.FC = () => {
           onRefresh={loadStats}
           isAuthenticated={isAuthenticated}
           onOpenNewMemoryModal={handleOpenNewMemoryModal}
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         />
 
         {/* SCROLLABLE MAIN CONTENT CANVAS WITH SMOOTH ANIMATED TAB TRANSITIONS */}
