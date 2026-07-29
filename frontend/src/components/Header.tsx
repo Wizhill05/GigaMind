@@ -63,22 +63,22 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="h-14 border-b border-[#1e2029] bg-[#0a0b0e] px-6 flex items-center justify-between font-sans text-xs select-none">
       {/* BREADCRUMB TITLE */}
       <div className="flex items-center gap-2 text-white font-medium text-xs">
-        <span className="font-semibold tracking-tight text-white">GigaMind</span>
+        <span className="font-semibold tracking-tight text-white text-sm">GigaMind</span>
         <span className="text-[#8a8f9e]">/</span>
         <span className="text-[#8a8f9e] font-normal">Console</span>
       </div>
 
-      {/* RIGHT ACTIONS */}
-      <div className="flex items-center gap-3">
+      {/* RIGHT ACTIONS - UNIFORM h-8 (32px) HEIGHT FOR ALL BUTTONS */}
+      <div className="flex items-center gap-2.5">
         {/* CMD+K SPOTLIGHT SEARCH BUTTON */}
         <button
           onClick={onOpenCommandPalette}
-          className="bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white px-3 py-1.5 rounded-none flex items-center gap-2 font-medium transition-all btn-press"
+          className="h-8 bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white px-3 rounded-none flex items-center gap-2 font-medium transition-all btn-press"
           title="Search (Cmd+K / Ctrl+K)"
         >
           <Search className="w-3.5 h-3.5 text-[#ff6b00]" />
           <span className="text-xs">Search</span>
-          <span className="bg-[#181a24] border border-[#262936] text-[10px] font-mono px-1.5 py-0.5 rounded-none text-[#8a8f9e]">
+          <span className="bg-[#181a24] border border-[#262936] text-[10px] font-mono px-1.5 py-0.5 rounded-none text-[#8a8f9e] leading-none">
             ⌘K
           </span>
         </button>
@@ -86,16 +86,16 @@ export const Header: React.FC<HeaderProps> = ({
         {/* + NEW MEMORY BUTTON */}
         <button
           onClick={onOpenNewMemoryModal}
-          className="bg-transparent hover:bg-[#181a24] border border-[#262936] text-white px-3 py-1.5 rounded-none flex items-center gap-1.5 font-medium transition-all btn-press"
+          className="h-8 bg-transparent hover:bg-[#181a24] border border-[#262936] text-white px-3 rounded-none flex items-center gap-1.5 font-medium transition-all btn-press"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span className="leading-none">New Memory</span>
+          <span className="leading-none text-xs">New Memory</span>
         </button>
 
-        {/* MASTER KEY AUTH BUTTON - PERFECT VERTICAL ALIGNMENT */}
+        {/* MASTER KEY AUTH BUTTON - UNIFORM h-8 HEIGHT */}
         <button
           onClick={() => setShowKeyModal(!showKeyModal)}
-          className={`border px-3 py-1.5 rounded-none flex items-center gap-2 font-medium transition-all btn-press ${
+          className={`h-8 border px-3 rounded-none flex items-center gap-2 font-medium transition-all btn-press ${
             isAuthenticated
               ? 'bg-[#10b981]/15 text-emerald-400 border-emerald-500/30'
               : 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white border-transparent hover:opacity-90'
@@ -104,16 +104,16 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="flex items-center justify-center flex-shrink-0">
             <PixelKey className={`w-3.5 h-3.5 ${isAuthenticated ? 'text-emerald-400' : 'text-white'}`} />
           </span>
-          <span className="leading-none flex items-center">{isAuthenticated ? 'Connected' : 'Master Key'}</span>
+          <span className="leading-none text-xs flex items-center">{isAuthenticated ? 'Connected' : 'Master Key'}</span>
         </button>
 
-        {/* REFRESH */}
+        {/* REFRESH - UNIFORM h-8 w-8 HEIGHT & WIDTH */}
         <button
           onClick={() => {
             onRefresh();
             toast('Refreshed system telemetry', 'info');
           }}
-          className="p-1.5 text-[#8a8f9e] hover:text-white border border-[#262936] bg-[#101216] rounded-none transition-all btn-press"
+          className="h-8 w-8 flex items-center justify-center text-[#8a8f9e] hover:text-white border border-[#262936] bg-[#101216] rounded-none transition-all btn-press"
           title="Refresh telemetry"
         >
           <RefreshCw className="w-3.5 h-3.5" />

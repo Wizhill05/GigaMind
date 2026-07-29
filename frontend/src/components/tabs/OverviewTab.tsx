@@ -148,28 +148,28 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
         </div>
       </div>
 
-      {/* QUICK SEARCH BAR SECTION */}
+      {/* QUICK SEARCH BAR SECTION - EXACT UNIFORM h-10 HEIGHT FOR INPUT AND BUTTON */}
       <div className="bg-[#13151c] border border-[#1e2029] p-5 rounded-none space-y-4">
         <div className="flex items-center gap-2 text-white font-semibold">
           <PixelSparkles className="w-4 h-4 text-[#ff6b00]" />
           <span>Semantic Memory Search</span>
         </div>
 
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-[#8a8f9e] absolute left-3 top-3" />
+        <form onSubmit={handleSearch} className="flex items-center gap-2">
+          <div className="relative flex-1 flex items-center h-10">
+            <Search className="w-4 h-4 text-[#8a8f9e] absolute left-3" />
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Query memory database using natural language (e.g. tech stack preferences)..."
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 py-2.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none transition-all font-sans"
+              className="h-10 w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none transition-all font-sans"
             />
           </div>
           <button
             type="submit"
             disabled={isSearching}
-            className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2.5 rounded-none transition-all flex items-center gap-2 shadow-sm btn-press"
+            className="h-10 bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 rounded-none transition-all flex items-center justify-center gap-2 shadow-sm btn-press flex-shrink-0"
           >
             <span>{isSearching ? 'Searching...' : 'Search'}</span>
           </button>

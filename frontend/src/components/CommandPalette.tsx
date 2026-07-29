@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, CornerDownLeft, Sparkles, Copy, Check } from 'lucide-react';
+import { X, CornerDownLeft, Copy, Check } from 'lucide-react';
+import { PixelBrain, PixelSparkles } from './ui/PixelIcons';
 import { SearchResult } from '../types';
 import { searchMemory } from '../api';
 import { CategoryBadge, AgentBadge } from './ui/Badge';
@@ -118,9 +119,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
           isExiting ? 'animate-scale-out' : 'animate-scale-in'
         }`}
       >
-        {/* INPUT HEADER */}
+        {/* INPUT HEADER WITH 8-BIT PIXEL BRAIN ICON */}
         <div className="p-4 border-b border-[#1e2029] flex items-center gap-3 bg-[#0a0b0e]">
-          <Search className="w-4 h-4 text-[#ff6b00] flex-shrink-0" />
+          <PixelBrain className="w-5 h-5 text-[#ff6b00] flex-shrink-0" />
           <input
             ref={inputRef}
             type="text"
@@ -144,7 +145,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
         <div className="max-h-96 overflow-y-auto p-2 space-y-1">
           {!query.trim() ? (
             <div className="p-8 text-center text-[#8a8f9e] space-y-2">
-              <Sparkles className="w-5 h-5 text-[#ff6b00] mx-auto opacity-70" />
+              <PixelSparkles className="w-6 h-6 text-[#ff6b00] mx-auto opacity-70" />
               <p>Type anything to run instant semantic vector search across all memories</p>
               <div className="flex justify-center items-center gap-2 text-[11px] font-mono text-[#8a8f9e]">
                 <span>Use ↑ ↓ to navigate</span>
