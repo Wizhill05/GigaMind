@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#0a0b0e] text-[#f4f5f8] font-sans antialiased selection:bg-[#5b0e89] selection:text-white;
+  }
+}
+
+/* Render Dashboard Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0b0e;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2029;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #262936;
+}
