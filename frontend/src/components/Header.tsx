@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
-import { PixelBrain, PixelKey } from './ui/PixelIcons';
+import { PixelKey } from './ui/PixelIcons';
 import { getApiKey, setApiKey } from '../api';
 
 interface HeaderProps {
@@ -30,10 +30,9 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isAuthenticated, onOp
 
   return (
     <header className="h-14 border-b border-[#1e2029] bg-[#0a0b0e] px-6 flex items-center justify-between font-sans text-xs select-none">
-      {/* BREADCRUMB TITLE - EXACT h-14 ALIGNED WITH SIDEBAR */}
+      {/* CLEAN BREADCRUMB TITLE - WITHOUT DUPLICATE LOGO ICON */}
       <div className="flex items-center gap-2 text-white font-medium text-xs">
-        <PixelBrain className="w-4 h-4 text-[#ff6b00]" />
-        <span>GigaMind</span>
+        <span className="font-semibold tracking-tight">GigaMind</span>
         <span className="text-[#8a8f9e]">/</span>
         <span className="text-[#8a8f9e] font-normal">Console</span>
       </div>

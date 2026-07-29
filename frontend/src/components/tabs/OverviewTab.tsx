@@ -4,10 +4,9 @@ import {
   PixelDatabase,
   PixelShield,
   PixelTerminal,
-  PixelSparkles,
-  PixelGlobe
+  PixelSparkles
 } from '../ui/PixelIcons';
-import { Search, Copy, Check, ExternalLink } from 'lucide-react';
+import { Search, Copy, Check, ExternalLink, Cpu } from 'lucide-react';
 import { Stats, SearchResult } from '../../types';
 import { searchMemory } from '../../api';
 import { AgentBadge, CategoryBadge, RenderPill } from '../ui/Badge';
@@ -49,8 +48,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-[#8a8f9e] text-xs">
-            <PixelBrain className="w-4 h-4 text-[#ff6b00]" />
-            <span className="uppercase tracking-wider font-medium text-[11px]">SINGLE SOURCE OF TRUTH</span>
+            <span className="uppercase tracking-wider font-semibold text-[11px] text-[#ff6b00]">
+              SINGLE SOURCE OF TRUTH
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -66,7 +66,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
               <span className="font-mono text-[#c1c5d0]">{sseUrl}</span>
               <button
                 onClick={() => handleCopy(sseUrl, 'sse')}
-                className="hover:text-white transition-colors"
+                className="hover:text-white transition-colors btn-press"
                 title="Copy SSE Endpoint"
               >
                 {copiedField === 'sse' ? <Check className="w-3 h-3 text-amber-400" /> : <Copy className="w-3 h-3" />}
@@ -83,11 +83,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
         </div>
       </div>
 
-      {/* METRICS CARDS */}
+      {/* METRICS CARDS WITH CARD-HOVER LIFTS */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div
           onClick={() => onNavigateTab('memories')}
-          className="bg-[#13151c] border border-[#1e2029] hover:border-[#ff6b00]/40 p-4 rounded-none cursor-pointer transition-all space-y-2 group"
+          className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
         >
           <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
             <span>Memories</span>
@@ -103,7 +103,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
 
         <div
           onClick={() => onNavigateTab('rules')}
-          className="bg-[#13151c] border border-[#1e2029] hover:border-[#ff6b00]/40 p-4 rounded-none cursor-pointer transition-all space-y-2 group"
+          className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
         >
           <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
             <span>Profile Rules</span>
@@ -119,7 +119,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
 
         <div
           onClick={() => onNavigateTab('transcripts')}
-          className="bg-[#13151c] border border-[#1e2029] hover:border-[#ff6b00]/40 p-4 rounded-none cursor-pointer transition-all space-y-2 group"
+          className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
         >
           <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
             <span>Chat Transcripts</span>
@@ -133,10 +133,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
           </div>
         </div>
 
-        <div className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none space-y-2">
+        <div className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none space-y-2 card-hover">
           <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
             <span>Task Sessions</span>
-            <PixelBrain className="w-4 h-4 text-[#06b6d4]" />
+            <Cpu className="w-4 h-4 text-[#06b6d4]" />
           </div>
           <div className="text-2xl font-bold text-white tracking-tight">
             {stats?.total_task_sessions ?? 0}
@@ -163,13 +163,13 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Query memory database using natural language (e.g. tech stack preferences)..."
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 py-2.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none transition-colors font-sans"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 py-2.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none transition-all font-sans"
             />
           </div>
           <button
             type="submit"
             disabled={isSearching}
-            className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2.5 rounded-none transition-all flex items-center gap-2 shadow-sm"
+            className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2.5 rounded-none transition-all flex items-center gap-2 shadow-sm btn-press"
           >
             <span>{isSearching ? 'Searching...' : 'Search'}</span>
           </button>
@@ -177,10 +177,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
 
         {/* SEARCH RESULTS PREVIEW */}
         {searchResults && (
-          <div className="pt-3 border-t border-[#1e2029] space-y-3">
+          <div className="pt-3 border-t border-[#1e2029] space-y-3 animate-fade-in">
             <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
               <span>Found {searchResults.length} relevant results</span>
-              <button onClick={() => setSearchResults(null)} className="text-rose-400 hover:underline">
+              <button onClick={() => setSearchResults(null)} className="text-rose-400 hover:underline btn-press">
                 Clear
               </button>
             </div>
@@ -194,7 +194,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
                 {searchResults.map((res) => (
                   <div
                     key={res.id}
-                    className="bg-[#0a0b0e] border border-[#1e2029] hover:border-[#262936] p-3 rounded-none flex justify-between items-center gap-4 transition-colors"
+                    className="bg-[#0a0b0e] border border-[#1e2029] hover:border-[#ff6b00]/40 p-3 rounded-none flex justify-between items-center gap-4 transition-all card-hover"
                   >
                     <div className="space-y-1 flex-1">
                       <div className="flex items-center gap-2">

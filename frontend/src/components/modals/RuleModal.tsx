@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, ShieldPlus } from 'lucide-react';
+import { X } from 'lucide-react';
+import { PixelShield } from '../ui/PixelIcons';
 
 interface RuleModalProps {
   isOpen: boolean;
@@ -33,14 +34,14 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 font-sans select-none">
-      <div className="bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-xl shadow-2xl space-y-4">
+    <div className="fixed inset-0 bg-[#0a0b0e]/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 font-sans select-none animate-fade-in">
+      <div className="bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 animate-scale-in">
         <div className="flex justify-between items-center border-b border-[#1e2029] pb-3">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <ShieldPlus className="w-4 h-4 text-[#a855f7]" />
+            <PixelShield className="w-4 h-4 text-[#ff6b00]" />
             <span>Define Identity & Profile Rule</span>
           </h3>
-          <button onClick={onClose} className="text-[#8a8f9e] hover:text-white transition-colors">
+          <button onClick={onClose} className="text-[#8a8f9e] hover:text-white transition-colors btn-press">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -56,7 +57,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
               onChange={(e) => setKey(e.target.value)}
               placeholder="e.g. primary_programming_language"
               required
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] p-2.5 text-white outline-none rounded-md"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-2.5 text-white outline-none rounded-none transition-colors"
             />
           </div>
 
@@ -70,7 +71,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
               onChange={(e) => setValue(e.target.value)}
               placeholder="e.g. Python / TypeScript with strict typing"
               required
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] p-2.5 text-white outline-none rounded-md"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-2.5 text-white outline-none rounded-none transition-colors"
             />
           </div>
 
@@ -82,7 +83,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 placeholder="general, coding, bio"
-                className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] p-2.5 text-white outline-none rounded-md"
+                className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-2.5 text-white outline-none rounded-none transition-colors"
               />
             </div>
 
@@ -91,7 +92,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
               <select
                 value={sourceAgent}
                 onChange={(e) => setSourceAgent(e.target.value)}
-                className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] p-2.5 text-white outline-none rounded-md cursor-pointer"
+                className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-2.5 text-white outline-none rounded-none cursor-pointer transition-colors"
               >
                 <option value="user" className="bg-[#0a0b0e]">User</option>
                 <option value="claude" className="bg-[#0a0b0e]">Claude</option>
@@ -106,13 +107,13 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
             <button
               type="button"
               onClick={onClose}
-              className="bg-[#181a24] text-[#8a8f9e] hover:text-white px-4 py-2 rounded-md font-medium"
+              className="bg-[#181a24] text-[#8a8f9e] hover:text-white px-4 py-2 rounded-none font-medium btn-press"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="bg-[#5b0e89] hover:bg-[#6d10a3] text-white font-medium px-5 py-2 rounded-md shadow-sm"
+              className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2 rounded-none shadow-sm btn-press"
             >
               Save Rule
             </button>

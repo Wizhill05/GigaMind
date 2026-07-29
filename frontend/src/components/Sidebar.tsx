@@ -5,10 +5,9 @@ import {
   PixelShield,
   PixelTerminal,
   PixelSparkles,
-  PixelSettings,
-  PixelGlobe
+  PixelSettings
 } from './ui/PixelIcons';
-import { ExternalLink } from 'lucide-react';
+import { LayoutDashboard, ExternalLink } from 'lucide-react';
 import { TabType } from './NavigationTabs';
 
 interface SidebarProps {
@@ -25,7 +24,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
   return (
     <aside className="w-60 bg-[#0f1015] border-r border-[#1e2029] flex flex-col justify-between h-screen sticky top-0 flex-shrink-0 text-xs font-sans select-none">
       <div>
-        {/* BRANDING HEADER - EXACT h-14 ALIGNED WITH NAVBAR */}
+        {/* BRANDING HEADER - BRAND LOGO BOX */}
         <div className="h-14 px-4 border-b border-[#1e2029] flex items-center justify-between bg-[#0a0b0e]">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 bg-[#ff6b00] text-white rounded-none flex items-center justify-center font-bold text-sm shadow-sm shadow-[#ff6b00]/20">
@@ -50,7 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
             <SidebarItem
               id="overview"
               label="Overview"
-              icon={PixelBrain}
+              icon={LayoutDashboard}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
             />

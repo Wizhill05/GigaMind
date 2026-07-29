@@ -87,7 +87,7 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* LEFT SIDEBAR NAVIGATION (Matching Render Image 1) */}
+      {/* LEFT SIDEBAR NAVIGATION */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -100,16 +100,16 @@ export const App: React.FC = () => {
 
       {/* MAIN RIGHT CANVAS */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        {/* TOP BREADCRUMB HEADER (Matching Render Image 1) */}
+        {/* TOP BREADCRUMB HEADER */}
         <Header
           onRefresh={loadStats}
           isAuthenticated={isAuthenticated}
           onOpenNewMemoryModal={handleOpenNewMemoryModal}
         />
 
-        {/* SCROLLABLE MAIN CONTENT CANVAS */}
+        {/* SCROLLABLE MAIN CONTENT CANVAS WITH SMOOTH ANIMATED TAB TRANSITIONS */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          <div className="max-w-6xl mx-auto space-y-6">
+          <div key={activeTab} className="max-w-6xl mx-auto space-y-6 animate-slide-up">
             {activeTab === 'overview' && (
               <OverviewTab stats={stats} onNavigateTab={(tab) => setActiveTab(tab)} />
             )}

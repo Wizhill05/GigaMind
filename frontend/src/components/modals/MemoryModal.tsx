@@ -57,16 +57,16 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
   const isEdit = !!initialMemory;
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 font-sans select-none">
-      <div className="bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-xl shadow-2xl space-y-4">
+    <div className="fixed inset-0 bg-[#0a0b0e]/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 font-sans select-none animate-fade-in">
+      <div className="bg-[#13151c] border border-[#1e2029] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 animate-scale-in">
         <div className="flex justify-between items-center border-b border-[#1e2029] pb-3">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            {isEdit ? <Save className="w-4 h-4 text-[#a855f7]" /> : <Plus className="w-4 h-4 text-[#a855f7]" />}
+            {isEdit ? <Save className="w-4 h-4 text-[#ff6b00]" /> : <Plus className="w-4 h-4 text-[#ff6b00]" />}
             <span>{isEdit ? `Edit Memory Record (${initialMemory.id})` : 'Create New Memory Record'}</span>
           </h3>
           <button
             onClick={onClose}
-            className="text-[#8a8f9e] hover:text-white transition-colors"
+            className="text-[#8a8f9e] hover:text-white transition-colors btn-press"
           >
             <X className="w-4 h-4" />
           </button>
@@ -83,7 +83,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
               rows={4}
               required
               placeholder="Enter memory statement or factual context..."
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] p-3 text-white outline-none rounded-md text-xs font-sans"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-3 text-white outline-none rounded-none text-xs font-sans transition-colors"
             />
           </div>
 
@@ -95,7 +95,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 placeholder="e.g. general, coding, personal"
-                className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] p-2.5 text-white outline-none rounded-md"
+                className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-2.5 text-white outline-none rounded-none transition-colors"
               />
             </div>
 
@@ -104,7 +104,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
               <select
                 value={sourceAgent}
                 onChange={(e) => setSourceAgent(e.target.value)}
-                className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] p-2.5 text-white outline-none rounded-md cursor-pointer"
+                className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-2.5 text-white outline-none rounded-none cursor-pointer transition-colors"
               >
                 <option value="user" className="bg-[#0a0b0e]">User</option>
                 <option value="claude" className="bg-[#0a0b0e]">Claude</option>
@@ -124,7 +124,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
               value={tagsInput}
               onChange={(e) => setTagsInput(e.target.value)}
               placeholder="python, api, config, preferences"
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#5b0e89] p-2.5 text-white outline-none rounded-md"
+              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-2.5 text-white outline-none rounded-none transition-colors"
             />
           </div>
 
@@ -132,13 +132,13 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="bg-[#181a24] text-[#8a8f9e] hover:text-white px-4 py-2 rounded-md font-medium"
+              className="bg-[#181a24] text-[#8a8f9e] hover:text-white px-4 py-2 rounded-none font-medium btn-press"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="bg-[#5b0e89] hover:bg-[#6d10a3] text-white font-medium px-5 py-2 rounded-md shadow-sm"
+              className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2 rounded-none shadow-sm btn-press"
             >
               Save Memory
             </button>

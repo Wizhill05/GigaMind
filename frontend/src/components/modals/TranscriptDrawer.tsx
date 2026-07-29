@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, User, Bot, Terminal } from 'lucide-react';
+import { X, Copy, Check, User, Bot } from 'lucide-react';
 import { Conversation } from '../../types';
 import { AgentBadge } from '../ui/Badge';
 
@@ -24,13 +24,13 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/80 backdrop-blur-xs z-50 flex justify-end font-sans select-none">
-      <div className="bg-[#13151c] border-l border-[#1e2029] w-full max-w-2xl h-full flex flex-col shadow-2xl">
-        {/* DRAWER HEADER (Matching Render Image 2 Log Header) */}
+    <div className="fixed inset-0 bg-[#0a0b0e]/80 backdrop-blur-xs z-50 flex justify-end font-sans select-none animate-fade-in">
+      <div className="bg-[#13151c] border-l border-[#1e2029] w-full max-w-2xl h-full flex flex-col shadow-2xl animate-slide-right">
+        {/* DRAWER HEADER */}
         <div className="p-6 border-b border-[#1e2029] bg-[#0f1015] flex justify-between items-start gap-4">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-md font-medium">
+              <span className="text-[11px] font-mono uppercase bg-[#ff6b00]/10 text-[#ff6b00] border border-[#ff6b00]/30 px-2 py-0.5 rounded-none font-medium">
                 {conversation.platform}
               </span>
               <AgentBadge agent={conversation.source_agent} />
@@ -44,14 +44,14 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopyTranscript}
-              className="p-2 bg-[#101216] border border-[#262936] hover:border-[#3f4357] text-[#8a8f9e] hover:text-white rounded-md transition-colors"
+              className="p-2 bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white rounded-none transition-colors btn-press"
               title="Copy Full Transcript"
             >
-              {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+              {copied ? <Check className="w-4 h-4 text-amber-400" /> : <Copy className="w-4 h-4" />}
             </button>
             <button
               onClick={onClose}
-              className="p-2 bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 rounded-md transition-colors"
+              className="p-2 bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 rounded-none transition-colors btn-press"
               title="Close Drawer"
             >
               <X className="w-4 h-4" />
@@ -59,7 +59,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
           </div>
         </div>
 
-        {/* MESSAGES LIST BODY (Matching Image 2 Log View) */}
+        {/* MESSAGES LIST BODY */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4 text-xs">
           {!conversation.messages || conversation.messages.length === 0 ? (
             <div className="p-12 text-center text-[#8a8f9e]">
@@ -71,14 +71,14 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
               return (
                 <div
                   key={idx}
-                  className={`p-4 rounded-lg border ${
+                  className={`p-4 rounded-none border transition-all ${
                     isUser
-                      ? 'bg-[#0a0b0e] border-[#1e2029] text-white'
-                      : 'bg-[#101216] border-[#262936] text-[#c1c5d0]'
+                      ? 'bg-[#0a0b0e] border-[#1e2029] text-white hover:border-[#262936]'
+                      : 'bg-[#101216] border-[#262936] text-[#c1c5d0] hover:border-[#ff6b00]/30'
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-2 text-[11px] font-medium text-[#8a8f9e]">
-                    {isUser ? <User className="w-3.5 h-3.5 text-[#a855f7]" /> : <Bot className="w-3.5 h-3.5 text-emerald-400" />}
+                    {isUser ? <User className="w-3.5 h-3.5 text-[#ff6b00]" /> : <Bot className="w-3.5 h-3.5 text-amber-400" />}
                     <span className="capitalize">{msg.role}</span>
                   </div>
                   <div className="whitespace-pre-wrap leading-relaxed font-sans text-xs">{msg.content}</div>
