@@ -40,12 +40,12 @@ def import_chatgpt(file_path: str):
         first_user = next((m["content"][:200] for m in messages if m["role"] == "user"), "")
         summary = f"Topic: {title}. User prompt preview: {first_user}"
 
-        add_conversation_log("chatgpt", title, summary, messages)
+        add_conversation_log("chatgpt", title, summary, messages, source_agent="gpt")
         count += 1
 
         for m in messages:
             if m["role"] == "user" and any(k in m["content"].lower() for k in ["prefer", "project", "my name", "rule"]):
-                add_memory(m["content"], category="chatgpt_import", tags=["chatgpt", "history"])
+                add_memory(m["content"], category="chatgpt_import", source_agent="gpt", tags=["chatgpt", "history"])
                 facts_extracted += 1
 
     print(f"✅ Ingested {count} ChatGPT chats ({facts_extracted} key memory facts extracted).")
@@ -77,12 +77,12 @@ def import_claude(file_path: str):
         first_user = next((m["content"][:200] for m in messages if m["role"] == "user"), "")
         summary = f"Topic: {title}. User prompt preview: {first_user}"
 
-        add_conversation_log("claude", title, summary, messages)
+        add_conversation_log("claude", title, summary, messages, source_agent="claude")
         count += 1
 
         for m in messages:
             if m["role"] == "user" and any(k in m["content"].lower() for k in ["prefer", "project", "my name", "rule"]):
-                add_memory(m["content"], category="claude_import", tags=["claude", "history"])
+                add_memory(m["content"], category="claude_import", source_agent="claude", tags=["claude", "history"])
                 facts_extracted += 1
 
     print(f"✅ Ingested {count} Claude chats ({facts_extracted} key memory facts extracted).")

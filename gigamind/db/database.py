@@ -11,6 +11,7 @@ class ProfileItem(SQLModel, table=True):
     category: str = Field(default="general", index=True)
     key: str = Field(unique=True, index=True)
     value: str
+    source_agent: str = Field(default="user", index=True) # e.g. claude, gpt, gemini, user, system
     updated_at: str
 
 class MemoryItem(SQLModel, table=True):
@@ -20,6 +21,7 @@ class MemoryItem(SQLModel, table=True):
     category: str = Field(default="general", index=True)
     media_type: str = Field(default="text", index=True) # text, image, pdf, code
     media_url: Optional[str] = Field(default=None)
+    source_agent: str = Field(default="user", index=True) # e.g. claude, gpt, gemini, user, system
     tags_json: str = Field(default="[]")
     embedding_json: str = Field(default="[]")
     created_at: str
@@ -31,6 +33,7 @@ class ConversationItem(SQLModel, table=True):
     platform: str = Field(index=True)
     title: str
     summary: str
+    source_agent: str = Field(default="user", index=True) # e.g. claude, gpt, gemini, user, system
     messages_json: str
     embedding_json: str
     created_at: str
@@ -41,6 +44,7 @@ class TaskSessionItem(SQLModel, table=True):
     task_name: str = Field(index=True)
     summary: str
     status: str = Field(default="active")
+    source_agent: str = Field(default="user", index=True)
     updated_at: str
 
 # Database Engine initialization with automatic fallback
@@ -74,15 +78,29 @@ def init_db():
                 conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
                 conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS media_type VARCHAR DEFAULT 'text';"))
                 conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS media_url VARCHAR;"))
+                conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS source_agent VARCHAR DEFAULT 'user';"))
+                conn.execute(text("ALTER TABLE profile ADD COLUMN IF NOT EXISTS source_agent VARCHAR DEFAULT 'user';"))
+                conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_agent VARCHAR DEFAULT 'user';"))
+                conn.execute(text("ALTER TABLE task_sessions ADD COLUMN IF NOT EXISTS source_agent VARCHAR DEFAULT 'user';"))
                 conn.commit()
         except Exception as e:
             print(f"pgvector/column migration note: {e}")
     else:
         try:
             with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE memories ADD COLUMN media_type TEXT DEFAULT 'text';"))
-                conn.execute(text("ALTER TABLE memories ADD COLUMN media_url TEXT;"))
-                conn.commit()
+                for stmt in [
+                    "ALTER TABLE memories ADD COLUMN media_type TEXT DEFAULT 'text';",
+                    "ALTER TABLE memories ADD COLUMN media_url TEXT;",
+                    "ALTER TABLE memories ADD COLUMN source_agent TEXT DEFAULT 'user';",
+                    "ALTER TABLE profile ADD COLUMN source_agent TEXT DEFAULT 'user';",
+                    "ALTER TABLE conversations ADD COLUMN source_agent TEXT DEFAULT 'user';",
+                    "ALTER TABLE task_sessions ADD COLUMN source_agent TEXT DEFAULT 'user';"
+                ]:
+                    try:
+                        conn.execute(text(stmt))
+                        conn.commit()
+                    except Exception:
+                        pass
         except Exception:
             pass
 
