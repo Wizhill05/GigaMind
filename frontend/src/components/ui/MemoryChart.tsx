@@ -20,9 +20,9 @@ export const MemoryChart: React.FC<MemoryChartProps> = ({ sourceDistribution, to
   const maxCount = Math.max(1, ...seriesData.map(s => sourceDistribution[s.key] || 0));
 
   return (
-    <div className="bg-[#13151c] border border-[#1e2029] rounded-none p-5 space-y-5 font-sans select-none">
+    <div className="bg-[#181818] border border-[#262626] rounded-none p-5 space-y-5 font-sans select-none">
       {/* CHART HEADER */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-[#1e2029] pb-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-[#262626] pb-4">
         <div>
           <h2 className="text-sm font-semibold text-white tracking-tight flex items-center gap-2">
             <span>Memory Distribution & Origin Analytics</span>
@@ -43,7 +43,7 @@ export const MemoryChart: React.FC<MemoryChartProps> = ({ sourceDistribution, to
                 onMouseEnter={() => setHoveredSeries(s.key)}
                 onMouseLeave={() => setHoveredSeries(null)}
                 className={`flex items-center gap-1.5 cursor-pointer px-2 py-1 rounded-none transition-all ${
-                  isHovered ? 'bg-[#181a24] text-white' : 'hover:text-white'
+                  isHovered ? 'bg-[#222222] text-white' : 'hover:text-white'
                 }`}
               >
                 <span className="w-2.5 h-2.5 rounded-none flex-shrink-0" style={{ backgroundColor: s.color }} />
@@ -57,7 +57,7 @@ export const MemoryChart: React.FC<MemoryChartProps> = ({ sourceDistribution, to
 
       {/* SVG BAR CHART GRAPH */}
       <div className="space-y-4">
-        <div className="h-44 w-full relative flex items-end justify-between gap-4 pt-6 pb-2 px-2 border-b border-[#1e2029]">
+        <div className="h-44 w-full relative flex items-end justify-between gap-4 pt-6 pb-2 px-2 border-b border-[#262626]">
           {/* GRID BACKGROUND LINES */}
           <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-20">
             <div className="border-b border-dashed border-[#8a8f9e]" />
@@ -82,7 +82,7 @@ export const MemoryChart: React.FC<MemoryChartProps> = ({ sourceDistribution, to
               >
                 {/* INTERACTIVE TOOLTIP */}
                 {isHovered && (
-                  <div className="absolute -top-10 bg-[#0a0b0e] border border-[#262936] text-white px-2.5 py-1 text-[11px] font-mono rounded-none shadow-xl z-20 whitespace-nowrap animate-fade-in pointer-events-none">
+                  <div className="absolute -top-10 bg-[#0f0f0f] border border-[#333333] text-white px-2.5 py-1 text-[11px] font-mono rounded-none shadow-xl z-20 whitespace-nowrap animate-fade-in pointer-events-none">
                     <span style={{ color: s.color }} className="font-semibold">{s.label}</span>: {count} memories ({sharePct}%)
                   </div>
                 )}
@@ -117,7 +117,7 @@ export const MemoryChart: React.FC<MemoryChartProps> = ({ sourceDistribution, to
             <span>Total: {totalMemories} records</span>
           </div>
 
-          <div className="w-full h-3 bg-[#0a0b0e] border border-[#1e2029] flex overflow-hidden rounded-none">
+          <div className="w-full h-3 bg-[#0f0f0f] border border-[#262626] flex overflow-hidden rounded-none">
             {seriesData.map(s => {
               const count = sourceDistribution[s.key] || 0;
               const pct = (count / total) * 100;

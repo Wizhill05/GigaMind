@@ -60,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-14 border-b border-[#1e2029] bg-[#0a0b0e] px-6 flex items-center justify-between font-sans text-xs select-none">
+    <header className="h-14 border-b border-[#262626] bg-[#0f0f0f] px-6 flex items-center justify-between font-sans text-xs select-none">
       {/* BREADCRUMB TITLE */}
       <div className="flex items-center gap-2 text-white font-medium text-xs">
         <span className="font-semibold tracking-tight text-white text-sm">GigaMind</span>
@@ -73,12 +73,12 @@ export const Header: React.FC<HeaderProps> = ({
         {/* CMD+K SPOTLIGHT SEARCH BUTTON */}
         <button
           onClick={onOpenCommandPalette}
-          className="h-8 bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white px-3 rounded-none flex items-center gap-2 font-medium transition-all btn-press"
+          className="h-8 bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white px-3 rounded-none flex items-center gap-2 font-medium transition-all btn-press"
           title="Search (Cmd+K / Ctrl+K)"
         >
           <Search className="w-3.5 h-3.5 text-[#ff6b00]" />
           <span className="text-xs">Search</span>
-          <span className="bg-[#181a24] border border-[#262936] text-[10px] font-mono px-1.5 py-0.5 rounded-none text-[#8a8f9e] leading-none">
+          <span className="bg-[#222222] border border-[#333333] text-[10px] font-mono px-1.5 py-0.5 rounded-none text-[#8a8f9e] leading-none">
             ⌘K
           </span>
         </button>
@@ -88,7 +88,7 @@ export const Header: React.FC<HeaderProps> = ({
           href="https://github.com/Wizhill05/GigaMind#connecting-gigamind-to-ai-services--coding-harnesses"
           target="_blank"
           rel="noreferrer"
-          className="h-8 bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white px-3 rounded-none flex items-center gap-1.5 font-medium transition-all btn-press"
+          className="h-8 bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white px-3 rounded-none flex items-center gap-1.5 font-medium transition-all btn-press"
           title="Connect AI Harnesses & Services Guide"
         >
           <ExternalLink className="w-3.5 h-3.5 text-[#ff6b00]" />
@@ -98,7 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* + NEW MEMORY BUTTON */}
         <button
           onClick={onOpenNewMemoryModal}
-          className="h-8 bg-transparent hover:bg-[#181a24] border border-[#262936] text-white px-3 rounded-none flex items-center gap-1.5 font-medium transition-all btn-press"
+          className="h-8 bg-transparent hover:bg-[#222222] border border-[#333333] text-white px-3 rounded-none flex items-center gap-1.5 font-medium transition-all btn-press"
         >
           <Plus className="w-3.5 h-3.5" />
           <span className="leading-none text-xs">New Memory</span>
@@ -125,7 +125,7 @@ export const Header: React.FC<HeaderProps> = ({
             onRefresh();
             toast('Refreshed system telemetry', 'info');
           }}
-          className="h-8 w-8 flex items-center justify-center text-[#8a8f9e] hover:text-white border border-[#262936] bg-[#101216] rounded-none transition-all btn-press"
+          className="h-8 w-8 flex items-center justify-center text-[#8a8f9e] hover:text-white border border-[#333333] bg-[#161616] rounded-none transition-all btn-press"
           title="Refresh telemetry"
         >
           <RefreshCw className="w-3.5 h-3.5" />
@@ -142,7 +142,7 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className={`bg-[#13151c] border border-[#1e2029] max-w-sm w-full p-6 rounded-none shadow-2xl space-y-4 ${
+            className={`bg-[#181818] border border-[#262626] max-w-sm w-full p-6 rounded-none shadow-2xl space-y-4 ${
               isExiting ? 'animate-scale-out' : 'animate-scale-in'
             }`}
           >
@@ -160,7 +160,7 @@ export const Header: React.FC<HeaderProps> = ({
               onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
               placeholder="Enter GIGAMIND_API_KEY..."
               autoFocus
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-2.5 text-white font-mono text-xs rounded-none outline-none transition-colors"
+              className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 text-white font-mono text-xs rounded-none outline-none transition-colors"
             />
             <div className="flex justify-end gap-2 pt-2">
               {isAuthenticated && (
@@ -173,7 +173,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
               <button
                 onClick={handleAnimatedClose}
-                className="bg-[#181a24] text-[#8a8f9e] hover:text-white px-3 py-1.5 rounded-none text-xs btn-press"
+                className="bg-[#222222] text-[#8a8f9e] hover:text-white px-3 py-1.5 rounded-none text-xs btn-press"
               >
                 Cancel
               </button>

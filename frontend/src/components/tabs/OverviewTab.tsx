@@ -54,7 +54,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold text-white tracking-tight">GigaMind Service Overview</h1>
+            <h1 className="text-2xl font-semibold text-white tracking-tight">GigaMind Service Overview</h1>
             <RenderPill label="Python 3" variant="orange" />
             <RenderPill label="FastMCP SSE" variant="amber" />
             <RenderPill label="v2.0.0" variant="orangeFilled" />
@@ -99,7 +99,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div
           onClick={() => onNavigateTab('memories')}
-          className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
+          className="bg-[#181818] border border-[#262626] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
         >
           <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
             <span>Memories</span>
@@ -115,7 +115,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
 
         <div
           onClick={() => onNavigateTab('rules')}
-          className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
+          className="bg-[#181818] border border-[#262626] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
         >
           <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
             <span>Profile Rules</span>
@@ -131,7 +131,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
 
         <div
           onClick={() => onNavigateTab('transcripts')}
-          className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
+          className="bg-[#181818] border border-[#262626] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
         >
           <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
             <span>Chat Transcripts</span>
@@ -145,7 +145,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
           </div>
         </div>
 
-        <div className="bg-[#13151c] border border-[#1e2029] p-4 rounded-none space-y-2 card-hover">
+        <div className="bg-[#181818] border border-[#262626] p-4 rounded-none space-y-2 card-hover">
           <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
             <span>Task Sessions</span>
             <Cpu className="w-4 h-4 text-[#06b6d4]" />
@@ -161,7 +161,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
       </div>
 
       {/* QUICK SEARCH BAR SECTION - EXACT UNIFORM h-10 HEIGHT FOR INPUT AND BUTTON */}
-      <div className="bg-[#13151c] border border-[#1e2029] p-5 rounded-none space-y-4">
+      <div className="bg-[#181818] border border-[#262626] p-5 rounded-none space-y-4">
         <div className="flex items-center gap-2 text-white font-semibold">
           <PixelSparkles className="w-4 h-4 text-[#ff6b00]" />
           <span>Semantic Memory Search</span>
@@ -175,7 +175,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Query memory database using natural language (e.g. tech stack preferences)..."
-              className="h-10 w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] pl-9 pr-3 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none transition-all font-sans"
+              className="h-10 w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] pl-9 pr-3 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none transition-all font-sans"
             />
           </div>
           <button
@@ -189,7 +189,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
 
         {/* SEARCH RESULTS PREVIEW */}
         {searchResults && (
-          <div className="pt-3 border-t border-[#1e2029] space-y-3 animate-fade-in">
+          <div className="pt-3 border-t border-[#262626] space-y-3 animate-fade-in">
             <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
               <span>Found {searchResults.length} relevant results</span>
               <button onClick={() => setSearchResults(null)} className="text-rose-400 hover:underline btn-press">
@@ -198,7 +198,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
             </div>
 
             {searchResults.length === 0 ? (
-              <div className="p-4 text-center text-[#8a8f9e] bg-[#0a0b0e] border border-[#1e2029] rounded-none">
+              <div className="p-4 text-center text-[#8a8f9e] bg-[#0f0f0f] border border-[#262626] rounded-none">
                 No semantic matches found
               </div>
             ) : (
@@ -206,16 +206,16 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
                 {searchResults.map((res) => (
                   <div
                     key={res.id}
-                    className="bg-[#0a0b0e] border border-[#1e2029] hover:border-[#ff6b00]/40 p-3 rounded-none flex justify-between items-center gap-4 transition-all card-hover"
+                    className="bg-[#0f0f0f] border border-[#262626] hover:border-[#ff6b00]/40 p-3 rounded-none flex justify-between items-center gap-4 transition-all card-hover"
                   >
-                    <div className="space-y-1 flex-1">
+                    <div className="space-y-1 flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <CategoryBadge category={res.category} />
                         <AgentBadge agent={res.source_agent} />
                       </div>
-                      <p className="text-white text-xs">{res.content}</p>
+                      <p className="text-white text-xs break-words break-all">{res.content}</p>
                     </div>
-                    <span className="text-[#ff6b00] font-semibold text-xs bg-[#ff6b00]/15 border border-[#ff6b00]/30 px-2.5 py-1 rounded-none">
+                    <span className="text-[#ff6b00] font-semibold text-xs bg-[#ff6b00]/15 border border-[#ff6b00]/30 px-2.5 py-1 rounded-none flex-shrink-0">
                       {(res.score * 100).toFixed(1)}% match
                     </span>
                   </div>

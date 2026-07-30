@@ -98,7 +98,7 @@ export const AppContent: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen bg-[#0a0b0e] text-[#f4f5f8] overflow-hidden font-sans">
+    <div className="flex h-screen bg-[#0f0f0f] text-[#f4f5f8] overflow-hidden font-sans">
       {/* AUTH OVERLAY GATE */}
       {showAuthGate && (
         <AuthGate
