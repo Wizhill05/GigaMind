@@ -201,7 +201,7 @@ assert data['success'] == True
 assert data['memory']['chunks_created'] > 1
 "
 
-PARENT_MEM_ID=$(python3 -c "import sys, json; print(json.loads(sys.argv[1])['memory']['id'])" "$body")
+PARENT_MEM_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$body")
 
 # Search and verify chunk_info & parent_id match
 resp=$(http_request "POST" "/api/v1/search_memory" "Bearer $API_KEY" '{"query":"GigaMind memory engine test","category":"test_long"}')
@@ -323,7 +323,7 @@ DEL_TEXT=$(python3 -c "print('Cascading deletion test document chunking content.
 resp=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$DEL_TEXT\",\"category\":\"del_test\"}")
 code=$(echo "$resp" | tail -n1)
 body=$(echo "$resp" | sed '$d')
-DEL_PARENT_ID=$(python3 -c "import sys, json; print(json.loads(sys.argv[1])['memory']['id'])" "$body")
+DEL_PARENT_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$body")
 
 # Delete Parent Memory
 resp_del=$(http_request "DELETE" "/api/v1/memories/$DEL_PARENT_ID" "Bearer $API_KEY" "")
@@ -353,7 +353,7 @@ code=$(echo "$resp_prof" | tail -n1)
 body_prof=$(echo "$resp_prof" | sed '$d')
 run_test "5.1a" "Upsert Profile Rule" "200" "$code" "$body_prof" "assert data['success'] == True"
 
-RULE_ID=$(python3 -c "import sys, json; print(json.loads(sys.argv[1])['rule']['id'])" "$body_prof")
+RULE_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('rule', {}).get('id', ''))" "$body_prof")
 
 resp_get_prof=$(http_request "GET" "/api/v1/get_profile?category=test_rule" "Bearer $API_KEY" "")
 code=$(echo "$resp_get_prof" | tail -n1)
