@@ -20,8 +20,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
   };
 
   return (
-    <div className="fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans select-none transition-all duration-300 animate-fade-in">
-      <div className="bg-[#13151c] border border-[#1e2029] max-w-md w-full p-8 rounded-none shadow-2xl space-y-6 animate-scale-in">
+    <div className="fixed inset-0 bg-[#0f0f0f]/85 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans select-none transition-all duration-300 animate-fade-in">
+      <div className="bg-[#181818] border border-[#262626] max-w-md w-full p-8 rounded-none shadow-2xl space-y-6 animate-scale-in">
         <div className="text-center space-y-2">
           <div className="w-12 h-12 bg-[#ff6b00]/20 border border-[#ff6b00]/40 text-[#ff6b00] mx-auto rounded-none flex items-center justify-center">
             <PixelKey className="w-6 h-6 text-[#ff6b00]" />
@@ -45,7 +45,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
               onChange={(e) => setKeyInput(e.target.value)}
               placeholder="Enter GIGAMIND_API_KEY..."
               autoFocus
-              className="w-full bg-[#0a0b0e] border border-[#1e2029] focus:border-[#ff6b00] p-3 text-white font-mono text-xs rounded-none outline-none transition-colors"
+              className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-3 text-white font-mono text-xs rounded-none outline-none transition-colors"
             />
           </div>
 

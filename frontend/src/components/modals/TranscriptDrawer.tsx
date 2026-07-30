@@ -46,18 +46,18 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
   return (
     <div
       onClick={handleAnimatedClose}
-      className={`fixed inset-0 bg-[#0a0b0e]/85 backdrop-blur-md z-50 flex justify-end font-sans select-none transition-all duration-200 ${
+      className={`fixed inset-0 bg-[#0f0f0f]/85 backdrop-blur-md z-50 flex justify-end font-sans select-none transition-all duration-200 ${
         isExiting ? 'animate-fade-out' : 'animate-fade-in'
       }`}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`bg-[#13151c] border-l border-[#1e2029] w-full max-w-2xl h-full flex flex-col shadow-2xl ${
+        className={`bg-[#181818] border-l border-[#262626] w-full max-w-2xl h-full flex flex-col shadow-2xl ${
           isExiting ? 'animate-slide-out-right' : 'animate-slide-right'
         }`}
       >
         {/* DRAWER HEADER */}
-        <div className="p-6 border-b border-[#1e2029] bg-[#0f1015] flex justify-between items-start gap-4">
+        <div className="p-6 border-b border-[#262626] bg-[#141414] flex justify-between items-start gap-4">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-mono uppercase bg-[#ff6b00]/10 text-[#ff6b00] border border-[#ff6b00]/30 px-2 py-0.5 rounded-none font-medium">
@@ -74,14 +74,14 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopyTranscript}
-              className="p-2 bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white rounded-none transition-colors btn-press"
+              className="p-2 bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white rounded-none transition-colors btn-press"
               title="Copy Full Transcript"
             >
               {copied ? <Check className="w-4 h-4 text-amber-400" /> : <Copy className="w-4 h-4" />}
             </button>
             <button
               onClick={handleAnimatedClose}
-              className="p-2 bg-[#101216] border border-[#262936] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 rounded-none transition-colors btn-press"
+              className="p-2 bg-[#161616] border border-[#333333] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 rounded-none transition-colors btn-press"
               title="Close Drawer"
             >
               <X className="w-4 h-4" />
@@ -103,8 +103,8 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
                   key={idx}
                   className={`p-4 rounded-none border transition-all ${
                     isUser
-                      ? 'bg-[#0a0b0e] border-[#1e2029] text-white hover:border-[#262936]'
-                      : 'bg-[#101216] border-[#262936] text-[#c1c5d0] hover:border-[#ff6b00]/30'
+                      ? 'bg-[#0f0f0f] border-[#262626] text-white hover:border-[#333333]'
+                      : 'bg-[#161616] border-[#333333] text-[#c1c5d0] hover:border-[#ff6b00]/30'
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-2 text-[11px] font-medium text-[#8a8f9e]">

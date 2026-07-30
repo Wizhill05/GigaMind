@@ -39,16 +39,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
   ];
 
   return (
-    <aside className="w-60 bg-[#0f1015] border-r border-[#1e2029] flex flex-col justify-between h-screen sticky top-0 flex-shrink-0 text-xs font-sans select-none">
+    <aside className="w-60 bg-[#141414] border-r border-[#262626] flex flex-col justify-between h-screen sticky top-0 flex-shrink-0 text-xs font-sans select-none">
       <div>
         {/* BRANDING HEADER - EXACT h-14 ALIGNED WITH NAVBAR */}
-        <div className="h-14 px-4 border-b border-[#1e2029] flex items-center justify-between bg-[#0a0b0e]">
+        <div className="h-14 px-4 border-b border-[#262626] flex items-center justify-between bg-[#0f0f0f]">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 bg-[#ff6b00] text-white rounded-none flex items-center justify-center font-bold text-sm shadow-sm shadow-[#ff6b00]/20">
+            <div className="w-7 h-7 bg-[#ff6b00] text-white rounded-none flex items-center justify-center font-semibold text-sm shadow-sm shadow-[#ff6b00]/20">
               <PixelBrain className="w-4 h-4 text-white" />
             </div>
             <div>
-              <span className="font-bold text-white text-xs tracking-tight block">GigaMind</span>
+              <span className="font-semibold text-white text-xs tracking-tight block">GigaMind</span>
               <span className="text-[10px] text-[#8a8f9e] font-mono">Memory Engine</span>
             </div>
           </div>
@@ -101,7 +101,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
       </div>
 
       {/* FOOTER */}
-      <div className="p-4 border-t border-[#1e2029] flex items-center justify-between text-[#8a8f9e] text-xs">
+      <div className="p-4 border-t border-[#262626] flex items-center justify-between text-[#8a8f9e] text-xs">
         <a
           href="https://github.com/Wizhill05/GigaMind"
           target="_blank"
@@ -130,8 +130,8 @@ const SidebarNavItem: React.FC<{
       onClick={() => setActiveTab(item.id)}
       className={`w-full flex items-center justify-between px-3 py-2 rounded-none font-sans text-xs transition-all duration-150 relative overflow-hidden btn-press ${
         isActive
-          ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white font-semibold shadow-md shadow-[#ff6b00]/20'
-          : 'text-[#c1c5d0] hover:text-white hover:bg-[#181a24]'
+          ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white font-medium shadow-md shadow-[#ff6b00]/20'
+          : 'text-[#c1c5d0] hover:text-white hover:bg-[#222222]'
       }`}
     >
       <div className="flex items-center gap-2.5 relative z-10">
@@ -141,7 +141,7 @@ const SidebarNavItem: React.FC<{
       {item.badge !== undefined && (
         <span
           className={`px-1.5 py-0.2 text-[10px] font-mono rounded-none transition-colors relative z-10 ${
-            isActive ? 'bg-white/20 text-white' : 'bg-[#1e2029] text-[#8a8f9e]'
+            isActive ? 'bg-white/20 text-white' : 'bg-[#262626] text-[#8a8f9e]'
           }`}
         >
           {item.badge}

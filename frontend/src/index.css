@@ -4,8 +4,8 @@
 
 @layer base {
   body {
-    @apply bg-[#0a0b0e] text-[#f4f5f8] font-sans antialiased selection:bg-[#ff6b00] selection:text-white;
-    font-family: 'Lexend', sans-serif;
+    @apply bg-[#0f0f0f] text-[#f4f5f8] font-sans antialiased selection:bg-[#ff6b00] selection:text-white;
+    font-family: 'IBM Plex Sans', sans-serif;
   }
 
   * {
@@ -19,14 +19,14 @@
   height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #0a0b0e;
+  background: #0f0f0f;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e2029;
+  background: #262626;
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #262936;
+  background: #333333;
 }
 
 /* Micro Animations & Smooth Transitions */

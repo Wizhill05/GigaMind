@@ -7,7 +7,7 @@ interface AgentBadgeProps {
 export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent }) => {
   const normalized = (agent || 'user').toLowerCase();
 
-  let bg = 'bg-[#181a24] text-[#c1c5d0] border-[#262936]';
+  let bg = 'bg-[#222222] text-[#c1c5d0] border-[#333333]';
   let label = agent;
 
   if (normalized.includes('claude')) {
@@ -36,7 +36,7 @@ export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent }) => {
 
 export const CategoryBadge: React.FC<{ category: string }> = ({ category }) => {
   return (
-    <span className="inline-flex items-center px-2 py-0.5 text-xs font-sans text-[#8a8f9e] bg-[#101216] border border-[#1e2029] rounded-none">
+    <span className="inline-flex items-center px-2 py-0.5 text-xs font-sans text-[#8a8f9e] bg-[#161616] border border-[#262626] rounded-none">
       {category || 'general'}
     </span>
   );
@@ -46,7 +46,7 @@ export const RenderPill: React.FC<{ label: string; variant?: 'orange' | 'orangeF
   label,
   variant = 'gray',
 }) => {
-  let styles = 'bg-[#1e2029] text-[#c1c5d0] border-[#262936]';
+  let styles = 'bg-[#262626] text-[#c1c5d0] border-[#333333]';
 
   if (variant === 'orangeFilled') {
     styles = 'bg-[#ff6b00] text-white border-transparent';

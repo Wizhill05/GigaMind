@@ -34,6 +34,67 @@ PASSED_TESTS=0
 FAILED_TESTS=0
 TOTAL_TESTS=0
 
+# Track created items for post-test database cleanup
+CREATED_MEMORY_IDS=()
+CREATED_RULE_IDS=()
+
+cleanup_test_data() {
+    echo -e "\n${BOLD}${YELLOW}=== CLEANING UP TEST DATA ===${NC}"
+
+    # 1. Delete explicitly tracked memory IDs
+    for mem_id in "${CREATED_MEMORY_IDS[@]}"; do
+        if [ -n "$mem_id" ]; then
+            http_request "DELETE" "/api/v1/memories/$mem_id" "Bearer $API_KEY" "" > /dev/null 2>&1 || true
+        fi
+    done
+
+    # 2. Delete explicitly tracked profile rule IDs
+    for rule_id in "${CREATED_RULE_IDS[@]}"; do
+        if [ -n "$rule_id" ]; then
+            http_request "DELETE" "/api/v1/profile/$rule_id" "Bearer $API_KEY" "" > /dev/null 2>&1 || true
+        fi
+    done
+
+    # 3. Fallback category cleanup sweep
+    TEST_CATEGORIES=("test_short" "test_long" "unicode_test" "b_599" "b_601" "rerank_test" "agent_test" "del_test" "test")
+    for cat in "${TEST_CATEGORIES[@]}"; do
+        resp=$(http_request "GET" "/api/v1/memories?category=$cat" "Bearer $API_KEY" "" 2>/dev/null || true)
+        python3 -c "
+import sys, json
+try:
+    data = json.loads('''$resp''')
+    for m in data.get('memories', []):
+        print(m['id'])
+except Exception:
+    pass
+" | while read -r mid; do
+            if [ -n "$mid" ]; then
+                http_request "DELETE" "/api/v1/memories/$mid" "Bearer $API_KEY" "" > /dev/null 2>&1 || true
+            fi
+        done
+    done
+
+    # Fallback profile rule cleanup sweep
+    resp_rules=$(http_request "GET" "/api/v1/get_profile?category=test_rule" "Bearer $API_KEY" "" 2>/dev/null || true)
+    python3 -c "
+import sys, json
+try:
+    data = json.loads('''$resp_rules''')
+    for r in data.get('profile', []):
+        print(r['id'])
+except Exception:
+    pass
+" | while read -r rid; do
+        if [ -n "$rid" ]; then
+            http_request "DELETE" "/api/v1/profile/$rid" "Bearer $API_KEY" "" > /dev/null 2>&1 || true
+        fi
+    done
+
+    echo -e "${GREEN}Database cleanup completed successfully.${NC}"
+}
+
+trap cleanup_test_data EXIT INT TERM
+
 # Determine Target Server
 echo -e "${BOLD}${CYAN}=====================================================${NC}"
 echo -e "${BOLD}${CYAN}   GigaMind Deployed Engine Edge-Case Test Suite     ${NC}"
@@ -175,6 +236,9 @@ SHORT_TEXT="Short memory content under threshold."
 resp=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$SHORT_TEXT\",\"category\":\"test_short\"}")
 code=$(echo "$resp" | tail -n1)
 body=$(echo "$resp" | sed '$d')
+SHORT_MEM_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$body" 2>/dev/null || true)
+if [ -n "$SHORT_MEM_ID" ]; then CREATED_MEMORY_IDS+=("$SHORT_MEM_ID"); fi
+
 run_test "2.1a" "Ingest Short Text (<600 chars) -> chunks_created == 1" "200" "$code" "$body" "
 assert data['success'] == True
 assert data['memory']['chunks_created'] == 1
@@ -196,12 +260,13 @@ LONG_TEXT=$(python3 -c "print('GigaMind memory engine test paragraph. ' * 40)")
 resp=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$LONG_TEXT\",\"category\":\"test_long\"}")
 code=$(echo "$resp" | tail -n1)
 body=$(echo "$resp" | sed '$d')
+PARENT_MEM_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$body")
+if [ -n "$PARENT_MEM_ID" ]; then CREATED_MEMORY_IDS+=("$PARENT_MEM_ID"); fi
+
 run_test "2.2a" "Ingest Long Text (>600 chars) -> chunks_created > 1" "200" "$code" "$body" "
 assert data['success'] == True
 assert data['memory']['chunks_created'] > 1
 "
-
-PARENT_MEM_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$body")
 
 # Search and verify chunk_info & parent_id match
 resp=$(http_request "POST" "/api/v1/search_memory" "Bearer $API_KEY" '{"query":"GigaMind memory engine test","category":"test_long"}')
@@ -225,6 +290,9 @@ print(json.dumps({"content": content, "category": "unicode_test"}))
 resp=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "$PAYLOAD")
 code=$(echo "$resp" | tail -n1)
 body=$(echo "$resp" | sed '$d')
+UNI_MEM_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$body" 2>/dev/null || true)
+if [ -n "$UNI_MEM_ID" ]; then CREATED_MEMORY_IDS+=("$UNI_MEM_ID"); fi
+
 run_test "2.3a" "Ingest Unicode & Special Characters" "200" "$code" "$body" "assert data['success'] == True"
 
 resp=$(http_request "POST" "/api/v1/search_memory" "Bearer $API_KEY" '{"query":"日本語 中文 🧠🤖⚡","category":"unicode_test"}')
@@ -240,12 +308,18 @@ TXT_599=$(python3 -c "print('A' * 599)")
 resp=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$TXT_599\",\"category\":\"b_599\"}")
 code=$(echo "$resp" | tail -n1)
 body=$(echo "$resp" | sed '$d')
+B599_MEM_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$body" 2>/dev/null || true)
+if [ -n "$B599_MEM_ID" ]; then CREATED_MEMORY_IDS+=("$B599_MEM_ID"); fi
+
 run_test "2.4a" "Boundary Text Exact 599 chars -> chunks_created == 1" "200" "$code" "$body" "assert data['memory']['chunks_created'] == 1"
 
 TXT_601=$(python3 -c "print('B' * 601)")
 resp=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$TXT_601\",\"category\":\"b_601\"}")
 code=$(echo "$resp" | tail -n1)
 body=$(echo "$resp" | sed '$d')
+B601_MEM_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$body" 2>/dev/null || true)
+if [ -n "$B601_MEM_ID" ]; then CREATED_MEMORY_IDS+=("$B601_MEM_ID"); fi
+
 run_test "2.4b" "Boundary Text Exact 601 chars -> chunks_created > 1" "200" "$code" "$body" "assert data['memory']['chunks_created'] > 1"
 
 
@@ -256,11 +330,15 @@ echo -e "${BOLD}${YELLOW}=== SECTION 3: 2-STAGE RETRIEVAL & RERANKING ===${NC}"
 
 # Ingest Candidate A (generic vector relevance)
 CAND_A="General quantum physics and database engine architecture overview."
-http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$CAND_A\",\"category\":\"rerank_test\"}" > /dev/null
+resp_ca=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$CAND_A\",\"category\":\"rerank_test\"}")
+CA_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$(echo "$resp_ca" | sed '$d')" 2>/dev/null || true)
+if [ -n "$CA_ID" ]; then CREATED_MEMORY_IDS+=("$CA_ID"); fi
 
 # Ingest Candidate B (exact phrase keyword match)
 CAND_B="Specific target phrase: quantum flux capacitor engine initialization sequence."
-http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$CAND_B\",\"category\":\"rerank_test\"}" > /dev/null
+resp_cb=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" "{\"content\":\"$CAND_B\",\"category\":\"rerank_test\"}")
+CB_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$(echo "$resp_cb" | sed '$d')" 2>/dev/null || true)
+if [ -n "$CB_ID" ]; then CREATED_MEMORY_IDS+=("$CB_ID"); fi
 
 # Test 3.1: Reranking Re-order Verification
 resp=$(http_request "POST" "/api/v1/search_memory" "Bearer $API_KEY" '{"query":"quantum flux capacitor engine","category":"rerank_test","limit":5}')
@@ -301,8 +379,13 @@ for item in data['results']:
 "
 
 # Test 3.5: Source Agent Filtering
-http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" '{"content":"Claude specific item","category":"agent_test","source_agent":"claude"}' > /dev/null
-http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" '{"content":"GPT specific item","category":"agent_test","source_agent":"gpt"}' > /dev/null
+resp_c1=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" '{"content":"Claude specific item","category":"agent_test","source_agent":"claude"}')
+C1_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$(echo "$resp_c1" | sed '$d')" 2>/dev/null || true)
+if [ -n "$C1_ID" ]; then CREATED_MEMORY_IDS+=("$C1_ID"); fi
+
+resp_g1=$(http_request "POST" "/api/v1/add_memory" "Bearer $API_KEY" '{"content":"GPT specific item","category":"agent_test","source_agent":"gpt"}')
+G1_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('memory', {}).get('id', ''))" "$(echo "$resp_g1" | sed '$d')" 2>/dev/null || true)
+if [ -n "$G1_ID" ]; then CREATED_MEMORY_IDS+=("$G1_ID"); fi
 
 resp_agent=$(http_request "POST" "/api/v1/search_memory" "Bearer $API_KEY" '{"query":"item","category":"agent_test","source_agent":"claude"}')
 code=$(echo "$resp_agent" | tail -n1)
@@ -354,6 +437,7 @@ body_prof=$(echo "$resp_prof" | sed '$d')
 run_test "5.1a" "Upsert Profile Rule" "200" "$code" "$body_prof" "assert data['success'] == True"
 
 RULE_ID=$(python3 -c "import sys, json; data=json.loads(sys.argv[1]); print(data.get('rule', {}).get('id', ''))" "$body_prof")
+if [ -n "$RULE_ID" ]; then CREATED_RULE_IDS+=("$RULE_ID"); fi
 
 resp_get_prof=$(http_request "GET" "/api/v1/get_profile?category=test_rule" "Bearer $API_KEY" "")
 code=$(echo "$resp_get_prof" | tail -n1)
