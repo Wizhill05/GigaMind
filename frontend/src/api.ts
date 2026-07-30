@@ -104,6 +104,42 @@ export async function deleteMemory(id: string): Promise<boolean> {
   }
 }
 
+export async function exportMemories(format: 'json' | 'csv' = 'json'): Promise<void> {
+  try {
+    const res = await fetch(`/api/v1/memories/export?format=${format}`, { headers: getHeaders() });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gigamind_memories_export.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  } catch (err) {
+    console.error('exportMemories error:', err);
+  }
+}
+
+export async function hardResetMemories(password: string): Promise<{ success: boolean; count?: number; message?: string } | null> {
+  try {
+    const res = await fetch('/api/v1/memories/reset', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      return { success: false, message: errData.detail || 'Password verification failed' };
+    }
+    return await res.json();
+  } catch (err: any) {
+    console.error('hardResetMemories error:', err);
+    return { success: false, message: err.message || 'Network error' };
+  }
+}
+
 export async function fetchProfileRules(category?: string, sourceAgent?: string): Promise<ProfileRule[] | null> {
   try {
     const params = new URLSearchParams();

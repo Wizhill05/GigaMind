@@ -1,21 +1,54 @@
 import React, { useState } from 'react';
-import { Copy, Check, ExternalLink } from 'lucide-react';
-import { PixelKey, PixelBrain, PixelSparkles } from '../ui/PixelIcons';
-import { getApiKey, setApiKey } from '../../api';
+import { Copy, Check, ExternalLink, Download, Trash2, AlertTriangle, Lock } from 'lucide-react';
+import { PixelKey, PixelBrain, PixelSparkles, PixelDatabase } from '../ui/PixelIcons';
+import { getApiKey, setApiKey, exportMemories, hardResetMemories } from '../../api';
+import { useToast } from '../ui/Toast';
 
 export const SettingsTab: React.FC = () => {
   const [keyInput, setKeyInput] = useState(getApiKey());
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetPasswordInput, setResetPasswordInput] = useState('');
+  const [resetErrorMessage, setResetErrorMessage] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+
+  const { toast } = useToast();
 
   const handleSaveKey = () => {
     setApiKey(keyInput.trim());
-    alert('Master Password saved.');
+    toast('Master Password saved.', 'success');
   };
 
   const copyToClipboard = (text: string, section: string) => {
     navigator.clipboard.writeText(text);
     setCopiedSection(section);
     setTimeout(() => setCopiedSection(null), 2000);
+  };
+
+  const handleExport = async (format: 'json' | 'csv') => {
+    toast(`Exporting memories as ${format.toUpperCase()}...`, 'info');
+    await exportMemories(format);
+  };
+
+  const handleConfirmHardReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPasswordInput.trim()) {
+      setResetErrorMessage('Password is required to confirm hard reset');
+      return;
+    }
+
+    setIsResetting(true);
+    setResetErrorMessage('');
+    const res = await hardResetMemories(resetPasswordInput.trim());
+    setIsResetting(false);
+
+    if (res && res.success) {
+      toast(res.message || 'Hard memory reset complete.', 'success');
+      setShowResetModal(false);
+      setResetPasswordInput('');
+    } else {
+      setResetErrorMessage(res?.message || 'Password verification failed');
+    }
   };
 
   const sseUrl = `${window.location.origin}/sse`;
@@ -44,9 +77,9 @@ export const SettingsTab: React.FC = () => {
       {/* HEADER */}
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Service Settings & MCP Protocol</h2>
+          <h2 className="text-xl font-semibold text-white tracking-tight">Service Settings & MCP Protocol</h2>
           <p className="text-xs text-[#8a8f9e] mt-0.5">
-            Configure authorization keys, fastMCP SSE endpoints, and custom connector specs
+            Configure authorization keys, export database records, and perform administrative actions
           </p>
         </div>
       </div>
@@ -96,9 +129,44 @@ export const SettingsTab: React.FC = () => {
             />
             <button
               onClick={handleSaveKey}
-              className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-4 py-2.5 rounded-none transition-all"
+              className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-4 py-2.5 rounded-none transition-all btn-press"
             >
               Save Key
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* EXPORT DATABASE SECTION */}
+      <div className="bg-[#181818] border border-[#262626] p-5 rounded-none space-y-4">
+        <h3 className="text-sm font-semibold text-white flex items-center gap-2 border-b border-[#262626] pb-3">
+          <PixelDatabase className="w-4 h-4 text-[#ff6b00]" />
+          Database Backup & Export
+        </h3>
+
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="space-y-1">
+            <p className="text-xs text-[#c1c5d0] font-medium">Export All Memory Records</p>
+            <p className="text-xs text-[#8a8f9e]">
+              Download your entire persistent memory database as structured JSON or CSV for backups and analysis.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <button
+              onClick={() => handleExport('json')}
+              className="bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-white font-medium px-4 py-2 rounded-none transition-colors flex items-center gap-2 btn-press"
+            >
+              <Download className="w-3.5 h-3.5 text-[#ff6b00]" />
+              <span>Export JSON</span>
+            </button>
+
+            <button
+              onClick={() => handleExport('csv')}
+              className="bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-white font-medium px-4 py-2 rounded-none transition-colors flex items-center gap-2 btn-press"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-400" />
+              <span>Export CSV</span>
             </button>
           </div>
         </div>
@@ -172,6 +240,97 @@ export const SettingsTab: React.FC = () => {
           {mcpConfigSnippet}
         </pre>
       </div>
+
+      {/* DANGER ZONE - HARD MEMORY RESET */}
+      <div className="bg-rose-500/5 border border-rose-500/30 p-5 rounded-none space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-rose-500/20 pb-3">
+          <div>
+            <h3 className="text-sm font-semibold text-rose-400 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+              Danger Zone — Hard Memory Reset
+            </h3>
+            <p className="text-xs text-[#8a8f9e] mt-1">
+              Permanently purge all memory records from the GigaMind engine. This action is irreversible.
+            </p>
+          </div>
+
+          <button
+            onClick={() => {
+              setShowResetModal(true);
+              setResetErrorMessage('');
+              setResetPasswordInput('');
+            }}
+            className="bg-rose-600 hover:bg-rose-700 text-white font-semibold px-4 py-2 rounded-none transition-colors flex items-center gap-2 btn-press flex-shrink-0"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Hard Reset Database</span>
+          </button>
+        </div>
+      </div>
+
+      {/* HARD RESET CONFIRMATION MODAL */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-[#181818] border border-rose-500/40 p-6 max-w-md w-full rounded-none space-y-5 animate-scale-in">
+            <div className="flex items-center gap-3 border-b border-[#262626] pb-4">
+              <div className="w-9 h-9 bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center flex-shrink-0">
+                <Lock className="w-5 h-5 text-rose-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-white">Confirm Hard Memory Reset</h3>
+                <p className="text-xs text-rose-400 mt-0.5">Password Re-authentication Required</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-[#c1c5d0] leading-relaxed">
+              Are you sure you want to purge <strong>ALL</strong> memory items? To confirm this destructive action, please re-enter your GigaMind Master Password below.
+            </p>
+
+            <form onSubmit={handleConfirmHardReset} className="space-y-4">
+              <div>
+                <label className="block text-xs text-[#8a8f9e] mb-1.5">
+                  ENTER MASTER PASSWORD / API KEY
+                </label>
+                <input
+                  type="password"
+                  value={resetPasswordInput}
+                  onChange={(e) => setResetPasswordInput(e.target.value)}
+                  placeholder="Master API Key..."
+                  className="w-full bg-[#0f0f0f] border border-rose-500/40 focus:border-rose-500 p-2.5 text-xs font-mono text-white outline-none rounded-none"
+                  autoFocus
+                />
+                {resetErrorMessage && (
+                  <p className="text-xs text-rose-400 mt-1.5">{resetErrorMessage}</p>
+                )}
+              </div>
+
+              <div className="flex justify-end items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(false)}
+                  className="bg-[#161616] border border-[#333333] hover:bg-[#222222] text-[#c1c5d0] hover:text-white px-4 py-2 rounded-none text-xs transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResetting}
+                  className="bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-none text-xs transition-colors flex items-center gap-1.5 btn-press"
+                >
+                  {isResetting ? (
+                    <span>Purging...</span>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Confirm & Erase All Memories</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

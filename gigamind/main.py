@@ -5,7 +5,7 @@ import uuid
 from typing import Optional, List, Dict
 from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from gigamind.db.database import init_db
@@ -20,6 +20,8 @@ from gigamind.services.memory import (
     get_conversations,
     delete_profile_rule,
     get_stats,
+    reset_all_memories,
+    export_all_memories,
 )
 from gigamind.services.oauth import (
     create_authorization_code,
@@ -91,6 +93,9 @@ class UpdateMemoryRequest(BaseModel):
     category: Optional[str] = Field(None, description="Memory category")
     source_agent: Optional[str] = Field(None, description="Source agent or tool (e.g. claude, gpt, gemini, user)")
     tags: Optional[List[str]] = Field(None, description="Tags list")
+
+class ResetMemoriesRequest(BaseModel):
+    password: str = Field(..., description="Master API Key / Password to confirm hard memory purge")
 
 # Root Healthcheck
 @app.get("/")
@@ -387,6 +392,48 @@ def api_add_memory(req: AddMemoryRequest):
 def api_set_profile_rule(req: SetProfileRuleRequest):
     rule = set_profile_rule(key=req.key, value=req.value, category=req.category, source_agent=req.source_agent)
     return {"success": True, "rule": rule}
+
+@app.post("/api/v1/memories/reset", dependencies=[Depends(verify_auth)])
+def api_reset_memories(req: ResetMemoriesRequest):
+    if req.password != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid Master Password / API Key")
+    count = reset_all_memories()
+    return {"success": True, "count": count, "message": f"Hard reset complete. Purged {count} memory records from database."}
+
+@app.get("/api/v1/memories/export", dependencies=[Depends(verify_auth)])
+def api_export_memories(format: str = "json"):
+    memories = export_all_memories()
+    if format.lower() == "csv":
+        import io, csv
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "content", "category", "source_agent", "parent_id", "chunk_index", "total_chunks", "tags", "created_at", "last_accessed"])
+        for m in memories:
+            writer.writerow([
+                m["id"],
+                m["content"],
+                m["category"],
+                m["source_agent"],
+                m["parent_id"] or "",
+                m["chunk_index"] if m["chunk_index"] is not None else "",
+                m["total_chunks"] if m["total_chunks"] is not None else "",
+                json.dumps(m["tags"]),
+                m["created_at"] or "",
+                m["last_accessed"] or ""
+            ])
+        csv_content = output.getvalue()
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=gigamind_memories_export.csv"}
+        )
+    else:
+        json_content = json.dumps(memories, indent=2)
+        return Response(
+            content=json_content,
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=gigamind_memories_export.json"}
+        )
 
 @app.get("/api/v1/memories", dependencies=[Depends(verify_auth)])
 def api_get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None, source_agent: Optional[str] = None):

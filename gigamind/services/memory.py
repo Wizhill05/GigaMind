@@ -405,6 +405,31 @@ def delete_memory(memory_id: str) -> bool:
         session.commit()
         return True
 
+def reset_all_memories() -> int:
+    with Session(engine) as session:
+        all_mems = session.exec(select(MemoryItem)).all()
+        count = len(all_mems)
+        for mem in all_mems:
+            session.delete(mem)
+        session.commit()
+        return count
+
+def export_all_memories() -> List[Dict[str, Any]]:
+    with Session(engine) as session:
+        mems = session.exec(select(MemoryItem).order_by(MemoryItem.created_at.desc())).all()
+        return [{
+            "id": m.id,
+            "content": m.content,
+            "category": m.category,
+            "source_agent": getattr(m, "source_agent", "user") or "user",
+            "parent_id": m.parent_id,
+            "chunk_index": m.chunk_index,
+            "total_chunks": m.total_chunks,
+            "tags": json.loads(m.tags_json or "[]"),
+            "created_at": m.created_at,
+            "last_accessed": m.last_accessed
+        } for m in mems]
+
 def update_memory(memory_id: str, content: Optional[str] = None, category: Optional[str] = None, source_agent: Optional[str] = None, tags: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
     with Session(engine) as session:
         item = session.exec(select(MemoryItem).where(MemoryItem.id == memory_id)).first()
