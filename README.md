@@ -1,35 +1,39 @@
-# 🧠 GigaMind: Universal Personal Memory Engine for AI
+# GigaMind: Personal Memory Engine for AI
+
+<img width="1440" height="360" alt="GigaMind Header Banner" src="https://github.com/user-attachments/assets/e84bb1b9-4026-433c-a98e-94cf769d443c" />
+
+---
 
 GigaMind is an open-source, production-grade **Personal Memory Engine & 2-Stage RAG Pipeline** designed for AI models and coding harnesses. It acts as a single source of truth for your long-term preferences, identity rules, code snippets, and conversation logs.
 
 ---
 
-## ✨ Core Features
+## Features
 
-- **⚡ 2-Stage RAG Retrieval Engine**:
+- **2-Stage RAG Retrieval Engine**:
   - **Stage 1 (Vector Candidate Selection)**: Native PostgreSQL `pgvector` HNSW index similarity search ($O(\log N)$ cosine distance matching) or vectorized local scanning.
   - **Stage 2 (Cross-Encoder Reranker)**: Re-ranks candidate matches via Voyage/Cohere API rerankers or GigaMind's zero-dependency token-interaction cross-scorer (BM25 TF-IDF + phrase overlap + term density).
-- **✂️ Smart Text Chunking**: Hierarchical recursive text splitting (500-character windows with 100-character overlaps) for long memories, documents, and dialogue exports.
-- **🎛️ Tactical Dashboard UI (`/dashboard`)**: Modern Render-style dark theme React SPA (Vite + TypeScript + Tailwind CSS) with 8-bit pixel icons, 60fps micro-animations, spotlight search (`⌘K`), toast notifications, and interactive analytics charts.
-- **🏷️ Origin Source Agent Tracking**: Tracks exactly which AI model or user created each memory (`claude`, `gpt`, `gemini`, `user`, `system`, etc.).
-- **🌐 Universal Multi-Protocol Support**:
+- **Smart Text Chunking**: Hierarchical recursive text splitting (500-character windows with 100-character overlaps) for long memories, documents, and dialogue exports.
+- **Tactical Dashboard UI (`/dashboard`)**: Modern Render-style dark theme React SPA (Vite + TypeScript + Tailwind CSS) with 8-bit pixel icons, 60fps micro-animations, spotlight search (`Cmd+K`), toast notifications, and interactive analytics charts.
+- **Origin Source Agent Tracking**: Tracks exactly which AI model or user created each memory (`claude`, `gpt`, `gemini`, `user`, `system`, etc.).
+- **Universal Multi-Protocol Support**:
   - **FastMCP SSE & Stdio** (`/sse`, `/messages`) for Claude Desktop, Claude Code, Cursor, Windsurf, and OpenCode.
   - **OAuth 2.0 Authorization Server** (`/oauth/authorize`, `/oauth/token`) for `claude.ai` Custom Connectors.
   - **REST API + OpenAPI 3.1.0** (`/openapi.json`, `/api/v1/*`) for ChatGPT Custom GPT Actions & Gemini.
-- **🗑️ Cascading Parent-Child Cleanup**: Deleting a parent document automatically wipes all associated vector chunks atomically.
+- **Cascading Parent-Child Cleanup**: Deleting a parent document automatically wipes all associated vector chunks atomically.
 
 ---
 
-## 🛠️ Self-Hosting Guide
+## Self-Hosting Guide
 
-### Step 1: Database Setup (Supabase PostgreSQL + `pgvector`)
+### Step 1: Database Setup (Supabase PostgreSQL + pgvector)
 
 1. Create a free account and project at **[Supabase.com](https://supabase.com)**.
 2. In the Supabase dashboard, open the **SQL Editor** and run:
    ```sql
    CREATE EXTENSION IF NOT EXISTS vector;
    ```
-3. Go to **Project Settings** $\rightarrow$ **Database** $\rightarrow$ **Connection String**.
+3. Go to **Project Settings** -> **Database** -> **Connection String**.
 4. Copy the **URI / Connection String** (Session or Transaction pooler, e.g.):
    `postgresql://postgres.[REF]:[YOUR-PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres`
 
@@ -39,7 +43,7 @@ GigaMind is an open-source, production-grade **Personal Memory Engine & 2-Stage 
 
 1. Fork or clone this repository to your GitHub account.
 2. Sign up or log into **[Render.com](https://render.com)**.
-3. Click **New +** $\rightarrow$ **Web Service** and connect your GigaMind repository.
+3. Click **New +** -> **Web Service** and connect your GigaMind repository.
 4. Set the build and start commands:
    - **Environment**: `Python`
    - **Build Command**: `(cd frontend && npm install && npm run build) || true; pip install -r requirements.txt`
@@ -88,11 +92,11 @@ If you prefer running GigaMind locally without cloud dependencies:
 
 ---
 
-## 🔗 Connecting GigaMind to AI Services & Coding Harnesses
+## Connecting GigaMind to AI Services & Coding Harnesses
 
 ### 1. Claude Web (`claude.ai`) Custom Connector (OAuth 2.0)
 
-1. Navigate to **`claude.ai`** $\rightarrow$ **Account Settings** $\rightarrow$ **Integrations / Connectors**.
+1. Navigate to **`claude.ai`** -> **Account Settings** -> **Integrations / Connectors**.
 2. Click **Add Custom Connector**:
    - **Name**: `GigaMind`
    - **URL**: `https://your-app-name.onrender.com/sse`
@@ -152,11 +156,11 @@ Add GigaMind to your workspace MCP configuration file (`claude_desktop_config.js
 
 ### 4. ChatGPT (Custom GPT Actions & REST API)
 
-1. Open **ChatGPT** $\rightarrow$ **Explore GPTs** $\rightarrow$ **Create**.
-2. Go to **Configure** $\rightarrow$ **Actions** $\rightarrow$ **Import from URL**.
+1. Open **ChatGPT** -> **Explore GPTs** -> **Create**.
+2. Go to **Configure** -> **Actions** -> **Import from URL**.
 3. Enter your OpenAPI endpoint:
    `https://your-app-name.onrender.com/openapi.json`
-4. Set **Authentication** to **API Key** $\rightarrow$ **Auth Type: Bearer** and paste your `GIGAMIND_API_KEY`.
+4. Set **Authentication** to **API Key** -> **Auth Type: Bearer** and paste your `GIGAMIND_API_KEY`.
 5. Copy instructions from **[`SKILL.md`](./SKILL.md)** into the GPT **Instructions** text box!
 
 ---
@@ -172,12 +176,12 @@ To enable automatic memory search, rule fetching, and memory insertion across yo
 
 ---
 
-## 🧪 Edge-Case Verification & Reliability Testing
+## Edge-Case Verification & Reliability Testing
 
 GigaMind comes with an edge-case test suite (`tests/test_deployed_rag_edgecases.sh`) that evaluates **23 critical edge cases**:
 - Authentication Security (missing, invalid, and valid Bearer tokens)
 - Smart Text Chunking (<600 chars single chunk vs >600 chars multi-chunk windowing)
-- Multi-byte Unicode & Code Blocks (emojis 🧠🤖, quotes, backslashes, CJK text)
+- Multi-byte Unicode & Code Blocks (emojis, quotes, backslashes, CJK text)
 - Boundary Character Thresholds (599 vs 601 characters)
 - 2-Stage Retrieval & Cross-Encoder Reranking score calculations
 - Category & Source Agent Filtering isolation
@@ -210,7 +214,7 @@ ALL EDGE-CASE TESTS PASSED SUCCESSFULLY!
 
 ---
 
-## 📥 Ingesting Past Chat History
+## Ingesting Past Chat History
 
 Import conversation exports from ChatGPT, Claude, or Gemini into GigaMind:
 
@@ -220,6 +224,6 @@ python3 -m gigamind.cli.importer --chatgpt ./chatgpt_history.json --claude ./cla
 
 ---
 
-## 📄 License
+## License
 
 MIT License. Free to use, modify, and self-host.
