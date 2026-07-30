@@ -79,6 +79,18 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
                 /openapi.json <ExternalLink className="w-3 h-3 text-[#8a8f9e]" />
               </a>
             </div>
+
+            <div className="flex items-center gap-1.5">
+              <span>Connect AI Guide:</span>
+              <a
+                href="https://github.com/Wizhill05/GigaMind#connecting-gigamind-to-ai-services--coding-harnesses"
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-[#ff6b00] hover:underline flex items-center gap-1 font-semibold"
+              >
+                Docs <ExternalLink className="w-3 h-3 text-[#ff6b00]" />
+              </a>
+            </div>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Copy, Check, ExternalLink } from 'lucide-react';
-import { PixelKey, PixelBrain } from '../ui/PixelIcons';
+import { PixelKey, PixelBrain, PixelSparkles } from '../ui/PixelIcons';
 import { getApiKey, setApiKey } from '../../api';
 
 export const SettingsTab: React.FC = () => {
@@ -48,6 +48,30 @@ export const SettingsTab: React.FC = () => {
           <p className="text-xs text-[#8a8f9e] mt-0.5">
             Configure authorization keys, fastMCP SSE endpoints, and custom connector specs
           </p>
+        </div>
+      </div>
+
+      {/* CONNECT AI SERVICES FEATURED BANNER */}
+      <div className="bg-[#13151c] border border-[#ff6b00]/30 p-5 rounded-none space-y-3 bg-gradient-to-r from-[#ff6b00]/10 via-transparent to-transparent">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <PixelSparkles className="w-4 h-4 text-[#ff6b00]" />
+              Connect GigaMind to AI Services & Coding Harnesses
+            </h3>
+            <p className="text-xs text-[#8a8f9e]">
+              Step-by-step documentation for Claude Web (claude.ai), Claude Code, Cursor, Windsurf, OpenCode, ChatGPT Custom GPTs, and Claude Desktop.
+            </p>
+          </div>
+          <a
+            href="https://github.com/Wizhill05/GigaMind#connecting-gigamind-to-ai-services--coding-harnesses"
+            target="_blank"
+            rel="noreferrer"
+            className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white text-xs font-medium px-4 py-2 rounded-none flex items-center gap-1.5 transition-all btn-press flex-shrink-0"
+          >
+            <span>View Connect Guide</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
         </div>
       </div>
 

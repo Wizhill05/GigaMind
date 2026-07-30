@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, RefreshCw, Search } from 'lucide-react';
+import { Plus, RefreshCw, Search, ExternalLink } from 'lucide-react';
 import { PixelKey } from './ui/PixelIcons';
 import { getApiKey, setApiKey } from '../api';
 import { useToast } from './ui/Toast';
@@ -82,6 +82,18 @@ export const Header: React.FC<HeaderProps> = ({
             ⌘K
           </span>
         </button>
+
+        {/* CONNECT AI DOCS LINK */}
+        <a
+          href="https://github.com/Wizhill05/GigaMind#connecting-gigamind-to-ai-services--coding-harnesses"
+          target="_blank"
+          rel="noreferrer"
+          className="h-8 bg-[#101216] border border-[#262936] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white px-3 rounded-none flex items-center gap-1.5 font-medium transition-all btn-press"
+          title="Connect AI Harnesses & Services Guide"
+        >
+          <ExternalLink className="w-3.5 h-3.5 text-[#ff6b00]" />
+          <span className="leading-none text-xs">Connect AI</span>
+        </a>
 
         {/* + NEW MEMORY BUTTON */}
         <button
