@@ -18,7 +18,7 @@ def run_suite():
     os.chmod(bash_script, 0o755)
 
     env = os.environ.copy()
-    env["DEPLOYED_URL"] = env.get("DEPLOYED_URL", "https://gigamind-md53.onrender.com")
+    env["DEPLOYED_URL"] = env.get("DEPLOYED_URL", "http://localhost:8000")
     env["LOCAL_URL"] = env.get("LOCAL_URL", "http://localhost:8000")
 
     print(f"🚀 Launching GigaMind Edge-Case Test Suite...")

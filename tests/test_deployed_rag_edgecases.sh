@@ -2,7 +2,7 @@
 # ==============================================================================
 # GigaMind Deployed RAG Engine Edge-Case Test Suite
 # Tests: Auth, Chunking Boundaries, Reranking, Cascading Delete, Profile & Stats
-# Target: https://gigamind-md53.onrender.com (Fallback: http://localhost:8000)
+# Target: http://localhost:8000 (or DEPLOYED_URL env var)
 # ==============================================================================
 
 set -euo pipefail
@@ -25,7 +25,7 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
     set +o allexport
 fi
 
-DEPLOYED_URL="${DEPLOYED_URL:-https://gigamind-md53.onrender.com}"
+DEPLOYED_URL="${DEPLOYED_URL:-http://localhost:8000}"
 LOCAL_URL="${LOCAL_URL:-http://localhost:8000}"
 API_KEY="${GIGAMIND_API_KEY:-gigamind-secret-key-change-me}"
 VERBOSE="${VERBOSE:-0}"
