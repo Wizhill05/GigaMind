@@ -35,11 +35,12 @@ def search_memory(
                 vector_str = f"[{','.join(str(x) for x in query_vector)}]"
                 sql = """
                 SELECT id, content, category, source_agent, tags_json, parent_id, chunk_index, total_chunks,
-                       1.0 - (embedding_vector <=> :vec::vector) AS vector_score
+                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
                 FROM memories
                 WHERE (:cat IS NULL OR category = :cat)
                   AND (:agent IS NULL OR source_agent = :agent)
-                ORDER BY embedding_vector <=> :vec::vector ASC
+                  AND embedding_vector IS NOT NULL
+                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
                 LIMIT 30;
                 """
                 params = {"vec": vector_str, "cat": category, "agent": source_agent}
@@ -61,6 +62,7 @@ def search_memory(
                     candidates.append(c_dict)
             except Exception as pg_err:
                 print(f"pgvector query fallback: {pg_err}")
+                session.rollback()
                 candidates = []
 
         # Fallback / SQLite Candidate Scanner
@@ -195,6 +197,14 @@ def add_memory(
             )
             session.add(item)
             session.commit()
+            if is_postgres:
+                try:
+                    vec_str = f"[{','.join(str(x) for x in embedding)}]"
+                    with Session(engine) as p_sess:
+                        p_sess.exec(text("UPDATE memories SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": vec_str, "id": parent_mem_id})
+                        p_sess.commit()
+                except Exception as p_err:
+                    print(f"pgvector single chunk update note: {p_err}")
             return {
                 "id": parent_mem_id,
                 "content": content,
@@ -242,6 +252,17 @@ def add_memory(
             session.add(chk_item)
 
         session.commit()
+        if is_postgres:
+            try:
+                with Session(engine) as p_sess:
+                    for chk in chunks:
+                        chk_id = f"{parent_mem_id}_chk_{chk['chunk_index']}"
+                        chk_emb = generate_embedding(chk["content"])
+                        chk_vec_str = f"[{','.join(str(x) for x in chk_emb)}]"
+                        p_sess.exec(text("UPDATE memories SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": chk_vec_str, "id": chk_id})
+                    p_sess.commit()
+            except Exception as p_err:
+                print(f"pgvector multi-chunk update note: {p_err}")
 
     return {
         "id": parent_mem_id,
