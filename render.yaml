@@ -9,8 +9,6 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
-      - key: DB_PATH
-        value: ./gigamind.db
       - key: ENVIRONMENT
         value: production
       - key: R2_ACCOUNT_ID

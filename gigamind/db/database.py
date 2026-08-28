@@ -61,6 +61,9 @@ if raw_db_url and raw_db_url.startswith("postgres://"):
 
 def get_db_engine():
     global raw_db_url
+    env_name = os.getenv("ENVIRONMENT", "development").lower()
+    is_production = env_name in ("production", "prod") or bool(os.getenv("RENDER"))
+
     if raw_db_url and raw_db_url.startswith("postgresql"):
         try:
             # Ensure sslmode=require for Neon / remote Postgres if not specified
@@ -74,7 +77,19 @@ def get_db_engine():
             print("⚡ Connected successfully to Neon PostgreSQL (Lakebase Postgres).")
             return pg_engine, True
         except Exception as e:
-            print(f"⚠️ Neon PostgreSQL connection failed ({e}). Falling back to local SQLite database.")
+            if is_production:
+                raise RuntimeError(
+                    f"❌ CRITICAL ERROR: Failed to connect to Neon PostgreSQL in production ({e}). "
+                    "Refusing silent fallback to ephemeral SQLite on Render (which erases all data on redeploy). "
+                    "Please check your Neon database status and verify DATABASE_URL in Render Dashboard Environment Variables."
+                ) from e
+            print(f"⚠️ Neon PostgreSQL connection failed ({e}). Falling back to local SQLite database for development.")
+    elif is_production:
+        raise RuntimeError(
+            "❌ CRITICAL ERROR: DATABASE_URL environment variable is required in production! "
+            "Render web services use ephemeral storage and do not persist SQLite databases across redeploys. "
+            "Please configure DATABASE_URL (Neon PostgreSQL connection string) in your Render Dashboard Environment Variables."
+        )
 
     db_path = os.getenv("DB_PATH", "./gigamind.db")
     sqlite_url = f"sqlite:///{db_path}"
