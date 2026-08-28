@@ -26,16 +26,16 @@ GigaMind is an open-source, production-grade **Personal Memory Engine & 2-Stage 
 
 ## Self-Hosting Guide
 
-### Step 1: Database Setup (Supabase PostgreSQL + pgvector)
+### Step 1: Database Setup (Neon Lakebase Postgres + pgvector)
 
-1. Create a free account and project at **[Supabase.com](https://supabase.com)**.
-2. In the Supabase dashboard, open the **SQL Editor** and run:
+1. Open your project in the **[Neon Console](https://console.neon.tech)** (e.g. project `Gigamind`).
+2. Enable the `vector` extension if not already enabled (GigaMind will also auto-enable it via `init_db()`):
    ```sql
    CREATE EXTENSION IF NOT EXISTS vector;
    ```
-3. Go to **Project Settings** -> **Database** -> **Connection String**.
-4. Copy the **URI / Connection String** (Session or Transaction pooler, e.g.):
-   `postgresql://postgres.[REF]:[YOUR-PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres`
+3. Go to **Dashboard** -> **Connection Details** / **Connection String**.
+4. Copy the **Pooled Connection String** (recommended for web app queries):
+   `postgresql://[user]:[password]@[endpoint-id]-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require`
 
 ---
 
@@ -52,7 +52,7 @@ GigaMind is an open-source, production-grade **Personal Memory Engine & 2-Stage 
    | Variable | Value / Description |
    |---|---|
    | `GIGAMIND_API_KEY` | `your-secure-master-password` |
-   | `DATABASE_URL` | Your Supabase PostgreSQL connection string from Step 1 |
+| `DATABASE_URL` | Your Neon PostgreSQL connection string from Step 1 (`?sslmode=require`) |
    | `GEMINI_API_KEY` | *(Optional)* Google AI Studio API key for Gemini embeddings |
    | `VOYAGE_API_KEY` | *(Optional)* Voyage AI API key for cross-encoder reranking |
    | `COHERE_API_KEY` | *(Optional)* Cohere API key for cross-encoder reranking |

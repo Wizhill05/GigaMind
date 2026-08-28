@@ -2,8 +2,11 @@ import os
 import json
 from datetime import datetime, timezone
 from typing import Optional, List
+from dotenv import load_dotenv
 from sqlmodel import SQLModel, Field, create_engine, Session, select, text
 
+# Load environment variables from .env
+load_dotenv()
 # Models
 class ProfileItem(SQLModel, table=True):
     __tablename__ = "profile"
@@ -59,19 +62,23 @@ def get_db_engine():
     global raw_db_url
     if raw_db_url and raw_db_url.startswith("postgresql"):
         try:
-            pg_engine = create_engine(raw_db_url, pool_pre_ping=True)
+            # Ensure sslmode=require for Neon / remote Postgres if not specified
+            conn_url = raw_db_url
+            if "neon.tech" in conn_url and "sslmode=" not in conn_url:
+                separator = "&" if "?" in conn_url else "?"
+                conn_url = f"{conn_url}{separator}sslmode=require"
+            pg_engine = create_engine(conn_url, pool_pre_ping=True)
             with pg_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            print("⚡ Connected successfully to Supabase PostgreSQL.")
+            print("⚡ Connected successfully to Neon PostgreSQL (Lakebase Postgres).")
             return pg_engine, True
         except Exception as e:
-            print(f"⚠️ PostgreSQL connection failed ({e}). Falling back to local SQLite database.")
+            print(f"⚠️ Neon PostgreSQL connection failed ({e}). Falling back to local SQLite database.")
 
     db_path = os.getenv("DB_PATH", "./gigamind.db")
     sqlite_url = f"sqlite:///{db_path}"
     sqlite_engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
     return sqlite_engine, False
-
 engine, is_postgres = get_db_engine()
 
 def init_db():
@@ -119,7 +126,7 @@ def init_db():
             pass
 
     SQLModel.metadata.create_all(engine)
-    print(f"✅ GigaMind database initialized on {'Supabase PostgreSQL' if is_postgres else 'SQLite'}.")
+    print(f"✅ GigaMind database initialized on {'Neon PostgreSQL (Lakebase Postgres)' if is_postgres else 'SQLite'}.")
 
 def get_session():
     with Session(engine) as session:
