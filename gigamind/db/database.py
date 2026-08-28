@@ -27,6 +27,7 @@ class MemoryItem(SQLModel, table=True):
     source_agent: str = Field(default="user", index=True) # e.g. claude, gpt, gemini, user, system
     tags_json: str = Field(default="[]")
     embedding_json: str = Field(default="[]")
+    attachments_json: str = Field(default="[]")
     parent_id: Optional[str] = Field(default=None, index=True)
     chunk_index: Optional[int] = Field(default=None)
     total_chunks: Optional[int] = Field(default=None)
@@ -93,6 +94,7 @@ def init_db():
                 conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS chunk_index INTEGER;"))
                 conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS total_chunks INTEGER;"))
                 conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS embedding_vector vector(768);"))
+                conn.execute(text("ALTER TABLE memories ADD COLUMN IF NOT EXISTS attachments_json TEXT DEFAULT '[]';"))
                 conn.execute(text("ALTER TABLE profile ADD COLUMN IF NOT EXISTS source_agent VARCHAR DEFAULT 'user';"))
                 conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_agent VARCHAR DEFAULT 'user';"))
                 conn.execute(text("ALTER TABLE task_sessions ADD COLUMN IF NOT EXISTS source_agent VARCHAR DEFAULT 'user';"))
@@ -113,6 +115,7 @@ def init_db():
                     "ALTER TABLE memories ADD COLUMN parent_id TEXT;",
                     "ALTER TABLE memories ADD COLUMN chunk_index INTEGER;",
                     "ALTER TABLE memories ADD COLUMN total_chunks INTEGER;",
+                    "ALTER TABLE memories ADD COLUMN attachments_json TEXT DEFAULT '[]';",
                     "ALTER TABLE profile ADD COLUMN source_agent TEXT DEFAULT 'user';",
                     "ALTER TABLE conversations ADD COLUMN source_agent TEXT DEFAULT 'user';",
                     "ALTER TABLE task_sessions ADD COLUMN source_agent TEXT DEFAULT 'user';"

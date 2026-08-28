@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Code } from 'lucide-react';
+import { Search, Code, Paperclip, ExternalLink } from 'lucide-react';
 import { PixelSparkles, PixelTerminal } from '../ui/PixelIcons';
 import { SearchResult } from '../../types';
 import { searchMemory } from '../../api';
@@ -167,6 +167,31 @@ export const VectorSearchLabTab: React.FC = () => {
                   </div>
 
                   <p className="text-white text-xs leading-relaxed break-words break-all">{res.content}</p>
+
+                  {res.attachments && res.attachments.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      {res.attachments.map((att, attIdx) => (
+                        <span
+                          key={att.key || attIdx}
+                          className="inline-flex items-center gap-1 bg-[#121212] border border-[#2a2a2a] px-2 py-0.5 text-[11px] text-[#c1c5d0]"
+                        >
+                          <Paperclip className="w-3 h-3 text-[#ff6b00]" />
+                          <span className="font-mono truncate max-w-[150px]">{att.filename}</span>
+                          {att.url && (
+                            <a
+                              href={att.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#8a8f9e] hover:text-[#ff6b00] transition-colors ml-0.5"
+                              title="Open / Download attached file"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

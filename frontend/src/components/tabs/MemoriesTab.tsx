@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check } from 'lucide-react';
+import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check, Paperclip, ExternalLink } from 'lucide-react';
 import { PixelDatabase } from '../ui/PixelIcons';
 import { Memory } from '../../types';
 import { fetchMemories, deleteMemory } from '../../api';
@@ -206,6 +206,32 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
                           {mem.content}
                         </span>
                       </div>
+
+                      {mem.attachments && mem.attachments.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          {mem.attachments.map((att, attIdx) => (
+                            <span
+                              key={att.key || attIdx}
+                              className="inline-flex items-center gap-1 bg-[#141414] border border-[#2a2a2a] px-2 py-0.5 text-[11px] text-[#c1c5d0]"
+                            >
+                              <Paperclip className="w-3 h-3 text-[#ff6b00]" />
+                              <span className="font-mono truncate max-w-[140px]">{att.filename}</span>
+                              {att.url && (
+                                <a
+                                  href={att.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[#8a8f9e] hover:text-[#ff6b00] transition-colors ml-0.5"
+                                  title="Download / Open file from Cloudflare R2"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      )}
 
                       <div className="flex flex-wrap items-center gap-3 text-[#8a8f9e] text-xs">
                         <CategoryBadge category={mem.category} />

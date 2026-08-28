@@ -2,13 +2,15 @@ import os
 import json
 import asyncio
 import uuid
-from typing import Optional, List, Dict
-from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form
+import base64
+from typing import Optional, List, Dict, Any
+from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from gigamind.db.database import init_db
+from gigamind.services.storage import storage_service
 from gigamind.services.memory import (
     search_memory,
     add_memory,
@@ -85,6 +87,10 @@ class AddMemoryRequest(BaseModel):
     category: str = Field("general", description="Memory category")
     source_agent: str = Field("user", description="Source agent or tool creating this memory (e.g. claude, gpt, gemini, user)")
     tags: List[str] = Field(default_factory=list, description="Tags list")
+    attachments: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="R2 file attachment metadata list")
+    file_keys: Optional[List[str]] = Field(default_factory=list, description="Existing R2 storage keys to link")
+    media_url: Optional[str] = Field(None, description="Legacy media URL for backward compatibility")
+    media_type: Optional[str] = Field(None, description="Legacy media MIME or file type")
 
 class SetProfileRuleRequest(BaseModel):
     key: str = Field(..., description="Profile rule key")
@@ -97,10 +103,26 @@ class UpdateMemoryRequest(BaseModel):
     category: Optional[str] = Field(None, description="Memory category")
     source_agent: Optional[str] = Field(None, description="Source agent or tool (e.g. claude, gpt, gemini, user)")
     tags: Optional[List[str]] = Field(None, description="Tags list")
+    attachments: Optional[List[Dict[str, Any]]] = Field(None, description="Updated attachments list")
 
 class ResetMemoriesRequest(BaseModel):
     password: str = Field(..., description="Master API Key / Password to confirm hard memory purge")
 
+class PresignedUrlRequest(BaseModel):
+    key: str = Field(..., description="Cloudflare R2 storage key")
+    expires_in: int = Field(3600, description="Expiration time in seconds (default 3600)")
+    filename: Optional[str] = Field(None, description="Optional override filename for Content-Disposition")
+    inline: bool = Field(True, description="Inline display (True) or force attachment download (False)")
+
+class PresignedUploadUrlRequest(BaseModel):
+    filename: str = Field(..., description="Target file name")
+    content_type: str = Field("application/octet-stream", description="File MIME type")
+    expires_in: int = Field(3600, description="Expiration time in seconds (default 3600)")
+
+class FileUploadBase64Request(BaseModel):
+    filename: str = Field(..., description="File name")
+    content_base64: str = Field(..., description="Base64 encoded file content")
+    mime_type: Optional[str] = Field(None, description="MIME content type")
 # Dashboard UI Helper
 def dashboard_ui():
     index_file = os.path.join(frontend_dist_dir, "index.html")
@@ -295,7 +317,7 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
         tools_list = [
             {
                 "name": "search_memory",
-                "description": "Search user GigaMind personal memory database using a 2-stage RAG engine (Vector Candidate Search + Cross-Encoder Reranker).",
+                "description": "Search user GigaMind personal memory database using a 2-stage RAG engine (Vector Candidate Search + Cross-Encoder Reranker). Returns memories with active file attachments.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -320,15 +342,65 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
             },
             {
                 "name": "add_memory",
-                "description": "Save a new fact or preference to GigaMind memory.",
+                "description": "Save a new fact, project decision, or research context with optional attached files to GigaMind memory.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "content": {"type": "string"},
+                        "content": {"type": "string", "description": "Text content of the memory"},
                         "category": {"type": "string", "default": "general"},
-                        "source_agent": {"type": "string", "default": "claude", "description": "Source agent or model (e.g. claude, gpt, gemini, user)"}
+                        "source_agent": {"type": "string", "default": "claude", "description": "Source agent or model (e.g. claude, gpt, gemini, user)"},
+                        "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags array"},
+                        "file_keys": {"type": "array", "items": {"type": "string"}, "description": "Optional list of Cloudflare R2 storage keys to attach"}
                     },
                     "required": ["content"]
+                }
+            },
+            {
+                "name": "upload_file_to_storage",
+                "description": "Upload a research document, PDF, diagram, or code artifact directly to Cloudflare R2 object storage with zero egress fees.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "Name of the file (e.g. quantum_research.pdf)"},
+                        "content_base64": {"type": "string", "description": "Base64-encoded binary content of the file (max 15MB)"},
+                        "mime_type": {"type": "string", "description": "Optional MIME type (e.g. application/pdf, text/markdown)"}
+                    },
+                    "required": ["filename", "content_base64"]
+                }
+            },
+            {
+                "name": "get_file_download_url",
+                "description": "Generate a secure, time-limited presigned download URL for an R2 storage key.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string", "description": "R2 storage key (e.g. files/2026/08/mem_123_spec.pdf)"},
+                        "expires_in_seconds": {"type": "integer", "default": 3600, "description": "URL validity duration in seconds"}
+                    },
+                    "required": ["key"]
+                }
+            },
+            {
+                "name": "get_file_upload_url",
+                "description": "Generate a direct presigned PUT URL for streaming large uploads directly to Cloudflare R2.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {"type": "string", "description": "Target filename"},
+                        "content_type": {"type": "string", "default": "application/octet-stream", "description": "MIME type"}
+                    },
+                    "required": ["filename"]
+                }
+            },
+            {
+                "name": "list_storage_files",
+                "description": "List files and artifacts stored in the Cloudflare R2 knowledge bucket.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "prefix": {"type": "string", "default": "", "description": "Key prefix filter (e.g. files/2026/)"},
+                        "limit": {"type": "integer", "default": 50, "description": "Max files to return"}
+                    }
                 }
             },
             {
@@ -368,9 +440,82 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
             return res
 
         if name == "add_memory":
-            mem = add_memory(content=args.get("content", ""), category=args.get("category", "general"), source_agent=args.get("source_agent", "claude"))
+            mem = add_memory(
+                content=args.get("content", ""),
+                category=args.get("category", "general"),
+                source_agent=args.get("source_agent", "claude"),
+                tags=args.get("tags", []),
+                file_keys=args.get("file_keys", [])
+            )
             res = await send_rpc_response(result={
                 "content": [{"type": "text", "text": json.dumps({"success": True, "memory": mem}, indent=2)}]
+            })
+            return res
+
+        if name == "upload_file_to_storage":
+            if not storage_service.is_enabled():
+                res = await send_rpc_response(error={"code": -32000, "message": "Cloudflare R2 storage is not configured on this GigaMind server."})
+                return res
+            try:
+                b64_str = args.get("content_base64", "")
+                file_bytes = base64.b64decode(b64_str)
+                uploaded = storage_service.upload_file(
+                    data=file_bytes,
+                    filename=args.get("filename", "agent_file"),
+                    mime_type=args.get("mime_type")
+                )
+                if not uploaded:
+                    res = await send_rpc_response(error={"code": -32000, "message": "Failed to upload file to Cloudflare R2."})
+                    return res
+                res = await send_rpc_response(result={
+                    "content": [{"type": "text", "text": json.dumps({"success": True, "file": uploaded}, indent=2)}]
+                })
+                return res
+            except Exception as up_err:
+                res = await send_rpc_response(error={"code": -32000, "message": f"Upload error: {up_err}"})
+                return res
+
+        if name == "get_file_download_url":
+            if not storage_service.is_enabled():
+                res = await send_rpc_response(error={"code": -32000, "message": "Cloudflare R2 storage is not configured."})
+                return res
+            url = storage_service.get_presigned_download_url(
+                key=args.get("key", ""),
+                expires_in=args.get("expires_in_seconds", 3600)
+            )
+            if not url:
+                res = await send_rpc_response(error={"code": -32000, "message": f"Could not generate URL for key: {args.get('key')}"})
+                return res
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": json.dumps({"key": args.get("key"), "url": url}, indent=2)}]
+            })
+            return res
+
+        if name == "get_file_upload_url":
+            if not storage_service.is_enabled():
+                res = await send_rpc_response(error={"code": -32000, "message": "Cloudflare R2 storage is not configured."})
+                return res
+            upload_info = storage_service.get_presigned_upload_url(
+                filename=args.get("filename", "file"),
+                content_type=args.get("content_type", "application/octet-stream")
+            )
+            if not upload_info:
+                res = await send_rpc_response(error={"code": -32000, "message": "Failed to generate presigned upload URL."})
+                return res
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": json.dumps(upload_info, indent=2)}]
+            })
+            return res
+
+        if name == "list_storage_files":
+            if not storage_service.is_enabled():
+                res = await send_rpc_response(result={
+                    "content": [{"type": "text", "text": json.dumps({"enabled": False, "files": []}, indent=2)}]
+                })
+                return res
+            files = storage_service.list_files(prefix=args.get("prefix", ""), limit=args.get("limit", 50))
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": json.dumps({"enabled": True, "files": files, "count": len(files)}, indent=2)}]
             })
             return res
 
@@ -383,7 +528,6 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
 
     res = await send_rpc_response(error={"code": -32601, "message": "Method not found"})
     return res
-
 # ==========================================
 # REST API ENDPOINTS (ChatGPT & Gemini)
 # ==========================================
@@ -403,9 +547,17 @@ def api_get_profile(category: Optional[str] = None, source_agent: Optional[str] 
 
 @app.post("/api/v1/add_memory", dependencies=[Depends(verify_auth)])
 def api_add_memory(req: AddMemoryRequest):
-    mem = add_memory(content=req.content, category=req.category, source_agent=req.source_agent, tags=req.tags)
+    mem = add_memory(
+        content=req.content,
+        category=req.category,
+        source_agent=req.source_agent,
+        tags=req.tags,
+        attachments=req.attachments,
+        file_keys=req.file_keys,
+        media_url=req.media_url,
+        media_type=req.media_type
+    )
     return {"success": True, "memory": mem}
-
 @app.post("/api/v1/set_profile_rule", dependencies=[Depends(verify_auth)])
 def api_set_profile_rule(req: SetProfileRuleRequest):
     rule = set_profile_rule(key=req.key, value=req.value, category=req.category, source_agent=req.source_agent)
@@ -466,11 +618,17 @@ def api_delete_memory(id: str):
 
 @app.put("/api/v1/memories/{id}", dependencies=[Depends(verify_auth)])
 def api_update_memory(id: str, req: UpdateMemoryRequest):
-    updated = update_memory(memory_id=id, content=req.content, category=req.category, source_agent=req.source_agent, tags=req.tags)
+    updated = update_memory(
+        memory_id=id,
+        content=req.content,
+        category=req.category,
+        source_agent=req.source_agent,
+        tags=req.tags,
+        attachments=req.attachments
+    )
     if not updated:
         raise HTTPException(status_code=404, detail=f"Memory '{id}' not found")
     return {"success": True, "memory": updated}
-
 @app.get("/api/v1/conversations", dependencies=[Depends(verify_auth)])
 def api_get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = None, source_agent: Optional[str] = None):
     return get_conversations(page=page, limit=limit, platform=platform, source_agent=source_agent)
@@ -486,4 +644,92 @@ def api_delete_profile_rule(id: str):
 def api_get_stats():
     return get_stats()
 
+
+# ==========================================
+# CLOUDFLARE R2 FILE STORAGE ENDPOINTS
+# ==========================================
+
+@app.post("/api/v1/files/upload", dependencies=[Depends(verify_auth)])
+async def api_upload_file(file: UploadFile = File(...), prefix: str = "files"):
+    """Streams binary file directly to Cloudflare R2 and returns metadata."""
+    if not storage_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
+
+    file_meta = storage_service.upload_fileobj(
+        fileobj=file.file,
+        filename=file.filename or "unnamed_file",
+        mime_type=file.content_type,
+        size_bytes=file.size or 0,
+        prefix=prefix
+    )
+    if not file_meta:
+        raise HTTPException(status_code=500, detail="Failed to upload file to Cloudflare R2.")
+    return {"success": True, "file": file_meta}
+
+@app.post("/api/v1/files/upload_base64", dependencies=[Depends(verify_auth)])
+def api_upload_file_base64(req: FileUploadBase64Request, prefix: str = "files"):
+    """Uploads base64 encoded file payload to Cloudflare R2."""
+    if not storage_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
+    try:
+        data = base64.b64decode(req.content_base64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 payload: {e}")
+
+    file_meta = storage_service.upload_file(
+        data=data,
+        filename=req.filename,
+        mime_type=req.mime_type,
+        prefix=prefix
+    )
+    if not file_meta:
+        raise HTTPException(status_code=500, detail="Failed to upload base64 file to Cloudflare R2.")
+    return {"success": True, "file": file_meta}
+
+@app.post("/api/v1/files/url", dependencies=[Depends(verify_auth)])
+def api_get_file_url(req: PresignedUrlRequest):
+    """Generates a fresh time-limited presigned download URL."""
+    if not storage_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
+    url = storage_service.get_presigned_download_url(
+        key=req.key,
+        expires_in=req.expires_in,
+        filename=req.filename,
+        inline=req.inline
+    )
+    if not url:
+        raise HTTPException(status_code=404, detail=f"Could not generate download URL for key '{req.key}'")
+    return {"success": True, "key": req.key, "url": url, "expires_in": req.expires_in}
+
+@app.post("/api/v1/files/upload_url", dependencies=[Depends(verify_auth)])
+def api_get_file_upload_url(req: PresignedUploadUrlRequest):
+    """Generates a presigned PUT URL for client-side direct streaming upload."""
+    if not storage_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
+    upload_data = storage_service.get_presigned_upload_url(
+        filename=req.filename,
+        content_type=req.content_type,
+        expires_in=req.expires_in
+    )
+    if not upload_data:
+        raise HTTPException(status_code=500, detail="Failed to generate presigned upload URL.")
+    return {"success": True, **upload_data}
+
+@app.get("/api/v1/files", dependencies=[Depends(verify_auth)])
+def api_list_files(prefix: str = "", limit: int = 100):
+    """Lists files currently indexed in the Cloudflare R2 bucket."""
+    if not storage_service.is_enabled():
+        return {"enabled": False, "files": [], "message": "Cloudflare R2 storage is not configured."}
+    files = storage_service.list_files(prefix=prefix, limit=limit)
+    return {"enabled": True, "files": files, "count": len(files)}
+
+@app.delete("/api/v1/files/{key:path}", dependencies=[Depends(verify_auth)])
+def api_delete_file(key: str):
+    """Deletes an object directly from Cloudflare R2."""
+    if not storage_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
+    success = storage_service.delete_file(key)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Failed to delete file '{key}' from R2.")
+    return {"success": True, "key": key, "message": f"File {key} deleted successfully."}
 # Endpoints completed

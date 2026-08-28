@@ -1,4 +1,4 @@
-import { Memory, ProfileRule, Conversation, SearchResult, Stats } from './types';
+import { Memory, MemoryAttachment, ProfileRule, Conversation, SearchResult, Stats } from './types';
 
 const API_KEY_KEY = 'gigamind_master_key';
 
@@ -58,6 +58,10 @@ export async function addMemory(data: {
   category?: string;
   source_agent?: string;
   tags?: string[];
+  attachments?: MemoryAttachment[];
+  file_keys?: string[];
+  media_url?: string;
+  media_type?: string;
 }): Promise<{ success: boolean; memory?: Memory } | null> {
   try {
     const res = await fetch('/api/v1/add_memory', {
@@ -75,7 +79,7 @@ export async function addMemory(data: {
 
 export async function updateMemory(
   id: string,
-  data: { content?: string; category?: string; source_agent?: string; tags?: string[] }
+  data: { content?: string; category?: string; source_agent?: string; tags?: string[]; attachments?: MemoryAttachment[] }
 ): Promise<{ success: boolean; memory?: Memory } | null> {
   try {
     const res = await fetch(`/api/v1/memories/${id}`, {
@@ -227,5 +231,54 @@ export async function searchMemory(
   } catch (err) {
     console.error('searchMemory error:', err);
     return null;
+  }
+}
+
+export async function uploadFile(file: File, prefix: string = 'files'): Promise<{ success: boolean; file?: MemoryAttachment; error?: string }> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`/api/v1/files/upload?prefix=${encodeURIComponent(prefix)}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${getApiKey()}`,
+      },
+      body: formData,
+    });
+    if (!res.ok) {
+      const errJson = (await res.json().catch(() => ({}))) as { detail?: string };
+      return { success: false, error: errJson.detail || 'Upload failed' };
+    }
+    return await res.json();
+  } catch (err: unknown) {
+    console.error('uploadFile error:', err);
+    const message = err instanceof Error ? err.message : 'Network error';
+    return { success: false, error: message };
+  }
+}
+
+export async function fetchFiles(prefix: string = '', limit: number = 100): Promise<{ enabled: boolean; files: MemoryAttachment[] } | null> {
+  try {
+    const res = await fetch(`/api/v1/files?prefix=${encodeURIComponent(prefix)}&limit=${limit}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error('fetchFiles error:', err);
+    return null;
+  }
+}
+
+export async function deleteStorageFile(key: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/v1/files/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('deleteStorageFile error:', err);
+    return false;
   }
 }

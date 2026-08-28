@@ -7,7 +7,53 @@ from gigamind.db.database import engine, is_postgres, ProfileItem, MemoryItem, C
 from gigamind.services.embedding import generate_embedding, cosine_similarity
 from gigamind.services.chunking import chunk_text
 from gigamind.services.reranker import rerank_candidates
+from gigamind.services.storage import storage_service
 
+
+def _hydrate_attachments(attachments_raw: Any, media_url: Optional[str] = None, media_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Parse attachments_json and inject active presigned download URLs."""
+    items: List[Dict[str, Any]] = []
+    if isinstance(attachments_raw, str):
+        try:
+            items = json.loads(attachments_raw or "[]")
+        except Exception:
+            items = []
+    elif isinstance(attachments_raw, list):
+        items = list(attachments_raw)
+
+    # Legacy media_url fallback if attachments is empty
+    if not items and media_url:
+        items = [{
+            "key": media_url,
+            "filename": media_url.split("/")[-1] or "legacy_attachment",
+            "mime_type": media_type or "application/octet-stream",
+            "size_bytes": 0,
+            "url": media_url,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }]
+
+    hydrated = []
+    for att in items:
+        if not isinstance(att, dict):
+            continue
+        key = att.get("key", "")
+        filename = att.get("filename") or (key.split("/")[-1] if key else "attachment")
+        url = att.get("url", "")
+        # Generate fresh presigned download URL if storage is enabled and key is not an external HTTP URL
+        if key and storage_service.is_enabled() and not (url and url.startswith("http") and ("r2.cloudflarestorage.com" not in url)):
+            fresh_url = storage_service.get_presigned_download_url(key, filename=filename)
+            if fresh_url:
+                url = fresh_url
+
+        hydrated.append({
+            "key": key or "",
+            "filename": filename,
+            "mime_type": att.get("mime_type") or "application/octet-stream",
+            "size_bytes": att.get("size_bytes", 0),
+            "url": url or "",
+            "created_at": att.get("created_at") or datetime.now(timezone.utc).isoformat()
+        })
+    return hydrated
 def search_memory(
     query: str,
     category: Optional[str] = None,
@@ -34,7 +80,7 @@ def search_memory(
                 # Native pgvector SQL similarity search
                 vector_str = f"[{','.join(str(x) for x in query_vector)}]"
                 sql = """
-                SELECT id, content, category, source_agent, tags_json, parent_id, chunk_index, total_chunks,
+                SELECT id, content, category, media_type, media_url, source_agent, tags_json, attachments_json, parent_id, chunk_index, total_chunks,
                        1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
                 FROM memories
                 WHERE (:cat IS NULL OR category = :cat)
@@ -47,6 +93,11 @@ def search_memory(
                 rows = session.exec(text(sql), params=params).all()
 
                 for row in rows:
+                    att_raw = getattr(row, "attachments_json", "[]")
+                    m_url = getattr(row, "media_url", None)
+                    m_type = getattr(row, "media_type", None)
+                    hydrated_atts = _hydrate_attachments(att_raw, media_url=m_url, media_type=m_type)
+
                     c_dict = {
                         "id": row.id,
                         "source": "memory",
@@ -55,6 +106,7 @@ def search_memory(
                         "source_agent": row.source_agent or "user",
                         "score": float(row.vector_score or 0.0),
                         "tags": json.loads(row.tags_json or "[]"),
+                        "attachments": hydrated_atts,
                         "parent_id": row.parent_id,
                         "chunk_index": row.chunk_index,
                         "total_chunks": row.total_chunks
@@ -99,6 +151,7 @@ def search_memory(
                         "source_agent": getattr(mem, "source_agent", "user") or "user",
                         "score": round(score, 4),
                         "tags": json.loads(mem.tags_json or "[]"),
+                        "attachments": _hydrate_attachments(getattr(mem, "attachments_json", "[]"), media_url=mem.media_url, media_type=mem.media_type),
                         "parent_id": mem.parent_id,
                         "chunk_index": mem.chunk_index,
                         "total_chunks": mem.total_chunks
@@ -153,7 +206,8 @@ def search_memory(
             "vector_score": item.get("vector_score", item["score"]),
             "rerank_score": item.get("rerank_score", item["score"]),
             "parent_id": item.get("parent_id"),
-            "tags": item.get("tags", [])
+            "tags": item.get("tags", []),
+            "attachments": item.get("attachments", [])
         }
         if item.get("chunk_index") is not None:
             res_item["chunk_info"] = {
@@ -168,7 +222,11 @@ def add_memory(
     content: str,
     category: str = "general",
     source_agent: str = "user",
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None,
+    file_keys: Optional[List[str]] = None,
+    media_url: Optional[str] = None,
+    media_type: Optional[str] = None
 ) -> Dict[str, Any]:
     if tags is None:
         tags = []
@@ -176,6 +234,29 @@ def add_memory(
     now_str = datetime.now(timezone.utc).isoformat()
     parent_mem_id = f"mem_{uuid.uuid4().hex[:12]}"
 
+    resolved_attachments: List[Dict[str, Any]] = []
+    if attachments:
+        resolved_attachments.extend(attachments)
+    if file_keys:
+        for fk in file_keys:
+            if fk and isinstance(fk, str):
+                resolved_attachments.append({
+                    "key": fk,
+                    "filename": fk.split("/")[-1],
+                    "mime_type": "application/octet-stream",
+                    "size_bytes": 0,
+                    "created_at": now_str
+                })
+    if media_url and not resolved_attachments:
+        resolved_attachments.append({
+            "key": media_url,
+            "filename": media_url.split("/")[-1] or "attachment",
+            "mime_type": media_type or "application/octet-stream",
+            "size_bytes": 0,
+            "created_at": now_str
+        })
+
+    attachments_json_str = json.dumps(resolved_attachments)
     chunks = chunk_text(content, chunk_size=500, chunk_overlap=100, min_threshold=600)
 
     with Session(engine) as session:
@@ -186,9 +267,12 @@ def add_memory(
                 id=parent_mem_id,
                 content=content,
                 category=category,
+                media_type=media_type or "text",
+                media_url=media_url,
                 source_agent=source_agent or "user",
                 tags_json=json.dumps(tags),
                 embedding_json=json.dumps(embedding),
+                attachments_json=attachments_json_str,
                 parent_id=None,
                 chunk_index=None,
                 total_chunks=None,
@@ -211,6 +295,7 @@ def add_memory(
                 "category": category,
                 "source_agent": source_agent or "user",
                 "tags": tags,
+                "attachments": _hydrate_attachments(resolved_attachments),
                 "chunks_created": 1,
                 "created_at": now_str
             }
@@ -221,9 +306,12 @@ def add_memory(
             id=parent_mem_id,
             content=content,
             category=category,
+            media_type=media_type or "text",
+            media_url=media_url,
             source_agent=source_agent or "user",
             tags_json=json.dumps(tags),
             embedding_json="[]",
+            attachments_json=attachments_json_str,
             parent_id=None,
             chunk_index=None,
             total_chunks=len(chunks),
@@ -232,7 +320,7 @@ def add_memory(
         )
         session.add(parent_item)
 
-        # 2. Child Chunk Records
+        # 2. Child Chunk Records (Denormalize attachments_json to ensure search_memory preserves files)
         for chk in chunks:
             chk_id = f"{parent_mem_id}_chk_{chk['chunk_index']}"
             chk_embedding = generate_embedding(chk["content"])
@@ -240,9 +328,12 @@ def add_memory(
                 id=chk_id,
                 content=chk["content"],
                 category=category,
+                media_type=media_type or "text",
+                media_url=media_url,
                 source_agent=source_agent or "user",
                 tags_json=json.dumps(tags),
                 embedding_json=json.dumps(chk_embedding),
+                attachments_json=attachments_json_str,
                 parent_id=parent_mem_id,
                 chunk_index=chk["chunk_index"],
                 total_chunks=chk["total_chunks"],
@@ -270,9 +361,11 @@ def add_memory(
         "category": category,
         "source_agent": source_agent or "user",
         "tags": tags,
+        "attachments": _hydrate_attachments(resolved_attachments),
         "chunks_created": len(chunks),
         "created_at": now_str
     }
+
 
 def set_profile_rule(key: str, value: str, category: str = "general", source_agent: str = "user") -> Dict[str, Any]:
     prof_id = f"prof_{key.replace(' ', '_')}"
@@ -380,6 +473,7 @@ def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None,
                 "chunk_index": mem.chunk_index,
                 "total_chunks": mem.total_chunks,
                 "tags": json.loads(mem.tags_json or "[]"),
+                "attachments": _hydrate_attachments(getattr(mem, "attachments_json", "[]"), media_url=mem.media_url, media_type=mem.media_type),
                 "created_at": mem.created_at,
                 "last_accessed": mem.last_accessed
             })
@@ -395,23 +489,63 @@ def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None,
 
 def delete_memory(memory_id: str) -> bool:
     with Session(engine) as session:
-        item = session.exec(select(MemoryItem).where((MemoryItem.id == memory_id) | (MemoryItem.parent_id == memory_id))).first()
-        if not item:
-            return False
-        # Delete both item and any child chunks
         all_to_delete = session.exec(select(MemoryItem).where((MemoryItem.id == memory_id) | (MemoryItem.parent_id == memory_id))).all()
-        for i in all_to_delete:
-            session.delete(i)
+        if not all_to_delete:
+            return False
+
+        # Extract all referenced R2 storage keys to purge
+        keys_to_purge = set()
+        for item in all_to_delete:
+            raw_att = getattr(item, "attachments_json", "[]")
+            if raw_att:
+                try:
+                    parsed = json.loads(raw_att)
+                    for a in parsed:
+                        if isinstance(a, dict):
+                            k = a.get("key")
+                            if k and not k.startswith("http"):
+                                keys_to_purge.add(k)
+                except Exception:
+                    pass
+            session.delete(item)
         session.commit()
+
+        # Cascade delete from Cloudflare R2
+        if keys_to_purge and storage_service.is_enabled():
+            try:
+                storage_service.delete_files(list(keys_to_purge))
+            except Exception as e:
+                print(f"R2 cascading cleanup note: {e}")
+
         return True
 
 def reset_all_memories() -> int:
     with Session(engine) as session:
         all_mems = session.exec(select(MemoryItem)).all()
         count = len(all_mems)
+        keys_to_purge = set()
         for mem in all_mems:
+            raw_att = getattr(mem, "attachments_json", "[]")
+            if raw_att:
+                try:
+                    parsed = json.loads(raw_att)
+                    for a in parsed:
+                        if isinstance(a, dict):
+                            k = a.get("key")
+                            if k and not k.startswith("http"):
+                                keys_to_purge.add(k)
+                except Exception:
+                    pass
             session.delete(mem)
         session.commit()
+
+        # Cascade batch delete from Cloudflare R2
+        if keys_to_purge and storage_service.is_enabled():
+            try:
+                storage_service.delete_files(list(keys_to_purge))
+            except Exception as e:
+                print(f"R2 cascading purge note: {e}")
+
         return count
 
 def export_all_memories() -> List[Dict[str, Any]]:
@@ -421,16 +555,26 @@ def export_all_memories() -> List[Dict[str, Any]]:
             "id": m.id,
             "content": m.content,
             "category": m.category,
+            "media_type": m.media_type,
+            "media_url": m.media_url,
             "source_agent": getattr(m, "source_agent", "user") or "user",
             "parent_id": m.parent_id,
             "chunk_index": m.chunk_index,
             "total_chunks": m.total_chunks,
             "tags": json.loads(m.tags_json or "[]"),
+            "attachments": _hydrate_attachments(getattr(m, "attachments_json", "[]"), media_url=m.media_url, media_type=m.media_type),
             "created_at": m.created_at,
             "last_accessed": m.last_accessed
         } for m in mems]
 
-def update_memory(memory_id: str, content: Optional[str] = None, category: Optional[str] = None, source_agent: Optional[str] = None, tags: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+def update_memory(
+    memory_id: str,
+    content: Optional[str] = None,
+    category: Optional[str] = None,
+    source_agent: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None
+) -> Optional[Dict[str, Any]]:
     with Session(engine) as session:
         item = session.exec(select(MemoryItem).where(MemoryItem.id == memory_id)).first()
         if not item:
@@ -445,6 +589,12 @@ def update_memory(memory_id: str, content: Optional[str] = None, category: Optio
             item.source_agent = source_agent
         if tags is not None:
             item.tags_json = json.dumps(tags)
+        if attachments is not None:
+            item.attachments_json = json.dumps(attachments)
+            # Also update child chunks if this is a parent memory
+            child_chunks = session.exec(select(MemoryItem).where(MemoryItem.parent_id == memory_id)).all()
+            for chk in child_chunks:
+                chk.attachments_json = json.dumps(attachments)
 
         now_str = datetime.now(timezone.utc).isoformat()
         item.last_accessed = now_str
@@ -461,6 +611,7 @@ def update_memory(memory_id: str, content: Optional[str] = None, category: Optio
             "chunk_index": item.chunk_index,
             "total_chunks": item.total_chunks,
             "tags": json.loads(item.tags_json or "[]"),
+            "attachments": _hydrate_attachments(getattr(item, "attachments_json", "[]"), media_url=item.media_url, media_type=item.media_type),
             "created_at": item.created_at,
             "last_accessed": item.last_accessed
         }

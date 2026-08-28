@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { X, Save, Plus } from 'lucide-react';
-import { Memory } from '../../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Save, Plus, Paperclip, Loader2, Trash2, ExternalLink } from 'lucide-react';
+import { Memory, MemoryAttachment } from '../../types';
+import { uploadFile } from '../../api';
 
 interface MemoryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (data: { content: string; category: string; source_agent: string; tags: string[] }) => void;
+  onSave: (data: { content: string; category: string; source_agent: string; tags: string[]; attachments?: MemoryAttachment[] }) => void;
   initialMemory?: Memory | null;
 }
-
 export const MemoryModal: React.FC<MemoryModalProps> = ({
   isOpen,
   onClose,
@@ -19,20 +19,27 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
   const [category, setCategory] = useState('general');
   const [sourceAgent, setSourceAgent] = useState('user');
   const [tagsInput, setTagsInput] = useState('');
+  const [attachments, setAttachments] = useState<MemoryAttachment[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isExiting, setIsExiting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialMemory) {
       setContent(initialMemory.content || '');
       setCategory(initialMemory.category || 'general');
       setSourceAgent(initialMemory.source_agent || 'user');
-      setTagsInput(initialMemory.tags ? initialMemory.tags.join(', ') : '');
+      setTagsInput((initialMemory.tags || []).join(', '));
+      setAttachments(initialMemory.attachments || []);
     } else {
       setContent('');
       setCategory('general');
       setSourceAgent('user');
       setTagsInput('');
+      setAttachments([]);
     }
+    setUploadError(null);
   }, [initialMemory, isOpen]);
 
   // Handle ESC key press
@@ -56,6 +63,42 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
 
   if (!isOpen) return null;
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const newAttachments: MemoryAttachment[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const res = await uploadFile(file, 'files');
+        if (res.success && res.file) {
+          newAttachments.push(res.file);
+        } else {
+          setUploadError(res.error || `Failed to upload ${file.name}`);
+        }
+      }
+      if (newAttachments.length > 0) {
+        setAttachments((prev) => [...prev, ...newAttachments]);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setUploadError(msg);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleRemoveAttachment = (indexToRemove: number) => {
+    setAttachments((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
@@ -70,6 +113,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
       category: category.trim() || 'general',
       source_agent: sourceAgent.trim() || 'user',
       tags,
+      attachments,
     });
     handleAnimatedClose();
   };
@@ -158,6 +202,82 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
             />
           </div>
 
+          {/* R2 Multi-File Attachments Section */}
+          <div className="border border-[#262626] bg-[#121212] p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-[#c1c5d0] flex items-center gap-1.5">
+                <Paperclip className="w-3.5 h-3.5 text-[#ff6b00]" />
+                <span>R2 File Attachments ({attachments.length})</span>
+              </span>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                multiple
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="flex items-center gap-1 bg-[#1e1e1e] hover:bg-[#282828] text-white text-[11px] px-2.5 py-1 border border-[#333333] transition-colors disabled:opacity-50"
+              >
+                {isUploading ? <Loader2 className="w-3 h-3 animate-spin text-[#ff6b00]" /> : <Plus className="w-3 h-3 text-[#ff6b00]" />}
+                <span>{isUploading ? 'Uploading to R2...' : 'Attach Files'}</span>
+              </button>
+            </div>
+
+            {uploadError && (
+              <p className="text-[11px] text-red-400 bg-red-950/40 p-1.5 border border-red-900/50">
+                {uploadError}
+              </p>
+            )}
+
+            {attachments.length > 0 ? (
+              <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                {attachments.map((att, idx) => (
+                  <div
+                    key={att.key || idx}
+                    className="flex items-center justify-between bg-[#181818] border border-[#262626] px-2.5 py-1.5 text-[11px]"
+                  >
+                    <div className="flex items-center gap-2 truncate pr-2">
+                      <span className="text-white font-mono truncate">{att.filename}</span>
+                      {att.size_bytes ? (
+                        <span className="text-[#888888] font-mono text-[10px]">
+                          ({(att.size_bytes / 1024).toFixed(1)} KB)
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {att.url && (
+                        <a
+                          href={att.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#8a8f9e] hover:text-[#ff6b00] transition-colors"
+                          title="Open / Download"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(idx)}
+                        className="text-[#8a8f9e] hover:text-red-400 transition-colors"
+                        title="Remove file"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-[#737373] italic">
+                No files attached. Upload PDFs, research documents, or datasets to store in Cloudflare R2.
+              </p>
+            )}
+          </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-[#262626]">
             <button
               type="button"

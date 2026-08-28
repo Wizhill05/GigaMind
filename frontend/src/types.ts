@@ -1,5 +1,14 @@
 export type SourceAgent = 'claude' | 'gpt' | 'gemini' | 'user' | 'system' | 'cursor' | 'windsurf' | string;
 
+export interface MemoryAttachment {
+  key: string;
+  filename: string;
+  mime_type?: string;
+  size_bytes?: number;
+  url?: string;
+  created_at?: string;
+}
+
 export interface Memory {
   id: string;
   content: string;
@@ -7,6 +16,7 @@ export interface Memory {
   source_agent: SourceAgent;
   media_type?: string;
   media_url?: string;
+  attachments?: MemoryAttachment[];
   tags: string[];
   created_at: string;
   last_accessed?: string;
@@ -43,7 +53,10 @@ export interface SearchResult {
   category: string;
   source_agent: SourceAgent;
   score: number;
+  vector_score?: number;
+  rerank_score?: number;
   tags?: string[];
+  attachments?: MemoryAttachment[];
 }
 
 export interface Stats {
