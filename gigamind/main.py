@@ -49,11 +49,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+frontend_dist_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+assets_dir = os.path.join(frontend_dist_dir, "assets")
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
+
 API_KEY = os.getenv("GIGAMIND_API_KEY", "gigamind-secret-key-change-me")
 
 # Active SSE Session Queues Map: session_id -> asyncio.Queue
 sse_queues: Dict[str, asyncio.Queue] = {}
-
 # Auth Middleware Helper
 def verify_auth(authorization: Optional[str] = Header(None), api_key: Optional[str] = None):
     token = ""
@@ -97,19 +101,33 @@ class UpdateMemoryRequest(BaseModel):
 class ResetMemoriesRequest(BaseModel):
     password: str = Field(..., description="Master API Key / Password to confirm hard memory purge")
 
-# Root Healthcheck
+# Dashboard UI Helper
+def dashboard_ui():
+    index_file = os.path.join(frontend_dist_dir, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return HTMLResponse(content="<h1>Dashboard Build Not Found</h1><p>Run `npm run build` inside frontend/ directory.</p>", status_code=404)
+
+@app.get("/dashboard")
+def get_dashboard():
+    return dashboard_ui()
+
+# Root Route (serves React Dashboard UI for web browsers, JSON for API clients)
 @app.get("/")
-def read_root():
+def read_root(request: Request):
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept:
+        return dashboard_ui()
     return {
         "status": "online",
         "name": "GigaMind Personal Memory Engine",
         "runtime": "Python (FastAPI + FastMCP)",
+        "dashboard_ui": "/dashboard",
         "mcp_endpoint": "/sse",
         "openapi_spec": "/openapi.json",
         "oauth_authorize": "/oauth/authorize",
         "oauth_token": "/oauth/token"
     }
-
 # ==========================================
 # OAUTH 2.0 DISCOVERY & ENDPOINTS
 # ==========================================
@@ -468,16 +486,4 @@ def api_delete_profile_rule(id: str):
 def api_get_stats():
     return get_stats()
 
-# Mount static assets for React dashboard frontend
-frontend_dist_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
-assets_dir = os.path.join(frontend_dist_dir, "assets")
-if os.path.exists(assets_dir):
-    app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
-
-@app.get("/dashboard")
-def dashboard_ui():
-    index_file = os.path.join(frontend_dist_dir, "index.html")
-    if os.path.exists(index_file):
-        return FileResponse(index_file)
-    return HTMLResponse(content="<h1>Dashboard Build Not Found</h1><p>Run `npm run build` inside frontend/ directory.</p>", status_code=404)
-
+# Endpoints completed
