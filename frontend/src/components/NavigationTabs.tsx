@@ -58,7 +58,7 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({ activeTab, setAc
   ];
 
   return (
-    <nav className="bg-[#15171e] border-b border-[#272935] px-4 md:px-8 flex overflow-x-auto scrollbar-none">
+    <nav className="bg-[#141414] border-b border-[#262626] px-4 md:px-8 flex overflow-x-auto scrollbar-none select-none">
       <div className="flex space-x-1 py-1">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -68,20 +68,20 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({ activeTab, setAc
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-3 text-xs font-mono font-semibold uppercase tracking-wider transition-all border-b-2 whitespace-nowrap rounded-none ${
+              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-mono font-semibold uppercase tracking-wider transition-all border-b-2 whitespace-nowrap rounded-none ${
                 isActive
-                  ? 'border-[#00f2fe] text-[#00f2fe] bg-[#0b0c10]/60'
-                  : 'border-transparent text-[#8b8f9a] hover:text-[#c1c5d0] hover:bg-[#1c1f29]'
+                  ? 'border-[#ff6b00] text-white bg-[#1c1c1c]'
+                  : 'border-transparent text-[#8a8f9e] hover:text-white hover:bg-[#1a1a1a]'
               }`}
             >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-[#00f2fe]' : 'text-[#8b8f9a]'}`} />
+              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[#ff6b00]' : 'text-[#8a8f9e]'}`} />
               <span>{tab.label}</span>
               {tab.badge !== undefined && (
                 <span
-                  className={`px-1.5 py-0.5 text-[10px] font-mono font-bold rounded-none ${
+                  className={`px-1.5 py-0.2 text-[10px] font-mono font-bold rounded-none ${
                     isActive
-                      ? 'bg-[#00f2fe]/20 text-[#00f2fe] border border-[#00f2fe]/30'
-                      : 'bg-[#272935] text-[#8b8f9a]'
+                      ? 'bg-[#ff6b00]/20 text-[#ff6b00] border border-[#ff6b00]/30'
+                      : 'bg-[#262626] text-[#8a8f9e]'
                   }`}
                 >
                   {tab.badge}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, RefreshCw, Search, ExternalLink } from 'lucide-react';
+import { Plus, RefreshCw, Search, ExternalLink, Upload } from 'lucide-react';
 import { PixelKey } from './ui/PixelIcons';
-import { getApiKey, setApiKey } from '../api';
+import { getApiKey, setApiKey, uploadFile } from '../api';
 import { useToast } from './ui/Toast';
 
 interface HeaderProps {
@@ -22,6 +22,26 @@ export const Header: React.FC<HeaderProps> = ({
   const [isExiting, setIsExiting] = useState(false);
 
   const { toast } = useToast();
+  const [isHeaderUploading, setIsHeaderUploading] = useState(false);
+
+  const handleHeaderFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    setIsHeaderUploading(true);
+    for (let i = 0; i < fileList.length; i++) {
+      const f = fileList[i];
+      toast(`Uploading ${f.name}...`, 'info');
+      const res = await uploadFile(f, 'files');
+      if (res.success) {
+        toast(`Uploaded ${f.name} & queued vector indexing`, 'success');
+      } else {
+        toast(`Failed to upload ${f.name}: ${res.error || 'Unknown error'}`, 'error');
+      }
+    }
+    setIsHeaderUploading(false);
+    e.target.value = '';
+    onRefresh();
+  };
 
   // Handle ESC key press
   useEffect(() => {
@@ -103,6 +123,19 @@ export const Header: React.FC<HeaderProps> = ({
           <Plus className="w-3.5 h-3.5" />
           <span className="leading-none text-xs">New Memory</span>
         </button>
+
+        {/* + UPLOAD FILE BUTTON */}
+        <label className="h-8 bg-[#ff6b00] hover:bg-[#e05e00] text-white px-3 rounded-none flex items-center gap-1.5 font-medium transition-all btn-press cursor-pointer shadow-sm shadow-[#ff6b00]/20">
+          <Upload className={`w-3.5 h-3.5 ${isHeaderUploading ? 'animate-spin' : ''}`} />
+          <span className="leading-none text-xs">{isHeaderUploading ? 'Uploading...' : 'Upload File'}</span>
+          <input
+            type="file"
+            multiple
+            className="hidden"
+            onChange={handleHeaderFileUpload}
+            disabled={isHeaderUploading}
+          />
+        </label>
 
         {/* MASTER KEY AUTH BUTTON - UNIFORM h-8 HEIGHT */}
         <button

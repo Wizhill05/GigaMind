@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, List
 from dotenv import load_dotenv
@@ -180,6 +181,47 @@ def init_db():
             pass
 
     print(f"✅ GigaMind database initialized on {'Neon PostgreSQL (Lakebase Postgres)' if is_postgres else 'SQLite'}.")
+
+    # Sync all memory attachments into storage_files repository
+    try:
+        with Session(engine) as session:
+            mems = session.exec(select(MemoryItem)).all()
+            for m in mems:
+                att_list = []
+                if getattr(m, "attachments_json", None):
+                    try:
+                        att_list = json.loads(m.attachments_json or "[]")
+                    except Exception:
+                        att_list = []
+                if getattr(m, "media_url", None) and not att_list:
+                    att_list = [{
+                        "key": m.media_url,
+                        "filename": m.media_url.split("/")[-1] or "attachment",
+                        "mime_type": getattr(m, "media_type", "application/octet-stream") or "application/octet-stream"
+                    }]
+                for att in att_list:
+                    f_key = att.get("key")
+                    if f_key:
+                        existing = session.exec(select(StorageFileItem).where(StorageFileItem.key == f_key)).first()
+                        if not existing:
+                            now_str = datetime.now(timezone.utc).isoformat()
+                            f_item = StorageFileItem(
+                                id=f"file_{uuid.uuid4().hex[:12]}",
+                                key=f_key,
+                                filename=att.get("filename") or f_key.split("/")[-1],
+                                mime_type=att.get("mime_type") or "application/octet-stream",
+                                size_bytes=att.get("size_bytes", 0),
+                                source_agent=getattr(m, "source_agent", "user") or "user",
+                                extracted_text_length=0,
+                                total_chunks=0,
+                                indexing_status="completed",
+                                created_at=getattr(m, "created_at", None) or now_str,
+                                updated_at=now_str
+                            )
+                            session.add(f_item)
+            session.commit()
+    except Exception as sync_err:
+        print(f"Memory attachments sync note: {sync_err}")
 
 def get_session():
     with Session(engine) as session:

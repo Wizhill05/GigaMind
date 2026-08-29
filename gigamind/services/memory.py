@@ -8,7 +8,7 @@ from gigamind.services.embedding import generate_embedding, cosine_similarity
 from gigamind.services.chunking import chunk_text
 from gigamind.services.reranker import rerank_candidates
 from gigamind.services.storage import storage_service
-from gigamind.services.indexing import delete_storage_file_index, delete_all_storage_file_indexes
+from gigamind.services.indexing import delete_storage_file_index, delete_all_storage_file_indexes, register_storage_file
 
 
 def _hydrate_attachments(attachments_raw: Any, media_url: Optional[str] = None, media_type: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -365,6 +365,21 @@ def add_memory(
             "created_at": now_str
         })
 
+
+    # Automatically register all attached files in the Storage Files repository
+    for att in resolved_attachments:
+        f_key = att.get("key")
+        if f_key:
+            try:
+                register_storage_file(
+                    file_key=f_key,
+                    filename=att.get("filename") or f_key.split("/")[-1],
+                    mime_type=att.get("mime_type"),
+                    size_bytes=att.get("size_bytes", 0),
+                    source_agent=source_agent or "user"
+                )
+            except Exception as reg_err:
+                print(f"Attachment storage registration note: {reg_err}")
     attachments_json_str = json.dumps(resolved_attachments)
     chunks = chunk_text(content, chunk_size=500, chunk_overlap=100, min_threshold=600)
 

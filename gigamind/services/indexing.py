@@ -269,3 +269,44 @@ def get_file_chunks(key: str) -> List[Dict[str, Any]]:
             }
             for c in chunks
         ]
+
+def register_storage_file(
+    file_key: str,
+    filename: str,
+    mime_type: Optional[str] = None,
+    size_bytes: int = 0,
+    source_agent: str = "user"
+) -> StorageFileItem:
+    """Inserts or updates a StorageFileItem immediately so the file is recorded in the Files repository."""
+    now_str = datetime.now(timezone.utc).isoformat()
+    with Session(engine) as session:
+        existing = session.exec(select(StorageFileItem).where(StorageFileItem.key == file_key)).first()
+        if not existing:
+            f_item = StorageFileItem(
+                id=f"file_{uuid.uuid4().hex[:12]}",
+                key=file_key,
+                filename=filename,
+                mime_type=mime_type or "application/octet-stream",
+                size_bytes=size_bytes,
+                source_agent=source_agent or "user",
+                extracted_text_length=0,
+                total_chunks=0,
+                indexing_status="completed" if not storage_service.is_enabled() else "pending",
+                created_at=now_str,
+                updated_at=now_str
+            )
+            session.add(f_item)
+            session.commit()
+            session.refresh(f_item)
+            return f_item
+        else:
+            existing.filename = filename
+            if mime_type:
+                existing.mime_type = mime_type
+            if size_bytes:
+                existing.size_bytes = size_bytes
+            existing.updated_at = now_str
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+            return existing

@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from gigamind.db.database import init_db
 from gigamind.services.storage import storage_service
-from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files, get_file_chunks
+from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files, get_file_chunks, register_storage_file
 from gigamind.services.memory import (
     search_memory,
     add_memory,
@@ -912,6 +912,15 @@ async def api_upload_file(background_tasks: BackgroundTasks, file: UploadFile = 
     if not file_meta:
         raise HTTPException(status_code=500, detail="Failed to upload file to Cloudflare R2.")
 
+
+    # Immediately register in database so the file is visible in the dashboard table
+    register_storage_file(
+        file_key=file_meta["key"],
+        filename=file_meta["filename"],
+        mime_type=file_meta.get("mime_type"),
+        size_bytes=len(file_bytes),
+        source_agent="user"
+    )
     # Enqueue background text extraction and vector indexing
     background_tasks.add_task(
         index_file_content,
@@ -942,6 +951,15 @@ def api_upload_file_base64(req: FileUploadBase64Request, background_tasks: Backg
     )
     if not file_meta:
         raise HTTPException(status_code=500, detail="Failed to upload base64 file to Cloudflare R2.")
+
+    # Immediately register in database so the file is visible in the dashboard table
+    register_storage_file(
+        file_key=file_meta["key"],
+        filename=file_meta["filename"],
+        mime_type=file_meta.get("mime_type"),
+        size_bytes=len(data),
+        source_agent="user"
+    )
 
     background_tasks.add_task(
         index_file_content,
