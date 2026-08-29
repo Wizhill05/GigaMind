@@ -1,8 +1,8 @@
 import io
 import os
+import base64
 import mimetypes
 from typing import Optional, Dict, Any, List
-
 try:
     import pypdf
     PYPDF_AVAILABLE = True
@@ -20,8 +20,11 @@ TEXT_EXTENSIONS = {
     ".bat", ".cmd", ".ps1", ".r", ".lua", ".swift", ".dart", ".dockerfile"
 }
 
+IMAGE_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"
+}
+
 BINARY_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg",
     ".mp3", ".wav", ".ogg", ".mp4", ".mov", ".avi", ".mkv", ".zip",
     ".tar", ".gz", ".7z", ".rar", ".exe", ".bin", ".iso", ".dll", ".so"
 }
@@ -111,8 +114,26 @@ def extract_text_from_file(
                 "error": f"Failed to parse PDF: {e}"
             }
 
-    # 2. Binary / Media Bypass (Images, Audio, Archives)
-    if ext in BINARY_EXTENSIONS or any(b in mime_type for b in ["image/", "audio/", "video/", "application/zip", "application/octet-stream"]) and ext not in TEXT_EXTENSIONS:
+    # 2. Multimodal Image Parsing (PNG, JPG, WEBP, GIF, BMP)
+    if ext in IMAGE_EXTENSIONS or (mime_type and mime_type.startswith("image/")):
+        try:
+            img_b64 = base64.b64encode(data).decode("utf-8")
+            clean_name = filename.replace("_", " ").replace("-", " ")
+            return {
+                "supported": True,
+                "format": "image",
+                "text": f"Image artifact: {clean_name}",
+                "image_base64": img_b64,
+                "mime_type": mime_type or "image/png",
+                "pages": [{"page_number": 1, "text": f"Image artifact: {clean_name}", "image_base64": img_b64}],
+                "char_count": len(clean_name),
+                "truncated": False
+            }
+        except Exception as img_err:
+            print(f"Image base64 encoding note: {img_err}")
+
+    # 3. Binary / Media Bypass (Audio, Video, Archives, Executables)
+    if ext in BINARY_EXTENSIONS or any(b in mime_type for b in ["audio/", "video/", "application/zip", "application/octet-stream"]) and ext not in TEXT_EXTENSIONS:
         return {
             "supported": False,
             "format": "binary",

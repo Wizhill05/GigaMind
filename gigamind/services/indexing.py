@@ -69,7 +69,13 @@ def index_file_content(
     raw_chunks: List[Dict[str, Any]] = []
 
     pages = parsed.get("pages", [])
-    if pages and len(pages) > 1:
+    if parsed.get("format") == "image":
+        raw_chunks.append({
+            "content": parsed["text"],
+            "page_number": 1,
+            "image_base64": parsed.get("image_base64")
+        })
+    elif pages and len(pages) > 1:
         # Multi-page document (e.g. PDF): preserve page-level semantic cohesion
         for p in pages:
             p_num = p["page_number"]
@@ -103,9 +109,12 @@ def index_file_content(
 
     for idx, rc in enumerate(raw_chunks):
         chk_id = f"{file_id}_chk_{idx}"
-        emb = generate_embedding(rc["content"])
+        emb = generate_embedding(
+            text=rc["content"],
+            image_base64=rc.get("image_base64"),
+            mime_type=mime_type or "image/png"
+        )
         chunk_embeddings.append(emb)
-
         chunk_item = StorageChunkItem(
             id=chk_id,
             file_id=file_id,

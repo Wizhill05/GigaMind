@@ -5,21 +5,24 @@ import urllib.request
 import json
 from typing import List, Optional
 
-DEFAULT_DIM = 768
+DEFAULT_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
 
 def _hash_token(token: str) -> int:
     return int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16)
 
 def generate_embedding(text: str, image_base64: Optional[str] = None, mime_type: str = "image/png") -> List[float]:
     """
-    Generate Vector Embedding using Google Gemini Embedding 2 (models/gemini-embedding-2).
-    Supports Multimodal input (text, code, images, documents).
+    Generate Multimodal Vector Embedding using Google Gemini Embedding 2 (models/gemini-embedding-2).
+    Supports Multimodal inputs (text, documents, code, images, architecture diagrams).
     """
     # 1. Google Gemini Embedding 2 API (models/gemini-embedding-2)
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if gemini_key:
-        # Try gemini-embedding-2 model endpoint first
-        gemini_models = ["models/gemini-embedding-2", "models/text-embedding-004"]
+        gemini_models = [
+            "models/gemini-embedding-2",
+            "models/gemini-embedding-2-preview",
+            "models/gemini-embedding-001"
+        ]
 
         for model_name in gemini_models:
             try:
@@ -31,26 +34,28 @@ def generate_embedding(text: str, image_base64: Optional[str] = None, mime_type:
                 if image_base64:
                     parts.append({
                         "inline_data": {
-                            "mime_type": mime_type,
+                            "mime_type": mime_type or "image/png",
                             "data": image_base64
                         }
                     })
 
+                payload = {
+                    "model": model_name,
+                    "content": {"parts": parts},
+                    "output_dimensionality": DEFAULT_DIM
+                }
+
                 req = urllib.request.Request(
                     url,
-                    data=json.dumps({
-                        "model": model_name,
-                        "content": {"parts": parts}
-                    }).encode("utf-8"),
+                    data=json.dumps(payload).encode("utf-8"),
                     headers={"Content-Type": "application/json"}
                 )
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     values = data["embedding"]["values"]
                     return [float(x) for x in values[:DEFAULT_DIM]]
             except Exception as e:
-                print(f"Gemini API model {model_name} note: {e}")
-
+                print(f"Gemini Embedding 2 model {model_name} note: {e}")
     # 2. Voyage AI (voyage-3-lite)
     voyage_key = os.getenv("VOYAGE_API_KEY")
     if voyage_key and text:
