@@ -37,30 +37,32 @@ def generate_embedding(
                 parts = []
                 if text:
                     parts.append({"text": text})
-                if inline_bytes:
-                    b64_data = base64.b64encode(inline_bytes).decode("utf-8")
-                    parts.append({
-                        "inline_data": {
-                            "mime_type": mime_type or "application/pdf",
-                            "data": b64_data
-                        }
-                    })
-                elif image_base64:
-                    parts.append({
-                        "inline_data": {
-                            "mime_type": mime_type or "image/png",
-                            "data": image_base64
-                        }
-                    })
+                if model_name != "models/text-embedding-004":
+                    if inline_bytes:
+                        b64_data = base64.b64encode(inline_bytes).decode("utf-8")
+                        parts.append({
+                            "inline_data": {
+                                "mime_type": mime_type or "application/pdf",
+                                "data": b64_data
+                            }
+                        })
+                    elif image_base64:
+                        parts.append({
+                            "inline_data": {
+                                "mime_type": mime_type or "image/png",
+                                "data": image_base64
+                            }
+                        })
 
                 if not parts:
-                    parts.append({"text": ""})
+                    parts.append({"text": text or "generic payload"})
 
                 payload = {
                     "model": model_name,
-                    "content": {"parts": parts},
-                    "output_dimensionality": DEFAULT_DIM
+                    "content": {"parts": parts}
                 }
+                if model_name != "models/text-embedding-004" and DEFAULT_DIM:
+                    payload["output_dimensionality"] = DEFAULT_DIM
 
                 req = urllib.request.Request(
                     url,

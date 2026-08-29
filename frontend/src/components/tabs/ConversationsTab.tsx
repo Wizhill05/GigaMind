@@ -12,11 +12,13 @@ import {
   AlertCircle,
   X,
   Terminal,
-  FolderInput
+  FolderInput,
+  Search,
+  Sparkles
 } from 'lucide-react';
 import { PixelTerminal } from '../ui/PixelIcons';
 import { Conversation } from '../../types';
-import { fetchConversations, importConversationsFile, importConversationsPath } from '../../api';
+import { fetchConversations, importConversationsFile, importConversationsPath, searchConversations } from '../../api';
 import { AgentBadge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 
@@ -31,6 +33,11 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   const [totalCount, setTotalCount] = useState(0);
   const [platformFilter, setPlatformFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
+
+  // Semantic Vector Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
 
   // Import Chat History State
   const [showImportCard, setShowImportCard] = useState(false);
@@ -51,8 +58,23 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   };
 
   useEffect(() => {
-    loadConversations();
-  }, [page, platformFilter, sourceAgentFilter]);
+    if (searchResults === null) {
+      loadConversations();
+    }
+  }, [page, platformFilter, sourceAgentFilter, searchResults]);
+
+  // Handle semantic transcript search
+  const handleTranscriptSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+    setIsSearching(true);
+    const res = await searchConversations(searchQuery.trim(), platformFilter || undefined, sourceAgentFilter || undefined, 10);
+    setSearchResults(res || []);
+    setIsSearching(false);
+  };
 
   // Handle local path import
   const handleImportFromPath = async () => {
@@ -129,7 +151,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
 
         <div className="flex items-center gap-2.5">
           <button
-            onClick={loadConversations}
+            onClick={() => { setSearchResults(null); setSearchQuery(''); loadConversations(); }}
             className="px-3 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-white border border-[#333333] transition-colors flex items-center gap-1.5 font-mono text-[11px]"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -251,6 +273,46 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
         </div>
       )}
 
+      {/* SEMANTIC TRANSCRIPTS VECTOR SEARCH BAR */}
+      <div className="bg-[#141414] border border-[#262626] p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-white font-mono text-xs font-semibold">
+            <Sparkles className="w-3.5 h-3.5 text-[#ff6b00]" />
+            <span>Semantic Transcript Vector Search</span>
+          </div>
+        </div>
+
+        <form onSubmit={handleTranscriptSearch} className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-[#8a8f9e] absolute left-3 top-2.5" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search concepts across all conversation sessions (e.g. 'Laptop for Blender', 'Body temperature recovery', 'FastAPI OAuth')..."
+              className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-white placeholder-[#8a8f9e] outline-none font-sans text-xs"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isSearching}
+            className="px-4 py-2 bg-[#ff6b00] hover:bg-[#e05e00] text-white font-medium transition-colors flex items-center gap-1.5 font-sans text-xs disabled:opacity-50"
+          >
+            {isSearching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+            <span>Search Transcripts</span>
+          </button>
+          {searchResults !== null && (
+            <button
+              type="button"
+              onClick={() => { setSearchResults(null); setSearchQuery(''); }}
+              className="px-3 py-2 bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border border-[#333333] transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </form>
+      </div>
+
       {/* RENDER SERVICE STACK CARD */}
       <div className="bg-[#141414] border border-[#262626] rounded-none overflow-hidden space-y-0">
         {/* LOG FILTER HEADER */}
@@ -259,7 +321,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
             <PixelTerminal className="w-4 h-4 text-[#ff6b00]" />
             <span className="font-semibold text-white">Application Transcript Logs</span>
             <span className="px-1.5 py-0.5 bg-[#262626] text-[#8a8f9e] font-mono text-[10px]">
-              {totalCount} total
+              {searchResults !== null ? `${searchResults.length} matching search result(s)` : `${totalCount} total`}
             </span>
           </div>
 
@@ -301,17 +363,19 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
         </div>
 
         {/* LOG ROWS */}
-        {conversations.length === 0 ? (
+        {(searchResults !== null ? searchResults : conversations).length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e] space-y-3">
             <MessageSquare className="w-8 h-8 mx-auto text-[#444444]" />
             <p className="text-white font-medium">No chat transcript logs found</p>
             <p className="text-xs max-w-md mx-auto">
-              Click &quot;Import Chat History&quot; above to ingest your Claude or ChatGPT export files directly into GigaMind.
+              {searchResults !== null
+                ? 'No conversation transcripts matched your vector search query.'
+                : 'Click "Import Chat History" above to ingest your Claude or ChatGPT export files directly into GigaMind.'}
             </p>
           </div>
         ) : (
           <div className="divide-y divide-[#202020]">
-            {conversations.map((conv) => (
+            {(searchResults !== null ? searchResults : conversations).map((conv) => (
               <div
                 key={conv.id}
                 onClick={() => onOpenTranscript(conv)}
@@ -331,6 +395,11 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                         {conv.platform}
                       </span>
                       <AgentBadge agent={conv.source_agent} />
+                      {conv.score !== undefined && (
+                        <span className="text-[10px] font-mono bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 px-1.5 py-0.2">
+                          {(conv.score * 100).toFixed(1)}% match
+                        </span>
+                      )}
                     </div>
 
                     <p className="text-[#8a8f9e] text-xs line-clamp-1 break-words font-sans">
@@ -341,7 +410,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
 
                 <div className="flex items-center gap-3 flex-shrink-0">
                   <span className="text-[11px] font-mono text-[#8a8f9e]">
-                    {conv.messages ? conv.messages.length : 0} messages
+                    {conv.messages ? conv.messages.length : (conv.messages_count || 0)} messages
                   </span>
 
                   <button
@@ -361,25 +430,27 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
         )}
 
         {/* PAGINATION FOOTER */}
-        <div className="p-4 border-t border-[#262626] bg-[#161616] flex justify-between items-center text-xs text-[#8a8f9e]">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="flex items-center gap-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed font-mono text-[11px]"
-          >
-            <ChevronLeft className="w-4 h-4" /> Previous
-          </button>
+        {searchResults === null && (
+          <div className="p-4 border-t border-[#262626] bg-[#161616] flex justify-between items-center text-xs text-[#8a8f9e]">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="flex items-center gap-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed font-mono text-[11px]"
+            >
+              <ChevronLeft className="w-4 h-4" /> Previous
+            </button>
 
-          <span className="font-mono text-[11px]">Page {page} of {totalPages}</span>
+            <span className="font-mono text-[11px]">Page {page} of {totalPages}</span>
 
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="flex items-center gap-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed font-mono text-[11px]"
-          >
-            Next <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="flex items-center gap-1 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed font-mono text-[11px]"
+            >
+              Next <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -25,7 +25,9 @@ from gigamind.services.memory import (
     get_stats,
     reset_all_memories,
     export_all_memories,
-    import_conversations_data
+    import_conversations_data,
+    search_conversations,
+    backfill_conversation_vectors
 )
 from gigamind.services.oauth import (
     create_authorization_code,
@@ -154,6 +156,12 @@ class ImportConversationsPathRequest(BaseModel):
     file_path: str = Field(..., description="Local path to conversations.json")
     platform: Optional[str] = Field(None, description="Optional platform override (claude, chatgpt)")
 
+
+class SearchConversationsRequest(BaseModel):
+    query: str = Field(..., description="Query to search inside chat transcripts")
+    platform: Optional[str] = Field(None, description="Optional platform filter: claude | chatgpt | gemini")
+    source_agent: Optional[str] = Field(None, description="Optional source agent filter")
+    limit: int = Field(5, description="Maximum results to return")
 def _format_search_results_for_agent(results: List[Dict[str, Any]], query: Optional[str], scope: str) -> str:
     query_label = f"'{query}'" if query else "visual multimodal query"
     if not results:
@@ -444,6 +452,19 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
                 }
             },
             {
+                "name": "search_chat_transcripts",
+                "description": "Semantic vector search specifically across past conversation transcripts, chat history logs, and prompt sessions from Claude, ChatGPT, and AI agent platforms.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query or topic to find inside past chat transcripts"},
+                        "platform": {"type": "string", "description": "Optional platform filter (claude, chatgpt, gemini)"},
+                        "limit": {"type": "integer", "default": 5, "description": "Max matching conversation transcripts to return"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
                 "name": "get_user_profile",
                 "inputSchema": {
                     "type": "object",
@@ -621,6 +642,31 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
                 }
             })
             return res
+        if name in ("search_chat_transcripts", "search_conversations"):
+            query = args.get("query", "")
+            platform = args.get("platform")
+            results = search_conversations(
+                query=query,
+                platform=platform,
+                source_agent=args.get("source_agent"),
+                limit=args.get("limit", 5)
+            )
+            lines = [f"Found {len(results)} matching conversation transcript(s) for query: '{query}':\n"]
+            for idx, c in enumerate(results, 1):
+                lines.append(f"{idx}. **[{c.get('platform', 'chat').upper()}] {c.get('title', 'Conversation')}** (Score: {c.get('score', 0):.2f}):")
+                lines.append(f"   Summary: {c.get('summary', '')}")
+                lines.append(f"   Date: {c.get('created_at', '')[:10]} | Messages: {c.get('messages_count', len(c.get('messages', [])))}\n")
+            formatted_text = "\n".join(lines)
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": formatted_text}],
+                "structured": {
+                    "query": query,
+                    "count": len(results),
+                    "results": results
+                }
+            })
+            return res
+
         if name == "get_user_profile":
             rules = get_profile_rules(category=args.get("category"), source_agent=args.get("source_agent"))
             res = await send_rpc_response(result={
@@ -965,6 +1011,29 @@ def api_import_conversations_path(req: ImportConversationsPathRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to import from path: {e}")
 
+
+@app.post("/api/v1/conversations/search", dependencies=[Depends(verify_auth)])
+@app.post("/api/v1/search_conversations", dependencies=[Depends(verify_auth)])
+def api_search_conversations(req: SearchConversationsRequest):
+    """Semantic vector search across chat conversation sessions and transcripts."""
+    results = search_conversations(
+        query=req.query,
+        platform=req.platform,
+        source_agent=req.source_agent,
+        limit=req.limit
+    )
+    return {
+        "query": req.query,
+        "platform": req.platform,
+        "count": len(results),
+        "results": results
+    }
+
+@app.post("/api/v1/conversations/backfill_vectors", dependencies=[Depends(verify_auth)])
+def api_backfill_conversation_vectors(background_tasks: BackgroundTasks):
+    """Asynchronously computes and backfills vector embeddings for all chat logs."""
+    background_tasks.add_task(backfill_conversation_vectors)
+    return {"success": True, "message": "Backfill vector indexing started in background."}
 @app.get("/api/v1/stats", dependencies=[Depends(verify_auth)])
 def api_get_stats():
     return get_stats()

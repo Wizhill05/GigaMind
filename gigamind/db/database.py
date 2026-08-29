@@ -167,6 +167,11 @@ def init_db():
                 except Exception as sf_idx_err:
                     print(f"storage_files HNSW index note: {sf_idx_err}")
                 conn.execute(text("ALTER TABLE storage_chunks ADD COLUMN IF NOT EXISTS is_visual_anchor BOOLEAN DEFAULT FALSE;"))
+                conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS embedding_vector vector(768);"))
+                try:
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS conversations_embedding_hnsw_idx ON conversations USING hnsw (embedding_vector vector_cosine_ops) WITH (m = 16, ef_construction = 64);"))
+                except Exception as conv_idx_err:
+                    print(f"conversations HNSW index note: {conv_idx_err}")
                 conn.commit()
         except Exception as e:
             print(f"pgvector/column migration note: {e}")

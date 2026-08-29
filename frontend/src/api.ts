@@ -213,6 +213,27 @@ export async function fetchConversations(
   }
 }
 
+export async function searchConversations(
+  query: string,
+  platform?: string,
+  sourceAgent?: string,
+  limit: number = 10
+): Promise<any[] | null> {
+  try {
+    const res = await fetch('/api/v1/conversations/search', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ query, platform, source_agent: sourceAgent, limit }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.results || [];
+  } catch (err) {
+    console.error('searchConversations error:', err);
+    return null;
+  }
+}
+
 export async function searchMemory(
   query?: string,
   category?: string,

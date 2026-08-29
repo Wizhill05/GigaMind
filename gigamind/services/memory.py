@@ -572,7 +572,8 @@ def get_profile_rules(category: Optional[str] = None, source_agent: Optional[str
 
 def add_conversation_log(platform: str, title: str, summary: str, messages: List[Dict[str, Any]], source_agent: str = "user") -> Dict[str, Any]:
     conv_id = f"conv_{platform}_{uuid.uuid4().hex[:8]}"
-    text_for_vector = f"{title} {summary}"
+    msgs_preview = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')[:100]}" for m in messages[:5])
+    text_for_vector = f"Chat Platform: {platform}. Title: {title}\nSummary: {summary}\n{msgs_preview}"
     embedding = generate_embedding(text_for_vector)
     now_str = datetime.now(timezone.utc).isoformat()
 
@@ -590,6 +591,14 @@ def add_conversation_log(platform: str, title: str, summary: str, messages: List
     with Session(engine) as session:
         session.add(item)
         session.commit()
+        if is_postgres:
+            try:
+                with Session(engine) as p_sess:
+                    vec_str = f"[{','.join(str(x) for x in embedding)}]"
+                    p_sess.exec(text("UPDATE conversations SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": vec_str, "id": conv_id})
+                    p_sess.commit()
+            except Exception as p_err:
+                print(f"conversations pgvector update note: {p_err}")
 
     return {
         "id": conv_id,
@@ -698,6 +707,8 @@ def import_conversations_data(raw_data: Any, default_platform: Optional[str] = N
 
             first_user_preview = next((m["content"][:200] for m in messages if m["role"] == "user"), "")
             summary = conv.get("summary") or (f"Topic: {title}. Preview: {first_user_preview}" if first_user_preview else f"Conversation on {platform}: {title}")
+            text_for_vector = f"Platform: {platform}. Title: {title}\nSummary: {summary}\n{first_user_preview}"
+            embedding = generate_embedding(text_for_vector)
 
             item = ConversationItem(
                 id=conv_id,
@@ -705,14 +716,23 @@ def import_conversations_data(raw_data: Any, default_platform: Optional[str] = N
                 title=title,
                 summary=summary,
                 messages_json=json.dumps(messages),
-                embedding_json="[]",
+                embedding_json=json.dumps(embedding),
                 source_agent=source_agent,
                 created_at=created_at
             )
             session.add(item)
-            ingested_count += 1
+            session.commit()
 
-        session.commit()
+            if is_postgres:
+                try:
+                    with Session(engine) as p_sess:
+                        vec_str = f"[{','.join(str(x) for x in embedding)}]"
+                        p_sess.exec(text("UPDATE conversations SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": vec_str, "id": conv_id})
+                        p_sess.commit()
+                except Exception as p_err:
+                    print(f"conversation batch vector note: {p_err}")
+
+            ingested_count += 1
 
     return {
         "success": True,
@@ -721,6 +741,134 @@ def import_conversations_data(raw_data: Any, default_platform: Optional[str] = N
         "total_processed": len(conversations) if isinstance(conversations, list) else 1,
         "message": f"Successfully imported {ingested_count} conversation(s) into database ({skipped_count} duplicate(s) skipped)."
     }
+
+def search_conversations(
+    query: str,
+    platform: Optional[str] = None,
+    source_agent: Optional[str] = None,
+    limit: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    Semantic vector search specifically across chat conversation transcripts.
+    """
+    query_vector = generate_embedding(query)
+    query_lower = (query or "").lower()
+    query_keywords = [k for k in query_lower.split() if len(k) > 2]
+
+    candidates: List[Dict[str, Any]] = []
+
+    with Session(engine) as session:
+        if is_postgres:
+            try:
+                vector_str = f"[{','.join(str(x) for x in query_vector)}]"
+                sql = """
+                SELECT id, platform, title, summary, source_agent, messages_json, created_at,
+                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
+                FROM conversations
+                WHERE embedding_vector IS NOT NULL
+                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
+                LIMIT 40;
+                """
+                rows = session.exec(text(sql), params={"vec": vector_str}).all()
+                for r in rows:
+                    if platform and r.platform.lower() != platform.lower():
+                        continue
+                    if source_agent and (r.source_agent or "").lower() != source_agent.lower():
+                        continue
+                    try:
+                        msgs = json.loads(r.messages_json or "[]")
+                    except Exception:
+                        msgs = []
+                    candidates.append({
+                        "id": r.id,
+                        "source": "conversation",
+                        "platform": r.platform,
+                        "title": r.title,
+                        "summary": r.summary,
+                        "source_agent": r.source_agent or "user",
+                        "content": f"[{r.platform.upper()} Transcript] {r.title}: {r.summary}",
+                        "messages": msgs,
+                        "messages_count": len(msgs),
+                        "created_at": r.created_at,
+                        "score": float(r.vector_score or 0.0),
+                        "vector_score": float(r.vector_score or 0.0)
+                    })
+            except Exception as pg_err:
+                print(f"pgvector search_conversations note: {pg_err}")
+                session.rollback()
+
+        if not candidates:
+            stmt = select(ConversationItem).limit(60)
+            if platform:
+                stmt = stmt.where(ConversationItem.platform == platform)
+            if source_agent:
+                stmt = stmt.where(ConversationItem.source_agent == source_agent)
+            conv_items = session.exec(stmt).all()
+            for c in conv_items:
+                score = 0.0
+                try:
+                    c_vec = json.loads(c.embedding_json)
+                    score += cosine_similarity(query_vector, c_vec) * 0.7
+                except Exception:
+                    pass
+                c_text = f"{c.title} {c.summary}".lower()
+                kw_hits = sum(1 for kw in query_keywords if kw in c_text)
+                if query_keywords:
+                    score += (kw_hits / len(query_keywords)) * 0.3
+
+                if score > 0.05:
+                    try:
+                        msgs = json.loads(c.messages_json or "[]")
+                    except Exception:
+                        msgs = []
+                    candidates.append({
+                        "id": c.id,
+                        "source": "conversation",
+                        "platform": c.platform,
+                        "title": c.title,
+                        "summary": c.summary,
+                        "source_agent": c.source_agent or "user",
+                        "content": f"[{c.platform.upper()} Transcript] {c.title}: {c.summary}",
+                        "messages": msgs,
+                        "messages_count": len(msgs),
+                        "created_at": c.created_at,
+                        "score": round(score, 4)
+                    })
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    top_candidates = candidates[:30]
+    reranked = rerank_candidates(query=query, candidates=top_candidates, top_n=limit)
+    return reranked
+
+def backfill_conversation_vectors() -> int:
+    """Computes and backfills Gemini Embedding 2 vectors for all stored conversations."""
+    count = 0
+    with Session(engine) as session:
+        convs = session.exec(select(ConversationItem)).all()
+        for c in convs:
+            msgs_preview = ""
+            if c.messages_json:
+                try:
+                    msgs = json.loads(c.messages_json)
+                    msgs_preview = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')[:100]}" for m in msgs[:4])
+                except Exception:
+                    pass
+            text_for_vector = f"Chat Platform: {c.platform}. Title: {c.title}\nSummary: {c.summary}\n{msgs_preview}"
+            emb = generate_embedding(text_for_vector)
+            c.embedding_json = json.dumps(emb)
+            session.add(c)
+            session.commit()
+
+            if is_postgres:
+                try:
+                    with Session(engine) as p_sess:
+                        vec_str = f"[{','.join(str(x) for x in emb)}]"
+                        p_sess.exec(text("UPDATE conversations SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": vec_str, "id": c.id})
+                        p_sess.commit()
+                except Exception as p_err:
+                    print(f"backfill pgvector note: {p_err}")
+            count += 1
+    return count
 
 def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None, source_agent: Optional[str] = None) -> Dict[str, Any]:
     with Session(engine) as session:
