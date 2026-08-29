@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
-import { TabType, NavigationTabs } from './components/NavigationTabs';
+import { TabType } from './components/NavigationTabs';
 import { AuthGate } from './components/AuthGate';
 import { OverviewTab } from './components/tabs/OverviewTab';
 import { MemoriesTab } from './components/tabs/MemoriesTab';
@@ -128,18 +128,6 @@ export const AppContent: React.FC = () => {
           isAuthenticated={isAuthenticated}
           onOpenNewMemoryModal={handleOpenNewMemoryModal}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-        />
-
-        {/* TOP NAVIGATION TABS BAR */}
-        <NavigationTabs
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          counts={{
-            memories: stats?.total_memories || 0,
-            files: stats?.total_storage_files || 0,
-            rules: stats?.total_profile_rules || 0,
-            transcripts: stats?.total_chat_logs || 0,
-          }}
         />
 
         {/* SCROLLABLE MAIN CONTENT CANVAS WITH SMOOTH ANIMATED TAB TRANSITIONS */}
