@@ -248,3 +248,24 @@ def list_indexed_storage_files(limit: int = 100) -> List[Dict[str, Any]]:
                 "updated_at": f.updated_at
             })
         return res
+
+def get_file_chunks(key: str) -> List[Dict[str, Any]]:
+    """Returns all semantic chunks and page citations extracted from a specific file key."""
+    with Session(engine) as session:
+        chunks = session.exec(
+            select(StorageChunkItem)
+            .where(StorageChunkItem.file_key == key)
+            .order_by(StorageChunkItem.chunk_index.asc())
+        ).all()
+        return [
+            {
+                "id": c.id,
+                "file_key": c.file_key,
+                "chunk_index": c.chunk_index,
+                "total_chunks": c.total_chunks,
+                "page_number": c.page_number,
+                "content": c.content,
+                "created_at": c.created_at
+            }
+            for c in chunks
+        ]

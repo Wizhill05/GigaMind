@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from gigamind.db.database import init_db
 from gigamind.services.storage import storage_service
-from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files
+from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files, get_file_chunks
 from gigamind.services.memory import (
     search_memory,
     add_memory,
@@ -136,6 +136,36 @@ class FileUploadBase64Request(BaseModel):
     filename: str = Field(..., description="File name")
     content_base64: str = Field(..., description="Base64 encoded file content")
     mime_type: Optional[str] = Field(None, description="MIME content type")
+
+def _format_search_results_for_agent(results: List[Dict[str, Any]], query: str, scope: str) -> str:
+    if not results:
+        return f"No matching results found in GigaMind for query: '{query}' (scope: {scope})."
+
+    lines = [f"Found {len(results)} relevant item(s) for query: '{query}' (scope: {scope}):\n"]
+    file_items = [r for r in results if r.get("source") == "file"]
+    mem_items = [r for r in results if r.get("source") != "file"]
+
+    if file_items:
+        lines.append("### 📄 Matching Files & Document Excerpts:")
+        for idx, f in enumerate(file_items, 1):
+            citation = f.get("citation", f.get("filename", "File"))
+            url = f.get("url")
+            link_md = f" | [Download / Open]({url})" if url else ""
+            lines.append(f"{idx}. **[{citation}]** (Score: {f.get('score', 0):.2f}){link_md}")
+            lines.append(f"   > {f.get('content', '').strip()}\n")
+
+    if mem_items:
+        lines.append("### 🧠 Matching Memories & Facts:")
+        for idx, m in enumerate(mem_items, 1):
+            tags_str = f" [tags: {', '.join(m.get('tags', []))}]" if m.get("tags") else ""
+            lines.append(f"{idx}. **Memory ({m.get('category', 'general')})** (Agent: {m.get('source_agent', 'user')}, Score: {m.get('score', 0):.2f}){tags_str}:")
+            lines.append(f"   {m.get('content', '').strip()}")
+            if m.get("attachments"):
+                att_names = [a.get("filename", "file") for a in m.get("attachments", [])]
+                lines.append(f"   📎 Attachments: {', '.join(att_names)}")
+            lines.append("")
+
+    return "\n".join(lines)
 # Dashboard UI Helper
 def dashboard_ui():
     index_file = os.path.join(frontend_dist_dir, "index.html")
@@ -330,22 +360,48 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
         tools_list = [
             {
                 "name": "search_memory",
-                "description": "Search user GigaMind personal memory database using a 2-stage RAG engine (Vector Candidate Search + Cross-Encoder Reranker). Searches both conversational memories and vectorized Cloudflare R2 files by default.",
+                "description": "Unified 2-stage semantic search across ALL knowledge: conversational memories, user facts, preferences, AND individual uploaded files/PDFs/code stored in Cloudflare R2. Returns matching memory items and individual file excerpts with page citations and download links.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Search term or query"},
-                        "scope": {"type": "string", "enum": ["all", "memories", "files"], "default": "all", "description": "Scope of search: 'all' (memories + files), 'memories' only, or 'files' only"},
+                        "query": {"type": "string", "description": "Search query or concept to look up across all knowledge"},
+                        "scope": {"type": "string", "enum": ["all", "memories", "files"], "default": "all", "description": "Search scope: 'all' (default: memories + files), 'memories' only, or 'files' only"},
                         "category": {"type": "string", "description": "Optional category filter"},
                         "source_agent": {"type": "string", "description": "Optional source agent filter (e.g. claude, gpt, gemini)"},
-                        "limit": {"type": "integer", "default": 5}
+                        "limit": {"type": "integer", "default": 5, "description": "Max items to return"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "search_memories",
+                "description": "Search ONLY user conversational memories, notes, facts, and profile knowledge. Excludes uploaded document files.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query for memories, facts, or preferences"},
+                        "category": {"type": "string", "description": "Optional category filter"},
+                        "source_agent": {"type": "string", "description": "Optional source agent filter"},
+                        "limit": {"type": "integer", "default": 5, "description": "Max memories to return"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "search_files",
+                "description": "Search ONLY individual uploaded files, PDFs, research papers, markdown docs, and code files stored in Cloudflare R2. Returns matching document excerpts with page numbers, filenames, and direct download links.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query or concept to find inside uploaded documents"},
+                        "limit": {"type": "integer", "default": 5, "description": "Max matching document chunks to return"}
                     },
                     "required": ["query"]
                 }
             },
             {
                 "name": "search_file_storage",
-                "description": "Semantic vector search specifically inside PDF research papers, code files, and documents stored in Cloudflare R2. Returns page numbers and direct download links.",
+                "description": "Semantic vector search inside PDF research papers, code files, and documents stored in Cloudflare R2. Alias for search_files.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -468,30 +524,67 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
         name = params.get("name")
         args = params.get("arguments", {})
 
-        if name == "search_memory":
+        if name in ("search_memory", "search_knowledge", "search_all"):
+            query = args.get("query", "")
+            scope = args.get("scope", "all")
             results = search_memory(
-                query=args.get("query", ""),
+                query=query,
                 category=args.get("category"),
                 source_agent=args.get("source_agent"),
                 limit=args.get("limit", 5),
-                scope=args.get("scope", "all")
+                scope=scope
             )
+            formatted_text = _format_search_results_for_agent(results, query, scope)
             res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps({"_privacy_notice": "Ephemeral context.", "scope": args.get("scope", "all"), "results": results}, indent=2)}]
+                "content": [{"type": "text", "text": formatted_text}],
+                "structured": {
+                    "query": query,
+                    "scope": scope,
+                    "count": len(results),
+                    "results": results
+                }
             })
             return res
 
-        if name == "search_file_storage":
+        if name in ("search_memories", "search_memories_only"):
+            query = args.get("query", "")
             results = search_memory(
-                query=args.get("query", ""),
+                query=query,
+                category=args.get("category"),
+                source_agent=args.get("source_agent"),
+                limit=args.get("limit", 5),
+                scope="memories"
+            )
+            formatted_text = _format_search_results_for_agent(results, query, "memories")
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": formatted_text}],
+                "structured": {
+                    "query": query,
+                    "scope": "memories",
+                    "count": len(results),
+                    "results": results
+                }
+            })
+            return res
+
+        if name in ("search_files", "search_files_only", "search_file_storage"):
+            query = args.get("query", "")
+            results = search_memory(
+                query=query,
                 limit=args.get("limit", 5),
                 scope="files"
             )
+            formatted_text = _format_search_results_for_agent(results, query, "files")
             res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps({"_privacy_notice": "Document vector search.", "scope": "files", "results": results}, indent=2)}]
+                "content": [{"type": "text", "text": formatted_text}],
+                "structured": {
+                    "query": query,
+                    "scope": "files",
+                    "count": len(results),
+                    "results": results
+                }
             })
             return res
-
         if name == "get_user_profile":
             rules = get_profile_rules(category=args.get("category"), source_agent=args.get("source_agent"))
             res = await send_rpc_response(result={
@@ -667,6 +760,23 @@ def api_search_files(req: SearchFilesRequest):
         "results": results
     }
 
+
+@app.post("/api/v1/search_memories", dependencies=[Depends(verify_auth)])
+def api_search_memories(req: SearchMemoryRequest):
+    """Dedicated endpoint for searching only conversational memories."""
+    results = search_memory(
+        query=req.query,
+        category=req.category,
+        source_agent=req.source_agent,
+        limit=req.limit,
+        scope="memories"
+    )
+    return {
+        "query": req.query,
+        "scope": "memories",
+        "count": len(results),
+        "results": results
+    }
 @app.get("/api/v1/get_profile", dependencies=[Depends(verify_auth)])
 def api_get_profile(category: Optional[str] = None, source_agent: Optional[str] = None):
     rules = get_profile_rules(category=category, source_agent=source_agent)
@@ -857,6 +967,13 @@ def api_list_indexed_files(limit: int = 100):
     """Returns indexed files with chunk counts and vector status from Neon PostgreSQL."""
     files = list_indexed_storage_files(limit=limit)
     return {"files": files, "count": len(files)}
+
+@app.get("/api/v1/files/chunks", dependencies=[Depends(verify_auth)])
+def api_get_file_chunks(key: str):
+    """Returns all semantic vector chunks and page numbers for an indexed file key."""
+    chunks = get_file_chunks(key)
+    return {"key": key, "chunks": chunks, "count": len(chunks)}
+
 @app.post("/api/v1/files/url", dependencies=[Depends(verify_auth)])
 def api_get_file_url(req: PresignedUrlRequest):
     """Generates a fresh time-limited presigned download URL."""

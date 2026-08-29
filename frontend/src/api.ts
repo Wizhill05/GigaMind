@@ -1,4 +1,4 @@
-import { Memory, MemoryAttachment, StorageFile, ProfileRule, Conversation, SearchResult, Stats } from './types';
+import { Memory, MemoryAttachment, StorageFile, StorageChunk, ProfileRule, Conversation, SearchResult, Stats } from './types';
 
 const API_KEY_KEY = 'gigamind_master_key';
 
@@ -324,5 +324,18 @@ export async function reindexStorageFile(key: string): Promise<boolean> {
   } catch (err) {
     console.error('reindexStorageFile error:', err);
     return false;
+  }
+}
+
+export async function fetchFileChunks(key: string): Promise<{ key: string; chunks: StorageChunk[]; count: number } | null> {
+  try {
+    const res = await fetch(`/api/v1/files/chunks?key=${encodeURIComponent(key)}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error('fetchFileChunks error:', err);
+    return null;
   }
 }

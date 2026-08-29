@@ -5,6 +5,7 @@ import { TabType } from './components/NavigationTabs';
 import { AuthGate } from './components/AuthGate';
 import { OverviewTab } from './components/tabs/OverviewTab';
 import { MemoriesTab } from './components/tabs/MemoriesTab';
+import { FilesTab } from './components/tabs/FilesTab';
 import { ProfileRulesTab } from './components/tabs/ProfileRulesTab';
 import { ConversationsTab } from './components/tabs/ConversationsTab';
 import { VectorSearchLabTab } from './components/tabs/VectorSearchLabTab';
@@ -113,6 +114,7 @@ export const AppContent: React.FC = () => {
         setActiveTab={setActiveTab}
         counts={{
           memories: stats?.total_memories || 0,
+          files: stats?.total_storage_files || 0,
           rules: stats?.total_profile_rules || 0,
           transcripts: stats?.total_chat_logs || 0,
         }}
@@ -141,6 +143,8 @@ export const AppContent: React.FC = () => {
                 onOpenEditModal={handleOpenEditMemoryModal}
               />
             )}
+
+            {activeTab === 'files' && <FilesTab />}
 
             {activeTab === 'rules' && (
               <ProfileRulesTab onOpenNewRuleModal={() => setIsRuleModalOpen(true)} />

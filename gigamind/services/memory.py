@@ -782,6 +782,8 @@ def get_stats() -> Dict[str, Any]:
         profile_rules = session.exec(select(ProfileItem)).all()
         chat_logs = session.exec(select(ConversationItem)).all()
         task_sessions = session.exec(select(TaskSessionItem)).all()
+        storage_files = session.exec(select(StorageFileItem)).all()
+        storage_chunks = session.exec(select(StorageChunkItem)).all()
 
         source_distribution = {}
         for mem in memories:
@@ -793,5 +795,7 @@ def get_stats() -> Dict[str, Any]:
             "total_profile_rules": len(profile_rules),
             "total_chat_logs": len(chat_logs),
             "total_task_sessions": len(task_sessions),
+            "total_storage_files": len(storage_files),
+            "total_storage_chunks": len(storage_chunks),
             "source_distribution": source_distribution
         }

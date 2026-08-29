@@ -61,6 +61,16 @@ export interface StorageFile {
   updated_at?: string;
 }
 
+export interface StorageChunk {
+  id: string;
+  file_key: string;
+  chunk_index: number;
+  total_chunks: number;
+  page_number?: number;
+  content: string;
+  created_at: string;
+}
+
 export interface SearchResult {
   id: string;
   source: 'memory' | 'profile' | 'file' | string;
@@ -87,5 +97,7 @@ export interface Stats {
   total_profile_rules: number;
   total_chat_logs: number;
   total_task_sessions: number;
+  total_storage_files?: number;
+  total_storage_chunks?: number;
   source_distribution: Record<string, number>;
 }

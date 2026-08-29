@@ -1,13 +1,14 @@
 import React from 'react';
-import { LayoutDashboard, Database, Shield, MessageSquare, Sparkles, Settings } from 'lucide-react';
+import { LayoutDashboard, Database, HardDrive, Shield, MessageSquare, Sparkles, Settings } from 'lucide-react';
 
-export type TabType = 'overview' | 'memories' | 'rules' | 'transcripts' | 'vector-lab' | 'settings';
+export type TabType = 'overview' | 'memories' | 'files' | 'rules' | 'transcripts' | 'vector-lab' | 'settings';
 
 interface NavigationTabsProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   counts: {
     memories: number;
+    files?: number;
     rules: number;
     transcripts: number;
   };
@@ -25,6 +26,12 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({ activeTab, setAc
       label: 'Memory Repository',
       icon: Database,
       badge: counts.memories,
+    },
+    {
+      id: 'files' as TabType,
+      label: 'Files & R2 Storage',
+      icon: HardDrive,
+      badge: counts.files,
     },
     {
       id: 'rules' as TabType,

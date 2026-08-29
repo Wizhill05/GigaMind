@@ -5,7 +5,7 @@ import {
   PixelTerminal,
   PixelSparkles
 } from '../ui/PixelIcons';
-import { Search, Copy, Check, ExternalLink, Cpu } from 'lucide-react';
+import { Search, Copy, Check, ExternalLink, Cpu, HardDrive } from 'lucide-react';
 import { Stats, SearchResult } from '../../types';
 import { searchMemory } from '../../api';
 import { CategoryBadge, AgentBadge, RenderPill } from '../ui/Badge';
@@ -96,7 +96,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
       </div>
 
       {/* METRICS CARDS WITH CARD-HOVER LIFTS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div
           onClick={() => onNavigateTab('memories')}
           className="bg-[#181818] border border-[#262626] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
@@ -110,6 +110,21 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ stats, onNavigateTab }
           </div>
           <div className="text-[11px] text-[#8a8f9e] group-hover:text-[#ff6b00] transition-colors">
             Manage repository →
+          </div>
+        </div>
+        <div
+          onClick={() => onNavigateTab('files')}
+          className="bg-[#181818] border border-[#262626] p-4 rounded-none cursor-pointer card-hover space-y-2 group"
+        >
+          <div className="flex justify-between items-center text-[#8a8f9e] text-xs">
+            <span>Files & Storage</span>
+            <HardDrive className="w-4 h-4 text-[#22c55e] group-hover:text-white transition-colors" />
+          </div>
+          <div className="text-2xl font-bold text-white tracking-tight">
+            {stats?.total_storage_files ?? 0}
+          </div>
+          <div className="text-[11px] text-[#8a8f9e] group-hover:text-[#22c55e] transition-colors">
+            {stats?.total_storage_chunks ?? 0} vector chunks →
           </div>
         </div>
 

@@ -7,7 +7,7 @@ import {
   PixelSparkles,
   PixelSettings
 } from './ui/PixelIcons';
-import { LayoutDashboard, ExternalLink } from 'lucide-react';
+import { LayoutDashboard, ExternalLink, HardDrive } from 'lucide-react';
 import { TabType } from './NavigationTabs';
 
 interface SidebarProps {
@@ -15,6 +15,7 @@ interface SidebarProps {
   setActiveTab: (tab: TabType) => void;
   counts: {
     memories: number;
+    files?: number;
     rules: number;
     transcripts: number;
   };
@@ -32,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
   const navItems: NavItemDef[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'OVERVIEW' },
     { id: 'memories', label: 'Memories', icon: PixelDatabase, group: 'KNOWLEDGE BASE', badge: counts.memories },
+    { id: 'files', label: 'Files & Storage', icon: HardDrive, group: 'KNOWLEDGE BASE', badge: counts.files },
     { id: 'rules', label: 'Profile Rules', icon: PixelShield, group: 'KNOWLEDGE BASE', badge: counts.rules },
     { id: 'transcripts', label: 'Chat Transcripts', icon: PixelTerminal, group: 'MONITOR & LAB', badge: counts.transcripts },
     { id: 'vector-lab', label: 'Vector Search Lab', icon: PixelSparkles, group: 'MONITOR & LAB' },
