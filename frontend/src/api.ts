@@ -327,11 +327,19 @@ export async function fetchFiles(prefix: string = '', limit: number = 100): Prom
 
 export async function deleteStorageFile(key: string): Promise<boolean> {
   try {
-    const res = await fetch(`/api/v1/files/${encodeURIComponent(key)}`, {
+    const res = await fetch('/api/v1/files/delete', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ key }),
+    });
+    if (res.ok) return true;
+
+    // Fallback to path parameter DELETE endpoint
+    const fallbackRes = await fetch(`/api/v1/files/${encodeURIComponent(key)}`, {
       method: 'DELETE',
       headers: getHeaders(),
     });
-    return res.ok;
+    return fallbackRes.ok;
   } catch (err) {
     console.error('deleteStorageFile error:', err);
     return false;

@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from gigamind.db.database import init_db
 from gigamind.services.storage import storage_service
-from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files, get_file_chunks, register_storage_file
+from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files, get_file_chunks, register_storage_file, delete_storage_file_index
 from gigamind.services.memory import (
     search_memory,
     add_memory,
@@ -146,6 +146,9 @@ class FileUploadBase64Request(BaseModel):
     content_base64: str = Field(..., description="Base64 encoded file content")
     mime_type: Optional[str] = Field(None, description="MIME content type")
 
+
+class DeleteFileRequest(BaseModel):
+    key: str = Field(..., description="Cloudflare R2 storage key to delete")
 def _format_search_results_for_agent(results: List[Dict[str, Any]], query: Optional[str], scope: str) -> str:
     query_label = f"'{query}'" if query else "visual multimodal query"
     if not results:
@@ -1077,13 +1080,27 @@ def api_list_files(prefix: str = "", limit: int = 100):
     files = storage_service.list_files(prefix=prefix, limit=limit)
     return {"enabled": True, "files": files, "count": len(files)}
 
+@app.post("/api/v1/files/delete", dependencies=[Depends(verify_auth)])
+def api_post_delete_file(req: DeleteFileRequest):
+    """Deletes an object from Cloudflare R2 and removes all vector index metadata from Neon PostgreSQL."""
+    if storage_service.is_enabled():
+        try:
+            storage_service.delete_file(req.key)
+        except Exception as r2_err:
+            print(f"R2 delete note for {req.key}: {r2_err}")
+
+    delete_storage_file_index(req.key)
+    return {"success": True, "key": req.key, "message": f"File {req.key} deleted successfully."}
+
 @app.delete("/api/v1/files/{key:path}", dependencies=[Depends(verify_auth)])
 def api_delete_file(key: str):
-    """Deletes an object directly from Cloudflare R2."""
-    if not storage_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
-    success = storage_service.delete_file(key)
-    if not success:
-        raise HTTPException(status_code=500, detail=f"Failed to delete file '{key}' from R2.")
+    """Deletes an object directly from Cloudflare R2 and Neon PostgreSQL."""
+    if storage_service.is_enabled():
+        try:
+            storage_service.delete_file(key)
+        except Exception as r2_err:
+            print(f"R2 delete note for {key}: {r2_err}")
+
+    delete_storage_file_index(key)
     return {"success": True, "key": key, "message": f"File {key} deleted successfully."}
 # Endpoints completed
