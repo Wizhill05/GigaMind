@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check, Paperclip, ExternalLink } from 'lucide-react';
+import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check, Paperclip, ExternalLink, RefreshCw, FileText } from 'lucide-react';
 import { PixelDatabase } from '../ui/PixelIcons';
-import { Memory } from '../../types';
-import { fetchMemories, deleteMemory } from '../../api';
+import { Memory, StorageFile } from '../../types';
+import { fetchMemories, deleteMemory, fetchIndexedFiles, reindexStorageFile } from '../../api';
 import { AgentBadge, CategoryBadge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 
@@ -23,8 +23,33 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   const [searchFilter, setSearchFilter] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
+  const [activeSubTab, setActiveSubTab] = useState<'memories' | 'files'>('memories');
+  const [storageFiles, setStorageFiles] = useState<StorageFile[]>([]);
+  const [isStorageLoading, setIsStorageLoading] = useState(false);
+  const [reindexingKey, setReindexingKey] = useState<string | null>(null);
 
   const { toast } = useToast();
+
+  const loadStorageFiles = async () => {
+    setIsStorageLoading(true);
+    const res = await fetchIndexedFiles(100);
+    if (res && res.files) {
+      setStorageFiles(res.files);
+    }
+    setIsStorageLoading(false);
+  };
+
+  const handleReindex = async (key: string) => {
+    setReindexingKey(key);
+    const ok = await reindexStorageFile(key);
+    if (ok) {
+      toast(`Re-indexing queued for ${key}`, 'success');
+      setTimeout(loadStorageFiles, 1500);
+    } else {
+      toast('Could not queue vector extraction', 'error');
+    }
+    setReindexingKey(null);
+  };
 
   const loadMemories = async () => {
     setIsLoading(true);
@@ -38,9 +63,12 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   };
 
   useEffect(() => {
-    loadMemories();
-  }, [page, categoryFilter, sourceAgentFilter]);
-
+    if (activeSubTab === 'memories') {
+      loadMemories();
+    } else {
+      loadStorageFiles();
+    }
+  }, [page, categoryFilter, sourceAgentFilter, activeSubTab]);
   const handleDelete = async (id: string) => {
     if (window.confirm(`Confirm deletion of memory item: ${id}?`)) {
       const ok = await deleteMemory(id);
@@ -93,23 +121,133 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
       {/* HEADER & TOP CONTROLS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-white tracking-tight">Memory Repository</h2>
+          <h2 className="text-xl font-semibold text-white tracking-tight">Memory &amp; Knowledge Repository</h2>
           <p className="text-xs text-[#8a8f9e] mt-0.5">
-            Manage persistent knowledge, user facts, and contextual statements ({totalCount} total)
+            Manage persistent knowledge, user facts, and vectorized Cloudflare R2 files
           </p>
         </div>
 
-        <button
-          onClick={onOpenNewModal}
-          className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm btn-press"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Memory</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-[#141414] border border-[#262626] p-1">
+            <button
+              onClick={() => setActiveSubTab('memories')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all ${
+                activeSubTab === 'memories'
+                  ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white shadow-sm'
+                  : 'text-[#8a8f9e] hover:text-white'
+              }`}
+            >
+              Memories ({totalCount})
+            </button>
+            <button
+              onClick={() => setActiveSubTab('files')}
+              className={`px-3 py-1.5 text-xs font-medium transition-all ${
+                activeSubTab === 'files'
+                  ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white shadow-sm'
+                  : 'text-[#8a8f9e] hover:text-white'
+              }`}
+            >
+              Indexed Files ({storageFiles.length})
+            </button>
+          </div>
+
+          {activeSubTab === 'memories' && (
+            <button
+              onClick={onOpenNewModal}
+              className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm btn-press"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Memory</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* RENDER SERVICE STACK CARD */}
-      <div className="bg-[#181818] border border-[#262626] rounded-none overflow-hidden space-y-0">
+      {activeSubTab === 'files' ? (
+        /* STORAGE FILES VECTORIZED LIST */
+        <div className="bg-[#181818] border border-[#262626] rounded-none overflow-hidden space-y-0">
+          <div className="p-4 border-b border-[#262626] bg-[#161616] flex justify-between items-center">
+            <span className="text-white font-medium flex items-center gap-2">
+              <FileText className="w-4 h-4 text-[#ff6b00]" />
+              <span>Cloudflare R2 Vectorized Files ({storageFiles.length})</span>
+            </span>
+            <button
+              onClick={loadStorageFiles}
+              disabled={isStorageLoading}
+              className="flex items-center gap-1.5 bg-[#141414] hover:bg-[#202020] border border-[#333333] text-[#c1c5d0] px-3 py-1 text-xs transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${isStorageLoading ? 'animate-spin text-[#ff6b00]' : ''}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          {isStorageLoading ? (
+            <div className="p-12 text-center text-[#8a8f9e]">Loading indexed documents...</div>
+          ) : storageFiles.length === 0 ? (
+            <div className="p-12 text-center text-[#8a8f9e]">
+              No files have been uploaded and vectorized yet. Upload PDFs or documents via the Memory modal or FastMCP tools.
+            </div>
+          ) : (
+            <div className="divide-y divide-[#262626]">
+              {storageFiles.map((file) => (
+                <div key={file.id} className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:bg-[#202020] transition-colors">
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-white font-mono font-medium text-xs truncate max-w-[320px]">{file.filename}</span>
+                      <span className={`px-2 py-0.5 text-[10px] font-mono uppercase border ${
+                        file.indexing_status === 'completed'
+                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60'
+                          : file.indexing_status === 'pending'
+                          ? 'bg-amber-950/70 text-amber-300 border-amber-700/60'
+                          : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                      }`}>
+                        {file.indexing_status}
+                      </span>
+                      <span className="bg-[#141414] border border-[#2a2a2a] px-2 py-0.5 text-[10px] font-mono text-zinc-400">
+                        {file.total_chunks} chunks
+                      </span>
+                      {file.extracted_text_length > 0 && (
+                        <span className="text-zinc-500 font-mono text-[10px]">
+                          ({(file.extracted_text_length / 1000).toFixed(1)}k chars)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-[#8a8f9e] font-mono truncate">
+                      key: {file.key} &bull; uploaded {new Date(file.created_at).toLocaleString()}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {file.url && (
+                      <a
+                        href={file.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 bg-[#141414] hover:bg-[#252525] border border-[#333333] text-white px-2.5 py-1 text-xs transition-colors"
+                        title="Download / Open from R2"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Open File</span>
+                      </a>
+                    )}
+                    <button
+                      onClick={() => handleReindex(file.key)}
+                      disabled={reindexingKey === file.key}
+                      className="flex items-center gap-1 bg-[#141414] hover:bg-[#252525] border border-[#333333] text-[#c1c5d0] px-2.5 py-1 text-xs transition-colors disabled:opacity-50"
+                      title="Re-extract text and re-generate embeddings"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${reindexingKey === file.key ? 'animate-spin text-[#ff6b00]' : ''}`} />
+                      <span>Re-index</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* MEMORIES LIST */
+        <div className="bg-[#181818] border border-[#262626] rounded-none overflow-hidden space-y-0">
         {/* FILTER BAR HEADER */}
         <div className="p-4 border-b border-[#262626] bg-[#161616] flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
           <div className="relative flex-1">
@@ -295,8 +433,9 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
           >
             Next <ChevronRight className="w-4 h-4" />
           </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

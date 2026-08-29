@@ -1,4 +1,4 @@
-import { Memory, MemoryAttachment, ProfileRule, Conversation, SearchResult, Stats } from './types';
+import { Memory, MemoryAttachment, StorageFile, ProfileRule, Conversation, SearchResult, Stats } from './types';
 
 const API_KEY_KEY = 'gigamind_master_key';
 
@@ -217,19 +217,36 @@ export async function searchMemory(
   query: string,
   category?: string,
   sourceAgent?: string,
-  limit: number = 5
+  limit: number = 5,
+  scope: string = 'all'
 ): Promise<SearchResult[] | null> {
   try {
     const res = await fetch('/api/v1/search_memory', {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ query, category, source_agent: sourceAgent, limit }),
+      body: JSON.stringify({ query, category, source_agent: sourceAgent, limit, scope }),
     });
     if (!res.ok) return null;
     const data = await res.json();
     return data.results || [];
   } catch (err) {
     console.error('searchMemory error:', err);
+    return null;
+  }
+}
+
+export async function searchFiles(query: string, limit: number = 5): Promise<SearchResult[] | null> {
+  try {
+    const res = await fetch('/api/v1/search_files', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ query, limit }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.results || [];
+  } catch (err) {
+    console.error('searchFiles error:', err);
     return null;
   }
 }
@@ -279,6 +296,33 @@ export async function deleteStorageFile(key: string): Promise<boolean> {
     return res.ok;
   } catch (err) {
     console.error('deleteStorageFile error:', err);
+    return false;
+  }
+}
+
+export async function fetchIndexedFiles(limit: number = 100): Promise<{ files: StorageFile[]; count: number } | null> {
+  try {
+    const res = await fetch(`/api/v1/files/indexed?limit=${limit}`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error('fetchIndexedFiles error:', err);
+    return null;
+  }
+}
+
+export async function reindexStorageFile(key: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/v1/files/reindex', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ key }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('reindexStorageFile error:', err);
     return false;
   }
 }

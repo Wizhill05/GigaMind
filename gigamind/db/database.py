@@ -54,6 +54,33 @@ class TaskSessionItem(SQLModel, table=True):
     source_agent: str = Field(default="user", index=True)
     updated_at: str
 
+class StorageFileItem(SQLModel, table=True):
+    __tablename__ = "storage_files"
+    id: str = Field(primary_key=True)
+    key: str = Field(unique=True, index=True)
+    filename: str
+    mime_type: str = Field(default="application/octet-stream")
+    size_bytes: int = Field(default=0)
+    source_agent: str = Field(default="user", index=True)
+    extracted_text_length: int = Field(default=0)
+    total_chunks: int = Field(default=0)
+    indexing_status: str = Field(default="completed", index=True) # pending, completed, failed, unsupported
+    created_at: str
+    updated_at: str
+
+class StorageChunkItem(SQLModel, table=True):
+    __tablename__ = "storage_chunks"
+    id: str = Field(primary_key=True)
+    file_id: str = Field(index=True)
+    file_key: str = Field(index=True)
+    filename: str
+    chunk_index: int = Field(default=0)
+    total_chunks: int = Field(default=1)
+    page_number: Optional[int] = Field(default=None)
+    content: str
+    embedding_json: str = Field(default="[]")
+    created_at: str
+
 # Database Engine initialization with automatic fallback
 raw_db_url = os.getenv("DATABASE_URL")
 if raw_db_url and raw_db_url.startswith("postgres://"):
@@ -98,6 +125,9 @@ def get_db_engine():
 engine, is_postgres = get_db_engine()
 
 def init_db():
+    # Create base tables first
+    SQLModel.metadata.create_all(engine)
+
     if is_postgres:
         try:
             with engine.connect() as conn:
@@ -116,7 +146,13 @@ def init_db():
                 try:
                     conn.execute(text("CREATE INDEX IF NOT EXISTS memories_embedding_hnsw_idx ON memories USING hnsw (embedding_vector vector_cosine_ops) WITH (m = 16, ef_construction = 64);"))
                 except Exception as idx_err:
-                    print(f"HNSW index note: {idx_err}")
+                    print(f"memories HNSW index note: {idx_err}")
+
+                conn.execute(text("ALTER TABLE storage_chunks ADD COLUMN IF NOT EXISTS embedding_vector vector(768);"))
+                try:
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS storage_chunks_embedding_hnsw_idx ON storage_chunks USING hnsw (embedding_vector vector_cosine_ops) WITH (m = 16, ef_construction = 64);"))
+                except Exception as s_idx_err:
+                    print(f"storage_chunks HNSW index note: {s_idx_err}")
                 conn.commit()
         except Exception as e:
             print(f"pgvector/column migration note: {e}")
@@ -143,7 +179,6 @@ def init_db():
         except Exception:
             pass
 
-    SQLModel.metadata.create_all(engine)
     print(f"✅ GigaMind database initialized on {'Neon PostgreSQL (Lakebase Postgres)' if is_postgres else 'SQLite'}.")
 
 def get_session():

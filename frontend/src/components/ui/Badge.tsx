@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface AgentBadgeProps {
-  agent: string;
+  agent?: string;
 }
 
 export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent }) => {
@@ -34,7 +34,7 @@ export const AgentBadge: React.FC<AgentBadgeProps> = ({ agent }) => {
   );
 };
 
-export const CategoryBadge: React.FC<{ category: string }> = ({ category }) => {
+export const CategoryBadge: React.FC<{ category?: string }> = ({ category }) => {
   return (
     <span className="inline-flex items-center px-2 py-0.5 text-xs font-sans text-[#8a8f9e] bg-[#161616] border border-[#262626] rounded-none">
       {category || 'general'}

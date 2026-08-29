@@ -7,6 +7,7 @@ import { AgentBadge, CategoryBadge } from '../ui/Badge';
 
 export const VectorSearchLabTab: React.FC = () => {
   const [query, setQuery] = useState('');
+  const [scope, setScope] = useState<'all' | 'memories' | 'files'>('all');
   const [category, setCategory] = useState('');
   const [sourceAgent, setSourceAgent] = useState('');
   const [limit, setLimit] = useState(5);
@@ -24,12 +25,12 @@ export const VectorSearchLabTab: React.FC = () => {
       query.trim(),
       category || undefined,
       sourceAgent || undefined,
-      limit
+      limit,
+      scope
     );
     setResults(res);
     setIsLoading(false);
   };
-
   return (
     <div className="space-y-6 font-sans text-xs">
       {/* HEADER */}
@@ -57,17 +58,60 @@ export const VectorSearchLabTab: React.FC = () => {
       {/* SEARCH CONTROLS FORM */}
       <div className="bg-[#181818] border border-[#262626] p-5 rounded-none space-y-4">
         <form onSubmit={handleSearch} className="space-y-4">
+          {/* SEARCH SCOPE TOGGLE */}
+          <div className="flex items-center gap-2 border-b border-[#262626] pb-3">
+            <span className="text-[#8a8f9e] text-xs font-medium">Search Domain:</span>
+            <div className="flex items-center gap-1 bg-[#101010] p-1 border border-[#262626]">
+              <button
+                type="button"
+                onClick={() => setScope('all')}
+                className={`px-3 py-1 text-xs font-medium transition-all ${
+                  scope === 'all'
+                    ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white shadow-sm'
+                    : 'text-[#8a8f9e] hover:text-white'
+                }`}
+              >
+                All Knowledge (Memories + Files)
+              </button>
+              <button
+                type="button"
+                onClick={() => setScope('memories')}
+                className={`px-3 py-1 text-xs font-medium transition-all ${
+                  scope === 'memories'
+                    ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white shadow-sm'
+                    : 'text-[#8a8f9e] hover:text-white'
+                }`}
+              >
+                Memories Only
+              </button>
+              <button
+                type="button"
+                onClick={() => setScope('files')}
+                className={`px-3 py-1 text-xs font-medium transition-all ${
+                  scope === 'files'
+                    ? 'bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] text-white shadow-sm'
+                    : 'text-[#8a8f9e] hover:text-white'
+                }`}
+              >
+                Files / R2 Storage Only
+              </button>
+            </div>
+          </div>
+
           <div className="relative">
             <Search className="w-4 h-4 text-[#8a8f9e] absolute left-3.5 top-3" />
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Enter prompt query or context statement to test embedding relevance..."
+              placeholder={
+                scope === 'files'
+                  ? "Search inside PDF whitepapers, documents, and code files..."
+                  : "Enter prompt query or context statement to test embedding relevance..."
+              }
               className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none transition-colors font-sans"
             />
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-medium text-[#8a8f9e] mb-1">
@@ -153,17 +197,50 @@ export const VectorSearchLabTab: React.FC = () => {
                 <div key={res.id || idx} className="p-4 space-y-2 hover:bg-[#222222] transition-colors">
                   <div className="flex justify-between items-center gap-4">
                     <div className="flex flex-wrap items-center gap-2 min-w-0">
-                      <span className="bg-[#ff6b00]/15 text-[#ff6b00] border border-[#ff6b00]/30 px-2 py-0.5 rounded-none text-[11px] font-medium uppercase flex-shrink-0">
-                        {res.source}
-                      </span>
-                      <CategoryBadge category={res.category} />
-                      <AgentBadge agent={res.source_agent} />
+                      {res.source === 'file' ? (
+                        <span className="bg-emerald-950/70 text-emerald-300 border border-emerald-700/60 px-2 py-0.5 rounded-none text-[11px] font-mono font-medium uppercase flex-shrink-0 flex items-center gap-1">
+                          <Paperclip className="w-3 h-3 text-emerald-400" />
+                          <span>FILE CHUNK</span>
+                        </span>
+                      ) : (
+                        <span className="bg-[#ff6b00]/15 text-[#ff6b00] border border-[#ff6b00]/30 px-2 py-0.5 rounded-none text-[11px] font-medium uppercase flex-shrink-0">
+                          {res.source}
+                        </span>
+                      )}
+
+                      {res.filename && (
+                        <span className="font-mono text-[11px] text-white font-medium">
+                          {res.filename}
+                        </span>
+                      )}
+
+                      {res.citation && (
+                        <span className="font-mono text-[11px] text-[#8a8f9e] bg-[#141414] px-1.5 py-0.5 border border-[#2a2a2a]">
+                          {res.citation}
+                        </span>
+                      )}
+
+                      {res.category && res.source !== 'file' && <CategoryBadge category={res.category} />}
+                      {res.source_agent && res.source !== 'file' && <AgentBadge agent={res.source_agent} />}
                       <span className="font-mono text-[11px] text-[#8a8f9e] truncate">id: {res.id}</span>
                     </div>
 
-                    <span className="text-[#ff6b00] font-semibold text-xs bg-[#ff6b00]/15 border border-[#ff6b00]/30 px-2.5 py-1 rounded-none flex-shrink-0">
-                      {(res.score * 100).toFixed(1)}% match
-                    </span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {res.url && (
+                        <a
+                          href={res.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] flex items-center gap-1 text-[#8a8f9e] hover:text-[#ff6b00] bg-[#161616] border border-[#333333] px-2 py-1 transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Open File</span>
+                        </a>
+                      )}
+                      <span className="text-[#ff6b00] font-semibold text-xs bg-[#ff6b00]/15 border border-[#ff6b00]/30 px-2.5 py-1 rounded-none flex-shrink-0">
+                        {(res.score * 100).toFixed(1)}% match
+                      </span>
+                    </div>
                   </div>
 
                   <p className="text-white text-xs leading-relaxed break-words break-all">{res.content}</p>

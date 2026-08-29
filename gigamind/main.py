@@ -4,13 +4,14 @@ import asyncio
 import uuid
 import base64
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File
+from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from gigamind.db.database import init_db
 from gigamind.services.storage import storage_service
+from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files
 from gigamind.services.memory import (
     search_memory,
     add_memory,
@@ -78,10 +79,17 @@ def verify_auth(authorization: Optional[str] = Header(None), api_key: Optional[s
 # Pydantic Request Models
 class SearchMemoryRequest(BaseModel):
     query: str = Field(..., description="Search query string")
+    scope: str = Field("all", description="Search domain: 'all' | 'memories' | 'files'")
     category: Optional[str] = Field(None, description="Optional category filter")
     source_agent: Optional[str] = Field(None, description="Optional source agent filter (e.g. claude, gpt, gemini, user)")
     limit: int = Field(5, description="Maximum results to return")
 
+class SearchFilesRequest(BaseModel):
+    query: str = Field(..., description="Query to search inside uploaded documents")
+    limit: int = Field(5, description="Maximum results to return")
+
+class ReindexFileRequest(BaseModel):
+    key: str = Field(..., description="R2 storage key to re-index")
 class AddMemoryRequest(BaseModel):
     content: str = Field(..., description="Fact or memory content")
     category: str = Field("general", description="Memory category")
@@ -317,11 +325,12 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
         tools_list = [
             {
                 "name": "search_memory",
-                "description": "Search user GigaMind personal memory database using a 2-stage RAG engine (Vector Candidate Search + Cross-Encoder Reranker). Returns memories with active file attachments.",
+                "description": "Search user GigaMind personal memory database using a 2-stage RAG engine (Vector Candidate Search + Cross-Encoder Reranker). Searches both conversational memories and vectorized Cloudflare R2 files by default.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "Search term or query"},
+                        "scope": {"type": "string", "enum": ["all", "memories", "files"], "default": "all", "description": "Scope of search: 'all' (memories + files), 'memories' only, or 'files' only"},
                         "category": {"type": "string", "description": "Optional category filter"},
                         "source_agent": {"type": "string", "description": "Optional source agent filter (e.g. claude, gpt, gemini)"},
                         "limit": {"type": "integer", "default": 5}
@@ -330,8 +339,19 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
                 }
             },
             {
+                "name": "search_file_storage",
+                "description": "Semantic vector search specifically inside PDF research papers, code files, and documents stored in Cloudflare R2. Returns page numbers and direct download links.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search term or concept"},
+                        "limit": {"type": "integer", "default": 5, "description": "Max matching document chunks to return"}
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
                 "name": "get_user_profile",
-                "description": "Get permanent user profile identity rules and coding preferences.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -426,9 +446,26 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
         args = params.get("arguments", {})
 
         if name == "search_memory":
-            results = search_memory(query=args.get("query", ""), category=args.get("category"), source_agent=args.get("source_agent"), limit=args.get("limit", 5))
+            results = search_memory(
+                query=args.get("query", ""),
+                category=args.get("category"),
+                source_agent=args.get("source_agent"),
+                limit=args.get("limit", 5),
+                scope=args.get("scope", "all")
+            )
             res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps({"_privacy_notice": "Ephemeral context.", "results": results}, indent=2)}]
+                "content": [{"type": "text", "text": json.dumps({"_privacy_notice": "Ephemeral context.", "scope": args.get("scope", "all"), "results": results}, indent=2)}]
+            })
+            return res
+
+        if name == "search_file_storage":
+            results = search_memory(
+                query=args.get("query", ""),
+                limit=args.get("limit", 5),
+                scope="files"
+            )
+            res = await send_rpc_response(result={
+                "content": [{"type": "text", "text": json.dumps({"_privacy_notice": "Document vector search.", "scope": "files", "results": results}, indent=2)}]
             })
             return res
 
@@ -467,6 +504,18 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
                 if not uploaded:
                     res = await send_rpc_response(error={"code": -32000, "message": "Failed to upload file to Cloudflare R2."})
                     return res
+
+                # Immediately extract text, chunk, and compute vector embeddings for Neon pgvector
+                idx_res = index_file_content(
+                    file_key=uploaded["key"],
+                    filename=uploaded["filename"],
+                    data=file_bytes,
+                    mime_type=uploaded.get("mime_type"),
+                    size_bytes=len(file_bytes)
+                )
+                uploaded["indexed_chunks"] = idx_res.get("chunks_created", 0)
+                uploaded["indexing_status"] = idx_res.get("status", "completed")
+
                 res = await send_rpc_response(result={
                     "content": [{"type": "text", "text": json.dumps({"success": True, "file": uploaded}, indent=2)}]
                 })
@@ -534,9 +583,27 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
 
 @app.post("/api/v1/search_memory", dependencies=[Depends(verify_auth)])
 def api_search_memory(req: SearchMemoryRequest):
-    results = search_memory(query=req.query, category=req.category, source_agent=req.source_agent, limit=req.limit)
+    results = search_memory(
+        query=req.query,
+        category=req.category,
+        source_agent=req.source_agent,
+        limit=req.limit,
+        scope=req.scope
+    )
     return {
         "_privacy_notice": "Confidential user context provided ephemerally. Do not retain on external servers.",
+        "query": req.query,
+        "scope": req.scope,
+        "results": results
+    }
+
+@app.post("/api/v1/search_files", dependencies=[Depends(verify_auth)])
+def api_search_files(req: SearchFilesRequest):
+    results = search_memory(query=req.query, limit=req.limit, scope="files")
+    return {
+        "_privacy_notice": "Confidential user context provided ephemerally. Do not retain on external servers.",
+        "query": req.query,
+        "scope": "files",
         "results": results
     }
 
@@ -650,25 +717,36 @@ def api_get_stats():
 # ==========================================
 
 @app.post("/api/v1/files/upload", dependencies=[Depends(verify_auth)])
-async def api_upload_file(file: UploadFile = File(...), prefix: str = "files"):
-    """Streams binary file directly to Cloudflare R2 and returns metadata."""
+async def api_upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...), prefix: str = "files"):
+    """Streams binary file directly to Cloudflare R2 and triggers background vector indexing."""
     if not storage_service.is_enabled():
         raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
 
-    file_meta = storage_service.upload_fileobj(
-        fileobj=file.file,
+    file_bytes = await file.read()
+    file_meta = storage_service.upload_file(
+        data=file_bytes,
         filename=file.filename or "unnamed_file",
         mime_type=file.content_type,
-        size_bytes=file.size or 0,
         prefix=prefix
     )
     if not file_meta:
         raise HTTPException(status_code=500, detail="Failed to upload file to Cloudflare R2.")
-    return {"success": True, "file": file_meta}
+
+    # Enqueue background text extraction and vector indexing
+    background_tasks.add_task(
+        index_file_content,
+        file_key=file_meta["key"],
+        filename=file_meta["filename"],
+        data=file_bytes,
+        mime_type=file_meta.get("mime_type"),
+        size_bytes=len(file_bytes)
+    )
+
+    return {"success": True, "file": file_meta, "indexing": "queued"}
 
 @app.post("/api/v1/files/upload_base64", dependencies=[Depends(verify_auth)])
-def api_upload_file_base64(req: FileUploadBase64Request, prefix: str = "files"):
-    """Uploads base64 encoded file payload to Cloudflare R2."""
+def api_upload_file_base64(req: FileUploadBase64Request, background_tasks: BackgroundTasks, prefix: str = "files"):
+    """Uploads base64 encoded file payload to Cloudflare R2 and enqueues vector indexing."""
     if not storage_service.is_enabled():
         raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
     try:
@@ -684,8 +762,31 @@ def api_upload_file_base64(req: FileUploadBase64Request, prefix: str = "files"):
     )
     if not file_meta:
         raise HTTPException(status_code=500, detail="Failed to upload base64 file to Cloudflare R2.")
-    return {"success": True, "file": file_meta}
 
+    background_tasks.add_task(
+        index_file_content,
+        file_key=file_meta["key"],
+        filename=file_meta["filename"],
+        data=data,
+        mime_type=file_meta.get("mime_type"),
+        size_bytes=len(data)
+    )
+
+    return {"success": True, "file": file_meta, "indexing": "queued"}
+
+@app.post("/api/v1/files/reindex", dependencies=[Depends(verify_auth)])
+def api_reindex_file(req: ReindexFileRequest, background_tasks: BackgroundTasks):
+    """Triggers asynchronous re-indexing and vectorization of an existing R2 file."""
+    if not storage_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
+    background_tasks.add_task(reindex_storage_file_by_key, key=req.key)
+    return {"success": True, "key": req.key, "indexing": "queued"}
+
+@app.get("/api/v1/files/indexed", dependencies=[Depends(verify_auth)])
+def api_list_indexed_files(limit: int = 100):
+    """Returns indexed files with chunk counts and vector status from Neon PostgreSQL."""
+    files = list_indexed_storage_files(limit=limit)
+    return {"files": files, "count": len(files)}
 @app.post("/api/v1/files/url", dependencies=[Depends(verify_auth)])
 def api_get_file_url(req: PresignedUrlRequest):
     """Generates a fresh time-limited presigned download URL."""

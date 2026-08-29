@@ -46,17 +46,40 @@ export interface Conversation {
   created_at: string;
 }
 
+export interface StorageFile {
+  id: string;
+  key: string;
+  filename: string;
+  mime_type?: string;
+  size_bytes: number;
+  source_agent?: string;
+  extracted_text_length: number;
+  total_chunks: number;
+  indexing_status: 'completed' | 'pending' | 'failed' | 'unsupported' | string;
+  url?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface SearchResult {
   id: string;
-  source: 'memory' | 'profile';
+  source: 'memory' | 'profile' | 'file' | string;
   content: string;
-  category: string;
-  source_agent: SourceAgent;
+  category?: string;
+  source_agent?: SourceAgent;
   score: number;
   vector_score?: number;
   rerank_score?: number;
   tags?: string[];
   attachments?: MemoryAttachment[];
+  filename?: string;
+  file_key?: string;
+  file_id?: string;
+  page_number?: number;
+  chunk_index?: number;
+  total_chunks?: number;
+  citation?: string;
+  url?: string;
 }
 
 export interface Stats {

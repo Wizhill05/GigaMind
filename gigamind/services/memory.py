@@ -3,11 +3,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from sqlmodel import Session, select, text
-from gigamind.db.database import engine, is_postgres, ProfileItem, MemoryItem, ConversationItem, TaskSessionItem
+from gigamind.db.database import engine, is_postgres, ProfileItem, MemoryItem, ConversationItem, TaskSessionItem, StorageFileItem, StorageChunkItem
 from gigamind.services.embedding import generate_embedding, cosine_similarity
 from gigamind.services.chunking import chunk_text
 from gigamind.services.reranker import rerank_candidates
 from gigamind.services.storage import storage_service
+from gigamind.services.indexing import delete_storage_file_index, delete_all_storage_file_indexes
 
 
 def _hydrate_attachments(attachments_raw: Any, media_url: Optional[str] = None, media_type: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -58,13 +59,21 @@ def search_memory(
     query: str,
     category: Optional[str] = None,
     source_agent: Optional[str] = None,
-    limit: int = 5
+    limit: int = 5,
+    scope: str = "all"
 ) -> List[Dict[str, Any]]:
     """
-    2-Stage RAG Retrieval Engine:
-    - Stage 1: Vector Candidate Retrieval (Top 30 candidates) via PostgreSQL pgvector or vectorized scanning.
-    - Stage 2: Cross-Encoder Rerank Pass (Top limit items returned) via neural interaction scoring.
+    Unified 2-Stage RAG Search Engine:
+    - scope: "all" (searches memories, profile rules & vectorized R2 files),
+             "memories" (searches textual memories only),
+             "files" (searches vectorized file storage chunks only).
+    - Stage 1: Vector Candidate Retrieval (Top 30 from memories, Top 30 from file storage).
+    - Stage 2: Cross-Encoder Neural Rerank Pass (Top limit items returned across all knowledge).
     """
+    scope_clean = (scope or "all").lower().strip()
+    if scope_clean not in ("all", "memories", "files"):
+        scope_clean = "all"
+
     query_vector = generate_embedding(query)
     query_lower = (query or "").lower()
     query_keywords = [k for k in re_words if len(k) > 2] if (re_words := query_lower.split()) else []
@@ -73,147 +82,247 @@ def search_memory(
 
     with Session(engine) as session:
         # ====================================================
-        # STAGE 1: VECTOR CANDIDATE RETRIEVAL (TOP 30 CANDIDATES)
+        # 1. MEMORIES & PROFILE RULES SCAN (if scope: all | memories)
         # ====================================================
-        if is_postgres:
-            try:
-                # Native pgvector SQL similarity search
-                vector_str = f"[{','.join(str(x) for x in query_vector)}]"
-                sql = """
-                SELECT id, content, category, media_type, media_url, source_agent, tags_json, attachments_json, parent_id, chunk_index, total_chunks,
-                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
-                FROM memories
-                WHERE (:cat IS NULL OR category = :cat)
-                  AND (:agent IS NULL OR source_agent = :agent)
-                  AND embedding_vector IS NOT NULL
-                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                LIMIT 30;
-                """
-                params = {"vec": vector_str, "cat": category, "agent": source_agent}
-                rows = session.exec(text(sql), params=params).all()
-
-                for row in rows:
-                    att_raw = getattr(row, "attachments_json", "[]")
-                    m_url = getattr(row, "media_url", None)
-                    m_type = getattr(row, "media_type", None)
-                    hydrated_atts = _hydrate_attachments(att_raw, media_url=m_url, media_type=m_type)
-
-                    c_dict = {
-                        "id": row.id,
-                        "source": "memory",
-                        "content": row.content,
-                        "category": row.category,
-                        "source_agent": row.source_agent or "user",
-                        "score": float(row.vector_score or 0.0),
-                        "tags": json.loads(row.tags_json or "[]"),
-                        "attachments": hydrated_atts,
-                        "parent_id": row.parent_id,
-                        "chunk_index": row.chunk_index,
-                        "total_chunks": row.total_chunks
-                    }
-                    candidates.append(c_dict)
-            except Exception as pg_err:
-                print(f"pgvector query fallback: {pg_err}")
-                session.rollback()
-                candidates = []
-
-        # Fallback / SQLite Candidate Scanner
-        if not candidates:
-            stmt = select(MemoryItem)
-            if category:
-                stmt = stmt.where(MemoryItem.category == category)
-            if source_agent:
-                stmt = stmt.where(MemoryItem.source_agent == source_agent)
-
-            stmt = stmt.order_by(MemoryItem.created_at.desc()).limit(100)
-            memories = session.exec(stmt).all()
-            now_str = datetime.now(timezone.utc).isoformat()
-
-            for mem in memories:
-                score = 0.0
+        if scope_clean in ("all", "memories"):
+            if is_postgres:
                 try:
-                    vec = json.loads(mem.embedding_json)
-                    score += cosine_similarity(query_vector, vec) * 0.7
-                except Exception:
-                    pass
+                    vector_str = f"[{','.join(str(x) for x in query_vector)}]"
+                    sql = """
+                    SELECT id, content, category, media_type, media_url, source_agent, tags_json, attachments_json, parent_id, chunk_index, total_chunks,
+                           1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
+                    FROM memories
+                    WHERE (:cat IS NULL OR category = :cat)
+                      AND (:agent IS NULL OR source_agent = :agent)
+                      AND embedding_vector IS NOT NULL
+                    ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
+                    LIMIT 30;
+                    """
+                    params = {"vec": vector_str, "cat": category, "agent": source_agent}
+                    rows = session.exec(text(sql), params=params).all()
 
-                content_lower = mem.content.lower()
-                kw_hits = sum(1 for kw in query_keywords if kw in content_lower)
-                if query_keywords:
-                    score += (kw_hits / len(query_keywords)) * 0.3
+                    for row in rows:
+                        att_raw = getattr(row, "attachments_json", "[]")
+                        m_url = getattr(row, "media_url", None)
+                        m_type = getattr(row, "media_type", None)
+                        hydrated_atts = _hydrate_attachments(att_raw, media_url=m_url, media_type=m_type)
 
-                if score > 0.05:
+                        c_dict = {
+                            "id": row.id,
+                            "source": "memory",
+                            "content": row.content,
+                            "category": row.category,
+                            "source_agent": row.source_agent or "user",
+                            "score": float(row.vector_score or 0.0),
+                            "tags": json.loads(row.tags_json or "[]"),
+                            "attachments": hydrated_atts,
+                            "parent_id": row.parent_id,
+                            "chunk_index": row.chunk_index,
+                            "total_chunks": row.total_chunks
+                        }
+                        candidates.append(c_dict)
+                except Exception as pg_err:
+                    print(f"pgvector memories query fallback: {pg_err}")
+                    session.rollback()
+
+            # Fallback / SQLite Candidate Scanner for memories
+            if not any(c.get("source") == "memory" for c in candidates):
+                stmt = select(MemoryItem)
+                if category:
+                    stmt = stmt.where(MemoryItem.category == category)
+                if source_agent:
+                    stmt = stmt.where(MemoryItem.source_agent == source_agent)
+
+                stmt = stmt.order_by(MemoryItem.created_at.desc()).limit(100)
+                memories = session.exec(stmt).all()
+                now_str = datetime.now(timezone.utc).isoformat()
+
+                for mem in memories:
+                    score = 0.0
+                    try:
+                        vec = json.loads(mem.embedding_json)
+                        score += cosine_similarity(query_vector, vec) * 0.7
+                    except Exception:
+                        pass
+
+                    content_lower = mem.content.lower()
+                    kw_hits = sum(1 for kw in query_keywords if kw in content_lower)
+                    if query_keywords:
+                        score += (kw_hits / len(query_keywords)) * 0.3
+
+                    if score > 0.05:
+                        candidates.append({
+                            "id": mem.id,
+                            "source": "memory",
+                            "content": mem.content,
+                            "category": mem.category,
+                            "source_agent": getattr(mem, "source_agent", "user") or "user",
+                            "score": round(score, 4),
+                            "tags": json.loads(mem.tags_json or "[]"),
+                            "attachments": _hydrate_attachments(getattr(mem, "attachments_json", "[]"), media_url=mem.media_url, media_type=mem.media_type),
+                            "parent_id": mem.parent_id,
+                            "chunk_index": mem.chunk_index,
+                            "total_chunks": mem.total_chunks
+                        })
+                        mem.last_accessed = now_str
+
+                session.commit()
+
+            # Search Profile Rules
+            profile_stmt = select(ProfileItem)
+            if category:
+                profile_stmt = profile_stmt.where(ProfileItem.category == category)
+            if source_agent:
+                profile_stmt = profile_stmt.where(ProfileItem.source_agent == source_agent)
+
+            profiles = session.exec(profile_stmt).all()
+            for prof in profiles:
+                p_text = f"{prof.key}: {prof.value}".lower()
+                p_score = 0.0
+                for kw in query_keywords:
+                    if kw in p_text:
+                        p_score += 0.4
+
+                if p_score > 0.1:
                     candidates.append({
-                        "id": mem.id,
-                        "source": "memory",
-                        "content": mem.content,
-                        "category": mem.category,
-                        "source_agent": getattr(mem, "source_agent", "user") or "user",
-                        "score": round(score, 4),
-                        "tags": json.loads(mem.tags_json or "[]"),
-                        "attachments": _hydrate_attachments(getattr(mem, "attachments_json", "[]"), media_url=mem.media_url, media_type=mem.media_type),
-                        "parent_id": mem.parent_id,
-                        "chunk_index": mem.chunk_index,
-                        "total_chunks": mem.total_chunks
+                        "id": prof.id,
+                        "source": "profile",
+                        "content": f"[PROFILE RULE] {prof.key} = {prof.value}",
+                        "category": prof.category,
+                        "source_agent": getattr(prof, "source_agent", "user") or "user",
+                        "score": round(p_score, 4)
                     })
-                    mem.last_accessed = now_str
 
-            session.commit()
+        # ====================================================
+        # 2. VECTORIZED OBJECT STORAGE SCAN (if scope: all | files)
+        # ====================================================
+        if scope_clean in ("all", "files"):
+            file_candidates: List[Dict[str, Any]] = []
+            if is_postgres:
+                try:
+                    vector_str = f"[{','.join(str(x) for x in query_vector)}]"
+                    sql_files = """
+                    SELECT id, file_id, file_key, filename, chunk_index, total_chunks, page_number, content,
+                           1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
+                    FROM storage_chunks
+                    WHERE embedding_vector IS NOT NULL
+                    ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
+                    LIMIT 30;
+                    """
+                    rows_files = session.exec(text(sql_files), params={"vec": vector_str}).all()
+                    for rf in rows_files:
+                        url = None
+                        if storage_service.is_enabled():
+                            url = storage_service.get_presigned_download_url(rf.file_key, filename=rf.filename)
 
-        # Search Profile Rules
-        profile_stmt = select(ProfileItem)
-        if category:
-            profile_stmt = profile_stmt.where(ProfileItem.category == category)
-        if source_agent:
-            profile_stmt = profile_stmt.where(ProfileItem.source_agent == source_agent)
+                        file_candidates.append({
+                            "id": rf.id,
+                            "source": "file",
+                            "content": rf.content,
+                            "filename": rf.filename,
+                            "file_key": rf.file_key,
+                            "file_id": rf.file_id,
+                            "page_number": rf.page_number,
+                            "chunk_index": rf.chunk_index,
+                            "total_chunks": rf.total_chunks,
+                            "score": float(rf.vector_score or 0.0),
+                            "url": url or "",
+                            "category": "file"
+                        })
+                except Exception as pg_f_err:
+                    print(f"pgvector storage_chunks query note: {pg_f_err}")
+                    session.rollback()
 
-        profiles = session.exec(profile_stmt).all()
-        for prof in profiles:
-            p_text = f"{prof.key}: {prof.value}".lower()
-            p_score = 0.0
-            for kw in query_keywords:
-                if kw in p_text:
-                    p_score += 0.4
+            # Fallback SQLite candidate scanner for storage chunks
+            if not file_candidates:
+                f_chunks = session.exec(select(StorageChunkItem).limit(100)).all()
+                for fc in f_chunks:
+                    f_score = 0.0
+                    try:
+                        fc_vec = json.loads(fc.embedding_json)
+                        f_score += cosine_similarity(query_vector, fc_vec) * 0.7
+                    except Exception:
+                        pass
 
-            if p_score > 0.1:
-                candidates.append({
-                    "id": prof.id,
-                    "source": "profile",
-                    "content": f"[PROFILE RULE] {prof.key} = {prof.value}",
-                    "category": prof.category,
-                    "source_agent": getattr(prof, "source_agent", "user") or "user",
-                    "score": round(p_score, 4)
-                })
+                    fc_lower = fc.content.lower()
+                    kw_hits = sum(1 for kw in query_keywords if kw in fc_lower)
+                    if query_keywords:
+                        f_score += (kw_hits / len(query_keywords)) * 0.3
 
-    # Sort top 30 candidates by initial score
+                    if f_score > 0.05:
+                        url = None
+                        if storage_service.is_enabled():
+                            url = storage_service.get_presigned_download_url(fc.file_key, filename=fc.filename)
+
+                        file_candidates.append({
+                            "id": fc.id,
+                            "source": "file",
+                            "content": fc.content,
+                            "filename": fc.filename,
+                            "file_key": fc.file_key,
+                            "file_id": fc.file_id,
+                            "page_number": fc.page_number,
+                            "chunk_index": fc.chunk_index,
+                            "total_chunks": fc.total_chunks,
+                            "score": round(f_score, 4),
+                            "url": url or "",
+                            "category": "file"
+                        })
+
+            candidates.extend(file_candidates)
+
+    # Sort all candidates by initial score
     candidates.sort(key=lambda x: x["score"], reverse=True)
-    top_candidates = candidates[:30]
+    top_candidates = candidates[:50]
 
     # ====================================================
-    # STAGE 2: CROSS-ENCODER RERANK PASS
+    # STAGE 2: CROSS-ENCODER NEURAL RERANK PASS
     # ====================================================
     reranked_results = rerank_candidates(query=query, candidates=top_candidates, top_n=limit)
 
     final_output = []
     for item in reranked_results:
-        res_item = {
-            "id": item["id"],
-            "source": item.get("source", "memory"),
-            "content": item["content"],
-            "category": item.get("category", "general"),
-            "source_agent": item.get("source_agent", "user"),
-            "score": item["score"],
-            "vector_score": item.get("vector_score", item["score"]),
-            "rerank_score": item.get("rerank_score", item["score"]),
-            "parent_id": item.get("parent_id"),
-            "tags": item.get("tags", []),
-            "attachments": item.get("attachments", [])
-        }
-        if item.get("chunk_index") is not None:
-            res_item["chunk_info"] = {
-                "index": item["chunk_index"],
-                "total": item.get("total_chunks", 1)
+        src = item.get("source", "memory")
+        if src == "file":
+            res_item = {
+                "id": item["id"],
+                "source": "file",
+                "content": item["content"],
+                "filename": item.get("filename", ""),
+                "file_key": item.get("file_key", ""),
+                "file_id": item.get("file_id", ""),
+                "page_number": item.get("page_number"),
+                "chunk_index": item.get("chunk_index", 0),
+                "total_chunks": item.get("total_chunks", 1),
+                "score": item["score"],
+                "vector_score": item.get("vector_score", item["score"]),
+                "rerank_score": item.get("rerank_score", item["score"]),
+                "url": item.get("url", "")
             }
+            if item.get("page_number") is not None:
+                res_item["citation"] = f"{item.get('filename')} (Page {item.get('page_number')})"
+            else:
+                res_item["citation"] = f"{item.get('filename')} (Chunk {item.get('chunk_index', 0) + 1}/{item.get('total_chunks', 1)})"
+        else:
+            res_item = {
+                "id": item["id"],
+                "source": src,
+                "content": item["content"],
+                "category": item.get("category", "general"),
+                "source_agent": item.get("source_agent", "user"),
+                "score": item["score"],
+                "vector_score": item.get("vector_score", item["score"]),
+                "rerank_score": item.get("rerank_score", item["score"]),
+                "parent_id": item.get("parent_id"),
+                "tags": item.get("tags", []),
+                "attachments": item.get("attachments", [])
+            }
+            if item.get("chunk_index") is not None:
+                res_item["chunk_info"] = {
+                    "index": item["chunk_index"],
+                    "total": item.get("total_chunks", 1)
+                }
+
         final_output.append(res_item)
 
     return final_output
@@ -508,14 +617,18 @@ def delete_memory(memory_id: str) -> bool:
                 except Exception:
                     pass
             session.delete(item)
-        session.commit()
-
-        # Cascade delete from Cloudflare R2
-        if keys_to_purge and storage_service.is_enabled():
-            try:
-                storage_service.delete_files(list(keys_to_purge))
-            except Exception as e:
-                print(f"R2 cascading cleanup note: {e}")
+        # Cascade delete from Cloudflare R2 and purge vectorized chunks
+        if keys_to_purge:
+            for k in keys_to_purge:
+                try:
+                    delete_storage_file_index(k)
+                except Exception:
+                    pass
+            if storage_service.is_enabled():
+                try:
+                    storage_service.delete_files(list(keys_to_purge))
+                except Exception as e:
+                    print(f"R2 cascading cleanup note: {e}")
 
         return True
 
@@ -537,9 +650,12 @@ def reset_all_memories() -> int:
                 except Exception:
                     pass
             session.delete(mem)
-        session.commit()
+        # Cascade batch delete from Cloudflare R2 and purge all storage chunks
+        try:
+            delete_all_storage_file_indexes()
+        except Exception:
+            pass
 
-        # Cascade batch delete from Cloudflare R2
         if keys_to_purge and storage_service.is_enabled():
             try:
                 storage_service.delete_files(list(keys_to_purge))
