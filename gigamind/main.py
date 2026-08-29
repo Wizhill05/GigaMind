@@ -90,6 +90,11 @@ class SearchFilesRequest(BaseModel):
 
 class ReindexFileRequest(BaseModel):
     key: str = Field(..., description="R2 storage key to re-index")
+
+class DeleteMemoryApiRequest(BaseModel):
+    memory_id: str = Field(..., description="The exact ID of the memory item to delete (e.g. 'mem_123')")
+    user_confirmed: bool = Field(True, description="Confirmation flag that user explicitly approved deletion")
+
 class AddMemoryRequest(BaseModel):
     content: str = Field(..., description="Fact or memory content")
     category: str = Field("general", description="Memory category")
@@ -436,6 +441,24 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
                     },
                     "required": ["key", "value"]
                 }
+            },
+            {
+                "name": "delete_memory",
+                "description": "Permanently delete a specific memory item from the GigaMind database. MANDATORY CONFIRMATION PROTOCOL: You MUST explicitly ask the user for permission and receive an affirmative response with the memory ID and summary before calling this tool. NEVER delete memories autonomously without direct user confirmation.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "memory_id": {
+                            "type": "string",
+                            "description": "The exact ID of the memory item to delete (e.g. 'mem_2b2d33ca34d0')"
+                        },
+                        "user_confirmed": {
+                            "type": "boolean",
+                            "description": "MUST be true. Indicates that the user explicitly authorized the deletion of this memory."
+                        }
+                    },
+                    "required": ["memory_id", "user_confirmed"]
+                }
             }
         ]
         res = await send_rpc_response(result={"tools": tools_list})
@@ -537,6 +560,43 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
                 return res
             res = await send_rpc_response(result={
                 "content": [{"type": "text", "text": json.dumps({"key": args.get("key"), "url": url}, indent=2)}]
+            })
+            return res
+
+        if name == "delete_memory":
+            memory_id = args.get("memory_id", "").strip()
+            user_confirmed = args.get("user_confirmed", False)
+            if not user_confirmed:
+                res = await send_rpc_response(error={
+                    "code": -32000,
+                    "message": "Permission denied. You must explicitly ask the user for confirmation and pass user_confirmed=true before deleting a memory."
+                })
+                return res
+
+            if not memory_id:
+                res = await send_rpc_response(error={
+                    "code": -32602,
+                    "message": "memory_id argument is required."
+                })
+                return res
+
+            success = delete_memory(memory_id)
+            if not success:
+                res = await send_rpc_response(error={
+                    "code": -32000,
+                    "message": f"Memory item '{memory_id}' not found."
+                })
+                return res
+
+            res = await send_rpc_response(result={
+                "content": [{
+                    "type": "text",
+                    "text": json.dumps({
+                        "success": True,
+                        "deleted_memory_id": memory_id,
+                        "message": f"Memory {memory_id} was permanently deleted upon user confirmation."
+                    }, indent=2)
+                }]
             })
             return res
 
@@ -682,6 +742,16 @@ def api_delete_memory(id: str):
     if not success:
         raise HTTPException(status_code=404, detail=f"Memory '{id}' not found")
     return {"success": True, "id": id, "message": f"Memory {id} deleted successfully"}
+
+@app.post("/api/v1/delete_memory", dependencies=[Depends(verify_auth)])
+def api_post_delete_memory(req: DeleteMemoryApiRequest):
+    """Allows Custom GPT Actions and API clients to delete a memory by ID with confirmation."""
+    if not req.user_confirmed:
+        raise HTTPException(status_code=400, detail="User confirmation required to delete memory.")
+    success = delete_memory(req.memory_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Memory '{req.memory_id}' not found")
+    return {"success": True, "id": req.memory_id, "message": f"Memory {req.memory_id} deleted successfully"}
 
 @app.put("/api/v1/memories/{id}", dependencies=[Depends(verify_auth)])
 def api_update_memory(id: str, req: UpdateMemoryRequest):
