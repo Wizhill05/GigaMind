@@ -1062,7 +1062,11 @@ def get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = 
         items = session.exec(stmt.order_by(ConversationItem.created_at.desc()).offset(offset).limit(limit)).all()
 
         res_convs = []
+        vectorized_count = 0
         for conv in items:
+            has_vec = bool(conv.embedding_json and conv.embedding_json != "[]")
+            if has_vec:
+                vectorized_count += 1
             res_convs.append({
                 "id": conv.id,
                 "platform": conv.platform,
@@ -1070,18 +1074,59 @@ def get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = 
                 "summary": conv.summary,
                 "source_agent": getattr(conv, "source_agent", "user") or "user",
                 "messages": json.loads(conv.messages_json or "[]"),
+                "is_vectorized": has_vec,
                 "created_at": conv.created_at
             })
 
         pages = (total + limit - 1) // limit if limit > 0 else 1
+        total_vectorized = sum(1 for c in all_items if c.embedding_json and c.embedding_json != "[]")
         return {
             "conversations": res_convs,
             "total": total,
+            "total_vectorized": total_vectorized,
             "page": page,
             "limit": limit,
             "pages": pages
         }
 
+def delete_conversation(conv_id: str) -> bool:
+    """Deletes a conversation transcript session by ID."""
+    with Session(engine) as session:
+        conv = session.exec(select(ConversationItem).where(ConversationItem.id == conv_id)).first()
+        if not conv:
+            return False
+        session.delete(conv)
+        session.commit()
+        return True
+
+def vectorize_conversation(conv_id: str) -> bool:
+    """Generates Gemini Embedding 2 vector for a single conversation."""
+    with Session(engine) as session:
+        c = session.exec(select(ConversationItem).where(ConversationItem.id == conv_id)).first()
+        if not c:
+            return False
+        msgs_preview = ""
+        if c.messages_json:
+            try:
+                msgs = json.loads(c.messages_json)
+                msgs_preview = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')[:100]}" for m in msgs[:4])
+            except Exception:
+                pass
+        text_for_vector = f"Chat Platform: {c.platform}. Title: {c.title}\nSummary: {c.summary}\n{msgs_preview}"
+        emb = generate_embedding(text_for_vector)
+        c.embedding_json = json.dumps(emb)
+        session.add(c)
+        session.commit()
+
+        if is_postgres:
+            try:
+                with Session(engine) as p_sess:
+                    vec_str = f"[{','.join(str(x) for x in emb)}]"
+                    p_sess.exec(text("UPDATE conversations SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": vec_str, "id": c.id})
+                    p_sess.commit()
+            except Exception as p_err:
+                print(f"vectorize conv pgvector note: {p_err}")
+        return True
 def delete_profile_rule(rule_id: str) -> bool:
     with Session(engine) as session:
         item = session.exec(select(ProfileItem).where((ProfileItem.id == rule_id) | (ProfileItem.key == rule_id))).first()

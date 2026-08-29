@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { X, Copy, Check, User, Bot } from 'lucide-react';
+import { X, Copy, Check, User, Bot, Trash2, Sparkles, RefreshCw } from 'lucide-react';
 import { Conversation } from '../../types';
 import { AgentBadge } from '../ui/Badge';
 
 interface TranscriptDrawerProps {
   conversation: Conversation | null;
   onClose: () => void;
+  onDelete?: (id: string) => void;
+  onVectorize?: (id: string) => void;
 }
 
-export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation, onClose }) => {
+export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation, onClose, onDelete, onVectorize }) => {
   const [copied, setCopied] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
 
@@ -72,6 +74,31 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
           </div>
 
           <div className="flex items-center gap-2">
+            {onVectorize && (
+              <button
+                onClick={() => onVectorize(conversation.id)}
+                className={`p-2 border rounded-none transition-colors btn-press flex items-center gap-1 text-[11px] font-mono ${
+                  conversation.is_vectorized
+                    ? 'bg-[#22c55e]/15 border-[#22c55e]/30 text-[#22c55e]'
+                    : 'bg-[#161616] border-[#333333] hover:border-[#ff6b00]/40 text-[#ff6b00]'
+                }`}
+                title={conversation.is_vectorized ? 'Vectorized (Click to re-vectorize)' : 'Generate Vector Embedding'}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{conversation.is_vectorized ? 'Vectorized' : 'Vectorize'}</span>
+              </button>
+            )}
+
+            {onDelete && (
+              <button
+                onClick={() => onDelete(conversation.id)}
+                className="p-2 bg-[#161616] border border-[#333333] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 rounded-none transition-colors btn-press"
+                title="Delete Transcript from Database"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+
             <button
               onClick={handleCopyTranscript}
               className="p-2 bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white rounded-none transition-colors btn-press"
@@ -79,9 +106,10 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
             >
               {copied ? <Check className="w-4 h-4 text-amber-400" /> : <Copy className="w-4 h-4" />}
             </button>
+
             <button
               onClick={handleAnimatedClose}
-              className="p-2 bg-[#161616] border border-[#333333] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 rounded-none transition-colors btn-press"
+              className="p-2 bg-[#161616] border border-[#333333] text-[#8a8f9e] hover:text-white rounded-none transition-colors btn-press"
               title="Close Drawer"
             >
               <X className="w-4 h-4" />

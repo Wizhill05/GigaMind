@@ -198,7 +198,7 @@ export async function fetchConversations(
   limit: number = 20,
   platform?: string,
   sourceAgent?: string
-): Promise<{ conversations: Conversation[]; total: number; page: number; pages: number } | null> {
+): Promise<{ conversations: Conversation[]; total: number; total_vectorized?: number; page: number; pages: number } | null> {
   try {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (platform) params.append('platform', platform);
@@ -210,6 +210,45 @@ export async function fetchConversations(
   } catch (err) {
     console.error('fetchConversations error:', err);
     return null;
+  }
+}
+
+export async function deleteConversation(id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/v1/conversations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('deleteConversation error:', err);
+    return false;
+  }
+}
+
+export async function vectorizeConversation(id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/v1/conversations/${encodeURIComponent(id)}/vectorize`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('vectorizeConversation error:', err);
+    return false;
+  }
+}
+
+export async function backfillConversationVectors(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/v1/conversations/backfill_vectors', {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('backfillConversationVectors error:', err);
+    return false;
   }
 }
 

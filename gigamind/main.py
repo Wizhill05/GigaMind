@@ -27,7 +27,9 @@ from gigamind.services.memory import (
     export_all_memories,
     import_conversations_data,
     search_conversations,
-    backfill_conversation_vectors
+    backfill_conversation_vectors,
+    delete_conversation,
+    vectorize_conversation
 )
 from gigamind.services.oauth import (
     create_authorization_code,
@@ -981,6 +983,22 @@ def api_update_memory(id: str, req: UpdateMemoryRequest):
 def api_get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = None, source_agent: Optional[str] = None):
     return get_conversations(page=page, limit=limit, platform=platform, source_agent=source_agent)
 
+
+@app.delete("/api/v1/conversations/{id}", dependencies=[Depends(verify_auth)])
+def api_delete_conversation(id: str):
+    """Deletes a conversation transcript log by ID."""
+    success = delete_conversation(id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Conversation '{id}' not found")
+    return {"success": True, "id": id, "message": f"Conversation {id} deleted successfully"}
+
+@app.post("/api/v1/conversations/{id}/vectorize", dependencies=[Depends(verify_auth)])
+def api_vectorize_conversation(id: str):
+    """Vectorizes a single conversation transcript using Gemini Embedding 2."""
+    success = vectorize_conversation(id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Conversation '{id}' not found")
+    return {"success": True, "id": id, "message": f"Conversation {id} vectorized successfully"}
 @app.delete("/api/v1/profile/{id}", dependencies=[Depends(verify_auth)])
 def api_delete_profile_rule(id: str):
     success = delete_profile_rule(id)

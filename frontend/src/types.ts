@@ -43,6 +43,8 @@ export interface Conversation {
   summary: string;
   source_agent: SourceAgent;
   messages: ConversationMessage[];
+  is_vectorized?: boolean;
+  score?: number;
   created_at: string;
 }
 

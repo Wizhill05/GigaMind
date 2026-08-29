@@ -16,7 +16,7 @@ import { TranscriptDrawer } from './components/modals/TranscriptDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { Stats, Memory, Conversation } from './types';
-import { fetchStats, addMemory, updateMemory, setProfileRule, getApiKey } from './api';
+import { fetchStats, addMemory, updateMemory, setProfileRule, getApiKey, deleteConversation, vectorizeConversation } from './api';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -96,6 +96,32 @@ export const AppContent: React.FC = () => {
     await setProfileRule(data);
     toast(`Profile rule '${data.key}' saved successfully`, 'success');
     loadStats();
+  };
+
+  // Transcript drawer handlers
+  const handleDeleteTranscript = async (id: string) => {
+    if (!window.confirm("Permanently delete conversation transcript from database?")) return;
+    const ok = await deleteConversation(id);
+    if (ok) {
+      toast("Deleted conversation transcript", "success");
+      setActiveTranscript(null);
+      loadStats();
+    } else {
+      toast("Failed to delete conversation transcript", "error");
+    }
+  };
+
+  const handleVectorizeTranscript = async (id: string) => {
+    toast("Vectorizing transcript with Gemini Embedding 2...", "info");
+    const ok = await vectorizeConversation(id);
+    if (ok) {
+      toast("Transcript vectorized successfully", "success");
+      if (activeTranscript && activeTranscript.id === id) {
+        setActiveTranscript({ ...activeTranscript, is_vectorized: true });
+      }
+    } else {
+      toast("Failed to vectorize transcript", "error");
+    }
   };
 
   return (
@@ -178,6 +204,8 @@ export const AppContent: React.FC = () => {
       <TranscriptDrawer
         conversation={activeTranscript}
         onClose={() => setActiveTranscript(null)}
+        onDelete={handleDeleteTranscript}
+        onVectorize={handleVectorizeTranscript}
       />
 
       <CommandPalette

@@ -14,11 +14,22 @@ import {
   Terminal,
   FolderInput,
   Search,
-  Sparkles
+  Sparkles,
+  Trash2,
+  Clock,
+  Zap
 } from 'lucide-react';
 import { PixelTerminal } from '../ui/PixelIcons';
 import { Conversation } from '../../types';
-import { fetchConversations, importConversationsFile, importConversationsPath, searchConversations } from '../../api';
+import {
+  fetchConversations,
+  importConversationsFile,
+  importConversationsPath,
+  searchConversations,
+  deleteConversation,
+  vectorizeConversation,
+  backfillConversationVectors
+} from '../../api';
 import { AgentBadge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 
@@ -31,6 +42,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [totalVectorized, setTotalVectorized] = useState(0);
   const [platformFilter, setPlatformFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
 
@@ -44,6 +56,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   const [localPathInput, setLocalPathInput] = useState('C:\\Users\\Aryan\\Downloads\\conversations-000\\conversations.json');
   const [importPlatform, setImportPlatform] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [isBackfilling, setIsBackfilling] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const { toast } = useToast();
@@ -54,6 +67,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
       setConversations(res.conversations);
       setTotalPages(res.pages || 1);
       setTotalCount(res.total || 0);
+      setTotalVectorized(res.total_vectorized || 0);
     }
   };
 
@@ -131,6 +145,46 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
     }
   };
 
+  // Handle single conversation deletion
+  const handleDeleteConversation = async (id: string, title?: string) => {
+    if (!window.confirm(`Permanently delete conversation transcript "${title || id}" from database?`)) {
+      return;
+    }
+    const ok = await deleteConversation(id);
+    if (ok) {
+      toast(`Deleted conversation transcript`, 'success');
+      loadConversations();
+    } else {
+      toast(`Failed to delete conversation transcript`, 'error');
+    }
+  };
+
+  // Handle single conversation vectorization
+  const handleVectorizeSingle = async (id: string) => {
+    toast('Vectorizing transcript with Gemini Embedding 2...', 'info');
+    const ok = await vectorizeConversation(id);
+    if (ok) {
+      toast('Transcript vectorized successfully', 'success');
+      loadConversations();
+    } else {
+      toast('Failed to vectorize transcript', 'error');
+    }
+  };
+
+  // Handle bulk backfill vectorization
+  const handleBackfillAll = async () => {
+    setIsBackfilling(true);
+    toast('Starting background vector backfill with Gemini Embedding 2...', 'info');
+    const ok = await backfillConversationVectors();
+    if (ok) {
+      toast('Bulk vectorization queued in background', 'success');
+      setTimeout(loadConversations, 3000);
+    } else {
+      toast('Failed to trigger bulk vectorization', 'error');
+    }
+    setIsBackfilling(false);
+  };
+
   return (
     <div className="space-y-6 font-sans text-xs">
       {/* HEADER & TOP CONTROLS */}
@@ -141,21 +195,36 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
               <MessageSquare className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-white tracking-tight">Chat Logs & Transcripts</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-white tracking-tight">Chat Logs & Transcripts</h2>
+                <span className="px-2 py-0.2 bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 font-mono text-[10px] font-semibold">
+                  {totalVectorized} / {totalCount} Vectorized
+                </span>
+              </div>
               <p className="text-xs text-[#8a8f9e]">
-                Imported conversation history from Claude, ChatGPT, and AI agent sessions ({totalCount} total)
+                Conversation history exports from Claude, ChatGPT, and AI agent sessions
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button
             onClick={() => { setSearchResults(null); setSearchQuery(''); loadConversations(); }}
             className="px-3 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-white border border-[#333333] transition-colors flex items-center gap-1.5 font-mono text-[11px]"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Refresh</span>
+          </button>
+
+          <button
+            onClick={handleBackfillAll}
+            disabled={isBackfilling}
+            className="px-3 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#22c55e] hover:text-white border border-[#333333] transition-colors flex items-center gap-1.5 font-mono text-[11px]"
+            title="Compute Gemini Embedding 2 vectors for all unindexed transcripts"
+          >
+            <Zap className={`w-3.5 h-3.5 ${isBackfilling ? 'animate-spin' : ''}`} />
+            <span>Vectorize All</span>
           </button>
 
           <button
@@ -237,7 +306,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                   <span className="font-semibold text-white text-xs">Option 2: Upload JSON Export</span>
                 </div>
                 <p className="text-[11px] text-[#8a8f9e] mt-1">
-                  Select and upload an exported <code>conversations.json</code> or zip file from Claude/ChatGPT settings:
+                  Select and upload an exported <code>conversations.json</code> file from Claude/ChatGPT settings:
                 </p>
               </div>
 
@@ -321,7 +390,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
             <PixelTerminal className="w-4 h-4 text-[#ff6b00]" />
             <span className="font-semibold text-white">Application Transcript Logs</span>
             <span className="px-1.5 py-0.5 bg-[#262626] text-[#8a8f9e] font-mono text-[10px]">
-              {searchResults !== null ? `${searchResults.length} matching search result(s)` : `${totalCount} total`}
+              {searchResults !== null ? `${searchResults.length} matching result(s)` : `${totalCount} total`}
             </span>
           </div>
 
@@ -395,6 +464,27 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                         {conv.platform}
                       </span>
                       <AgentBadge agent={conv.source_agent} />
+                      
+                      {/* VECTORIZATION STATUS BADGE */}
+                      {conv.is_vectorized ? (
+                        <span className="inline-flex items-center gap-1 bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 px-2 py-0.2 text-[10px] font-mono font-semibold">
+                          <Sparkles className="w-3 h-3" />
+                          <span>Vectorized</span>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleVectorizeSingle(conv.id);
+                          }}
+                          className="inline-flex items-center gap-1 bg-amber-500/15 text-amber-400 hover:text-amber-300 border border-amber-500/30 px-2 py-0.2 text-[10px] font-mono font-semibold transition-colors"
+                          title="Click to compute vector embedding with Gemini Embedding 2"
+                        >
+                          <Clock className="w-3 h-3" />
+                          <span>Pending Vectorization</span>
+                        </button>
+                      )}
+
                       {conv.score !== undefined && (
                         <span className="text-[10px] font-mono bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 px-1.5 py-0.2">
                           {(conv.score * 100).toFixed(1)}% match
@@ -408,7 +498,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 flex-shrink-0">
+                <div className="flex items-center gap-2.5 flex-shrink-0">
                   <span className="text-[11px] font-mono text-[#8a8f9e]">
                     {conv.messages ? conv.messages.length : (conv.messages_count || 0)} messages
                   </span>
@@ -421,7 +511,18 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                     className="bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#ff6b00] hover:text-[#ff8800] px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 font-medium flex-shrink-0"
                   >
                     <Eye className="w-3.5 h-3.5" />
-                    <span>Inspect Log</span>
+                    <span>Inspect</span>
+                  </button>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteConversation(conv.id, conv.title);
+                    }}
+                    className="p-1.5 bg-[#161616] border border-[#333333] hover:border-rose-500/40 text-[#8a8f9e] hover:text-rose-400 rounded-none transition-colors flex-shrink-0"
+                    title="Delete Transcript from Database"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
