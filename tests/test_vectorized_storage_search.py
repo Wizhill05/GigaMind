@@ -1,9 +1,12 @@
 import os
+import sys
 import json
 import base64
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gigamind.services.parser import extract_text_from_file
 from gigamind.services.indexing import (
@@ -16,14 +19,38 @@ from gigamind.db.database import init_db, Session, engine, StorageFileItem, Stor
 from gigamind.services.memory import add_memory, search_memory, delete_memory
 from fastapi.testclient import TestClient
 from gigamind.main import app, API_KEY
+from tests.cleanup_test_data import cleanup_all_test_data
 
 
 class TestVectorizedStorageSearch(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         init_db()
+        cleanup_all_test_data(verbose=False)
         cls.client = TestClient(app)
         cls.auth_headers = {"Authorization": f"Bearer {API_KEY}"}
+
+    @classmethod
+    def tearDownClass(cls):
+        cleanup_all_test_data(verbose=False)
+
+    def setUp(self):
+        self.created_mem_ids = []
+        self.created_file_keys = []
+
+    def tearDown(self):
+        for mem_id in self.created_mem_ids:
+            try:
+                delete_memory(mem_id)
+            except Exception:
+                pass
+        for file_key in self.created_file_keys:
+            try:
+                delete_storage_file_index(file_key)
+            except Exception:
+                pass
+        self.created_mem_ids.clear()
+        self.created_file_keys.clear()
 
     def test_01_parser_extract_text(self):
         # 1. Plain text extraction
@@ -50,7 +77,9 @@ class TestVectorizedStorageSearch(unittest.TestCase):
         self.assertEqual(res_bin["format"], "binary")
 
     def test_02_indexing_file_pipeline(self):
-        file_key = "files/2026/08/test_paper.md"
+        file_key = "files/test/2026/08/test_paper.md"
+        self.created_file_keys.append(file_key)
+
         content = (
             "# Superconducting Qubits & Error Mitigation\n\n"
             "This paper explores dynamic decoupling sequences to prolong T2 coherence time in transmon qubits. "
@@ -64,7 +93,7 @@ class TestVectorizedStorageSearch(unittest.TestCase):
             filename="test_paper.md",
             data=content.encode("utf-8"),
             mime_type="text/markdown",
-            source_agent="researcher"
+            source_agent="test_runner"
         )
 
         self.assertEqual(idx_res["status"], "completed")
@@ -81,21 +110,21 @@ class TestVectorizedStorageSearch(unittest.TestCase):
             self.assertGreater(len(chunks), 0)
             self.assertIn("Superconducting Qubits", chunks[0].content)
 
-        # Clean up
-        delete_storage_file_index(file_key)
-
     def test_03_scope_search_behavior(self):
-        # 1. Ingest a textual memory
+        # 1. Ingest a textual memory with test_runner agent
         mem = add_memory(
             content="User personal note: prefers superconducting transmon architectures over trapped ions for lab experiments.",
-            category="hardware",
-            source_agent="user",
-            tags=["hardware", "qubits"]
+            category="test_suite",
+            source_agent="test_runner",
+            tags=["test_runner", "hardware", "qubits"]
         )
         mem_id = mem["id"]
+        self.created_mem_ids.append(mem_id)
 
         # 2. Ingest an R2 file document
-        doc_key = "files/2026/08/trapped_ion_study.md"
+        doc_key = "files/test/2026/08/trapped_ion_study.md"
+        self.created_file_keys.append(doc_key)
+
         doc_content = (
             "# Trapped-Ion Quantum Computing Whitepaper\n\n"
             "Trapped ion systems achieve 99.9% two-qubit gate fidelity using ytterbium-171 ions. "
@@ -105,40 +134,37 @@ class TestVectorizedStorageSearch(unittest.TestCase):
             file_key=doc_key,
             filename="trapped_ion_study.md",
             data=doc_content.encode("utf-8"),
-            mime_type="text/markdown"
+            mime_type="text/markdown",
+            source_agent="test_runner"
         )
 
-        try:
-            # Query 1: scope="all" (Default) -> Should retrieve matches from both memories and files
-            res_all = search_memory("quantum architectures fidelity and transmon", limit=10, scope="all")
-            sources_all = {r.get("source") for r in res_all}
-            self.assertIn("memory", sources_all, "scope=all must include memories")
-            self.assertIn("file", sources_all, "scope=all must include file chunks")
+        # Query 1: scope="all" (Default) -> Should retrieve matches from both memories and files
+        res_all = search_memory("quantum architectures fidelity and transmon", limit=10, scope="all")
+        sources_all = {r.get("source") for r in res_all}
+        self.assertIn("memory", sources_all, "scope=all must include memories")
+        self.assertIn("file", sources_all, "scope=all must include file chunks")
 
-            # Check citation presence on file chunk
-            file_matches = [r for r in res_all if r.get("source") == "file"]
-            self.assertTrue(len(file_matches) > 0)
-            self.assertIn("filename", file_matches[0])
-            self.assertIn("citation", file_matches[0])
+        # Check citation presence on file chunk
+        file_matches = [r for r in res_all if r.get("source") == "file"]
+        self.assertTrue(len(file_matches) > 0)
+        self.assertIn("filename", file_matches[0])
+        self.assertIn("citation", file_matches[0])
 
-            # Query 2: scope="memories" -> Must return only memories, 0 files
-            res_mem = search_memory("quantum architectures fidelity and transmon", limit=10, scope="memories")
-            for r in res_mem:
-                self.assertNotEqual(r.get("source"), "file", "scope=memories must not return file chunks")
+        # Query 2: scope="memories" -> Must return only memories, 0 files
+        res_mem = search_memory("quantum architectures fidelity and transmon", limit=10, scope="memories")
+        for r in res_mem:
+            self.assertNotEqual(r.get("source"), "file", "scope=memories must not return file chunks")
 
-            # Query 3: scope="files" -> Must return only file chunks, 0 memories
-            res_files = search_memory("trapped ion ytterbium fidelity", limit=10, scope="files")
-            for r in res_files:
-                self.assertEqual(r.get("source"), "file", "scope=files must return only file chunks")
-                self.assertIn("trapped_ion_study.md", r.get("filename", ""))
-
-        finally:
-            delete_memory(mem_id)
-            delete_storage_file_index(doc_key)
+        # Query 3: scope="files" -> Must return only file chunks, 0 memories
+        res_files = search_memory("trapped ion ytterbium fidelity", limit=10, scope="files")
+        for r in res_files:
+            self.assertEqual(r.get("source"), "file", "scope=files must return only file chunks")
+            self.assertIn("trapped_ion_study.md", r.get("filename", ""))
 
     def test_04_fastapi_rest_endpoints(self):
-        # 1. Upload base64 file with background vector indexing
-        doc_key = "files/2026/08/api_test_doc.txt"
+        doc_key = "files/test/2026/08/api_test_doc.txt"
+        self.created_file_keys.append(doc_key)
+
         file_payload = {
             "filename": "api_test_doc.txt",
             "content_base64": base64.b64encode(b"FastAPI R2 Vectorized Storage Integration Content").decode("utf-8"),
@@ -153,7 +179,7 @@ class TestVectorizedStorageSearch(unittest.TestCase):
             self.assertTrue(up_res.json()["success"])
 
         # Directly index the content for immediate search test
-        index_file_content(file_key=doc_key, filename="api_test_doc.txt", data=b"FastAPI R2 Vectorized Storage Integration Content")
+        index_file_content(file_key=doc_key, filename="api_test_doc.txt", data=b"FastAPI R2 Vectorized Storage Integration Content", source_agent="test_runner")
 
         # 2. Test search_memory with scope
         search_payload = {"query": "Vectorized Storage Integration", "scope": "files", "limit": 3}
@@ -177,38 +203,33 @@ class TestVectorizedStorageSearch(unittest.TestCase):
         indexed_files = idx_list_res.json()["files"]
         self.assertTrue(any(f["key"] == doc_key for f in indexed_files))
 
-        # Clean up
-        delete_storage_file_index(doc_key)
-
     def test_05_fastmcp_tools(self):
-        # 1. Index test file
-        file_key = "files/2026/08/mcp_doc.txt"
-        index_file_content(file_key=file_key, filename="mcp_doc.txt", data=b"FastMCP Knowledge Search Tool Verification")
+        file_key = "files/test/2026/08/mcp_doc.txt"
+        self.created_file_keys.append(file_key)
 
-        try:
-            # 2. Call search_file_storage via FastMCP JSON-RPC
-            rpc_call = {
-                "jsonrpc": "2.0",
-                "id": 10,
-                "method": "tools/call",
-                "params": {
-                    "name": "search_file_storage",
-                    "arguments": {
-                        "query": "FastMCP Knowledge Verification",
-                        "limit": 3
-                    }
+        index_file_content(file_key=file_key, filename="mcp_doc.txt", data=b"FastMCP Knowledge Search Tool Verification", source_agent="test_runner")
+
+        # Call search_file_storage via FastMCP JSON-RPC
+        rpc_call = {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "search_file_storage",
+                "arguments": {
+                    "query": "FastMCP Knowledge Verification",
+                    "limit": 3
                 }
             }
-            rpc_res = self.client.post("/messages", json=rpc_call)
-            self.assertEqual(rpc_res.status_code, 200)
-            data = rpc_res.json()
-            content_str = data["result"]["content"][0]["text"]
-            parsed_result = json.loads(content_str)
-            self.assertEqual(parsed_result["scope"], "files")
-            self.assertTrue(len(parsed_result["results"]) > 0)
-            self.assertEqual(parsed_result["results"][0]["source"], "file")
-        finally:
-            delete_storage_file_index(file_key)
+        }
+        rpc_res = self.client.post("/messages", json=rpc_call)
+        self.assertEqual(rpc_res.status_code, 200)
+        data = rpc_res.json()
+        content_str = data["result"]["content"][0]["text"]
+        parsed_result = json.loads(content_str)
+        self.assertEqual(parsed_result["scope"], "files")
+        self.assertTrue(len(parsed_result["results"]) > 0)
+        self.assertEqual(parsed_result["results"][0]["source"], "file")
 
 
 if __name__ == "__main__":
