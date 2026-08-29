@@ -70,27 +70,33 @@ def index_file_content(
 
     pages = parsed.get("pages", [])
     if pages and len(pages) > 1:
-        # Multi-page document (e.g. PDF): chunk per page
+        # Multi-page document (e.g. PDF): preserve page-level semantic cohesion
         for p in pages:
             p_num = p["page_number"]
             p_text = p["text"].strip()
             if not p_text:
                 continue
-            sub_chunks = chunk_text(p_text, chunk_size=500, chunk_overlap=100, min_threshold=600)
-            for sc in sub_chunks:
+            # If page text is within standard threshold (1500 chars), keep as 1 clean chunk
+            if len(p_text) <= 1500:
                 raw_chunks.append({
-                    "content": sc["content"],
+                    "content": p_text,
                     "page_number": p_num
                 })
+            else:
+                sub_chunks = chunk_text(p_text, chunk_size=1200, chunk_overlap=200, min_threshold=1500)
+                for sc in sub_chunks:
+                    raw_chunks.append({
+                        "content": sc["content"],
+                        "page_number": p_num
+                    })
     else:
-        # Single page / code / markdown
-        sub_chunks = chunk_text(parsed["text"], chunk_size=500, chunk_overlap=100, min_threshold=600)
+        # Single page / code / markdown: dense semantic chunks (1200 chars)
+        sub_chunks = chunk_text(parsed["text"], chunk_size=1200, chunk_overlap=200, min_threshold=1500)
         for sc in sub_chunks:
             raw_chunks.append({
                 "content": sc["content"],
                 "page_number": 1
             })
-
     total_chunks = len(raw_chunks)
     chunk_records: List[StorageChunkItem] = []
     chunk_embeddings: List[List[float]] = []

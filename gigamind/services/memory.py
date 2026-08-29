@@ -85,97 +85,73 @@ def search_memory(
         # 1. MEMORIES & PROFILE RULES SCAN (if scope: all | memories)
         # ====================================================
         if scope_clean in ("all", "memories"):
+            raw_mem_candidates: List[Dict[str, Any]] = []
             if is_postgres:
                 try:
                     vector_str = f"[{','.join(str(x) for x in query_vector)}]"
                     sql = """
-                    SELECT id, content, category, media_type, media_url, source_agent, tags_json, attachments_json, parent_id, chunk_index, total_chunks,
+                    SELECT id, content, category, source_agent, parent_id, chunk_index, total_chunks, tags_json, attachments_json,
                            1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
                     FROM memories
-                    WHERE (:cat IS NULL OR category = :cat)
-                      AND (:agent IS NULL OR source_agent = :agent)
-                      AND embedding_vector IS NOT NULL
+                    WHERE embedding_vector IS NOT NULL
                     ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                    LIMIT 30;
+                    LIMIT 40;
                     """
-                    params = {"vec": vector_str, "cat": category, "agent": source_agent}
-                    rows = session.exec(text(sql), params=params).all()
-
-                    for row in rows:
-                        att_raw = getattr(row, "attachments_json", "[]")
-                        m_url = getattr(row, "media_url", None)
-                        m_type = getattr(row, "media_type", None)
-                        hydrated_atts = _hydrate_attachments(att_raw, media_url=m_url, media_type=m_type)
-
-                        c_dict = {
-                            "id": row.id,
+                    rows = session.exec(text(sql), params={"vec": vector_str}).all()
+                    for r in rows:
+                        raw_mem_candidates.append({
+                            "id": r.id,
                             "source": "memory",
-                            "content": row.content,
-                            "category": row.category,
-                            "source_agent": row.source_agent or "user",
-                            "score": float(row.vector_score or 0.0),
-                            "tags": json.loads(row.tags_json or "[]"),
-                            "attachments": hydrated_atts,
-                            "parent_id": row.parent_id,
-                            "chunk_index": row.chunk_index,
-                            "total_chunks": row.total_chunks
-                        }
-                        candidates.append(c_dict)
+                            "content": r.content,
+                            "category": r.category,
+                            "source_agent": r.source_agent or "user",
+                            "parent_id": r.parent_id,
+                            "chunk_index": r.chunk_index,
+                            "total_chunks": r.total_chunks,
+                            "tags": json.loads(r.tags_json or "[]"),
+                            "attachments": _hydrate_attachments(r.attachments_json),
+                            "score": float(r.vector_score or 0.0),
+                            "vector_score": float(r.vector_score or 0.0)
+                        })
                 except Exception as pg_err:
-                    print(f"pgvector memories query fallback: {pg_err}")
+                    print(f"pgvector query note: {pg_err}")
                     session.rollback()
 
-            # Fallback / SQLite Candidate Scanner for memories
-            if not any(c.get("source") == "memory" for c in candidates):
-                stmt = select(MemoryItem)
-                if category:
-                    stmt = stmt.where(MemoryItem.category == category)
-                if source_agent:
-                    stmt = stmt.where(MemoryItem.source_agent == source_agent)
+            # Keyword scan for memories
+            keyword_memories = session.exec(select(MemoryItem).limit(60)).all()
+            for mem in keyword_memories:
+                kw_score = 0.0
+                mem_lower = mem.content.lower()
+                kw_hits = sum(1 for kw in query_keywords if kw in mem_lower)
+                if query_keywords:
+                    kw_score = (kw_hits / len(query_keywords)) * 0.4
 
-                stmt = stmt.order_by(MemoryItem.created_at.desc()).limit(100)
-                memories = session.exec(stmt).all()
-                now_str = datetime.now(timezone.utc).isoformat()
+                if kw_score > 0.1:
+                    raw_mem_candidates.append({
+                        "id": mem.id,
+                        "source": "memory",
+                        "content": mem.content,
+                        "category": mem.category,
+                        "source_agent": getattr(mem, "source_agent", "user") or "user",
+                        "parent_id": mem.parent_id,
+                        "chunk_index": mem.chunk_index,
+                        "total_chunks": mem.total_chunks,
+                        "tags": json.loads(mem.tags_json or "[]"),
+                        "attachments": _hydrate_attachments(mem.attachments_json, mem.media_url, mem.media_type),
+                        "score": round(kw_score, 4)
+                    })
 
-                for mem in memories:
-                    score = 0.0
-                    try:
-                        vec = json.loads(mem.embedding_json)
-                        score += cosine_similarity(query_vector, vec) * 0.7
-                    except Exception:
-                        pass
+            # Deduplicate memory chunks by parent memory
+            distinct_mem_map: Dict[str, Dict[str, Any]] = {}
+            for mc in raw_mem_candidates:
+                pkey = mc.get("parent_id") or mc.get("id")
+                if pkey not in distinct_mem_map or mc["score"] > distinct_mem_map[pkey]["score"]:
+                    distinct_mem_map[pkey] = mc
 
-                    content_lower = mem.content.lower()
-                    kw_hits = sum(1 for kw in query_keywords if kw in content_lower)
-                    if query_keywords:
-                        score += (kw_hits / len(query_keywords)) * 0.3
+            candidates.extend(distinct_mem_map.values())
 
-                    if score > 0.05:
-                        candidates.append({
-                            "id": mem.id,
-                            "source": "memory",
-                            "content": mem.content,
-                            "category": mem.category,
-                            "source_agent": getattr(mem, "source_agent", "user") or "user",
-                            "score": round(score, 4),
-                            "tags": json.loads(mem.tags_json or "[]"),
-                            "attachments": _hydrate_attachments(getattr(mem, "attachments_json", "[]"), media_url=mem.media_url, media_type=mem.media_type),
-                            "parent_id": mem.parent_id,
-                            "chunk_index": mem.chunk_index,
-                            "total_chunks": mem.total_chunks
-                        })
-                        mem.last_accessed = now_str
-
-                session.commit()
-
-            # Search Profile Rules
-            profile_stmt = select(ProfileItem)
-            if category:
-                profile_stmt = profile_stmt.where(ProfileItem.category == category)
-            if source_agent:
-                profile_stmt = profile_stmt.where(ProfileItem.source_agent == source_agent)
-
-            profiles = session.exec(profile_stmt).all()
+            # Profile rules scan
+            profiles = session.exec(select(ProfileItem)).all()
             for prof in profiles:
                 p_text = f"{prof.key}: {prof.value}".lower()
                 p_score = 0.0
@@ -192,12 +168,11 @@ def search_memory(
                         "source_agent": getattr(prof, "source_agent", "user") or "user",
                         "score": round(p_score, 4)
                     })
-
         # ====================================================
         # 2. VECTORIZED OBJECT STORAGE SCAN (if scope: all | files)
         # ====================================================
         if scope_clean in ("all", "files"):
-            file_candidates: List[Dict[str, Any]] = []
+            raw_file_candidates: List[Dict[str, Any]] = []
             if is_postgres:
                 try:
                     vector_str = f"[{','.join(str(x) for x in query_vector)}]"
@@ -207,7 +182,7 @@ def search_memory(
                     FROM storage_chunks
                     WHERE embedding_vector IS NOT NULL
                     ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                    LIMIT 30;
+                    LIMIT 60;
                     """
                     rows_files = session.exec(text(sql_files), params={"vec": vector_str}).all()
                     for rf in rows_files:
@@ -215,7 +190,7 @@ def search_memory(
                         if storage_service.is_enabled():
                             url = storage_service.get_presigned_download_url(rf.file_key, filename=rf.filename)
 
-                        file_candidates.append({
+                        raw_file_candidates.append({
                             "id": rf.id,
                             "source": "file",
                             "content": rf.content,
@@ -234,7 +209,7 @@ def search_memory(
                     session.rollback()
 
             # Fallback SQLite candidate scanner for storage chunks
-            if not file_candidates:
+            if not raw_file_candidates:
                 f_chunks = session.exec(select(StorageChunkItem).limit(100)).all()
                 for fc in f_chunks:
                     f_score = 0.0
@@ -254,7 +229,7 @@ def search_memory(
                         if storage_service.is_enabled():
                             url = storage_service.get_presigned_download_url(fc.file_key, filename=fc.filename)
 
-                        file_candidates.append({
+                        raw_file_candidates.append({
                             "id": fc.id,
                             "source": "file",
                             "content": fc.content,
@@ -269,8 +244,26 @@ def search_memory(
                             "category": "file"
                         })
 
-            candidates.extend(file_candidates)
+            # Group chunks by distinct file_key and keep the best representative excerpt per file
+            distinct_file_candidates: Dict[str, Dict[str, Any]] = {}
+            for fc in raw_file_candidates:
+                fkey = fc["file_key"]
+                if fkey not in distinct_file_candidates:
+                    distinct_file_candidates[fkey] = {
+                        **fc,
+                        "matching_pages": [fc["page_number"]] if fc.get("page_number") is not None else []
+                    }
+                else:
+                    if fc["score"] > distinct_file_candidates[fkey]["score"]:
+                        prev_pages = distinct_file_candidates[fkey]["matching_pages"]
+                        distinct_file_candidates[fkey] = {
+                            **fc,
+                            "matching_pages": prev_pages
+                        }
+                    if fc.get("page_number") is not None and fc["page_number"] not in distinct_file_candidates[fkey]["matching_pages"]:
+                        distinct_file_candidates[fkey]["matching_pages"].append(fc["page_number"])
 
+            candidates.extend(distinct_file_candidates.values())
     # Sort all candidates by initial score
     candidates.sort(key=lambda x: x["score"], reverse=True)
     top_candidates = candidates[:50]
@@ -299,7 +292,10 @@ def search_memory(
                 "rerank_score": item.get("rerank_score", item["score"]),
                 "url": item.get("url", "")
             }
-            if item.get("page_number") is not None:
+            if item.get("matching_pages"):
+                pages_str = ", ".join(str(p) for p in sorted(item["matching_pages"]))
+                res_item["citation"] = f"{item.get('filename')} (Page{'s' if len(item['matching_pages']) > 1 else ''} {pages_str})"
+            elif item.get("page_number") is not None:
                 res_item["citation"] = f"{item.get('filename')} (Page {item.get('page_number')})"
             else:
                 res_item["citation"] = f"{item.get('filename')} (Chunk {item.get('chunk_index', 0) + 1}/{item.get('total_chunks', 1)})"
