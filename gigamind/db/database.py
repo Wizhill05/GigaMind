@@ -42,8 +42,8 @@ class ConversationItem(SQLModel, table=True):
     title: str
     summary: str
     source_agent: str = Field(default="user", index=True) # e.g. claude, gpt, gemini, user, system
-    messages_json: str
-    embedding_json: str
+    messages_json: str = Field(default="[]")
+    embedding_json: str = Field(default="[]")
     created_at: str
 
 class TaskSessionItem(SQLModel, table=True):

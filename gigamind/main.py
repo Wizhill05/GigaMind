@@ -25,6 +25,7 @@ from gigamind.services.memory import (
     get_stats,
     reset_all_memories,
     export_all_memories,
+    import_conversations_data
 )
 from gigamind.services.oauth import (
     create_authorization_code,
@@ -146,14 +147,17 @@ class FileUploadBase64Request(BaseModel):
     content_base64: str = Field(..., description="Base64 encoded file content")
     mime_type: Optional[str] = Field(None, description="MIME content type")
 
-
 class DeleteFileRequest(BaseModel):
     key: str = Field(..., description="Cloudflare R2 storage key to delete")
+
+class ImportConversationsPathRequest(BaseModel):
+    file_path: str = Field(..., description="Local path to conversations.json")
+    platform: Optional[str] = Field(None, description="Optional platform override (claude, chatgpt)")
+
 def _format_search_results_for_agent(results: List[Dict[str, Any]], query: Optional[str], scope: str) -> str:
     query_label = f"'{query}'" if query else "visual multimodal query"
     if not results:
         return f"No matching results found in GigaMind for {query_label} (scope: {scope})."
-
     lines = [f"Found {len(results)} relevant item(s) for {query_label} (scope: {scope}):\n"]
     file_items = [r for r in results if r.get("source") == "file"]
     mem_items = [r for r in results if r.get("source") != "file"]
@@ -937,6 +941,29 @@ def api_delete_profile_rule(id: str):
     if not success:
         raise HTTPException(status_code=404, detail=f"Profile rule '{id}' not found")
     return {"success": True, "id": id, "message": f"Profile rule {id} deleted successfully"}
+
+@app.post("/api/v1/conversations/import_file", dependencies=[Depends(verify_auth)])
+async def api_import_conversations_file(file: UploadFile = File(...), platform: Optional[str] = None):
+    """Uploads and batch-imports conversations.json from Claude, ChatGPT, or standard exports."""
+    try:
+        content = await file.read()
+        res = import_conversations_data(content, default_platform=platform)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to import conversations file: {e}")
+
+@app.post("/api/v1/conversations/import_path", dependencies=[Depends(verify_auth)])
+def api_import_conversations_path(req: ImportConversationsPathRequest):
+    """Reads a local conversations.json file directly from disk and batch-imports into database."""
+    if not os.path.exists(req.file_path):
+        raise HTTPException(status_code=404, detail=f"File not found at path: {req.file_path}")
+    try:
+        with open(req.file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        res = import_conversations_data(data, default_platform=req.platform)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to import from path: {e}")
 
 @app.get("/api/v1/stats", dependencies=[Depends(verify_auth)])
 def api_get_stats():

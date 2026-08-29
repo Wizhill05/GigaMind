@@ -385,3 +385,38 @@ export async function fetchFileChunks(key: string): Promise<{ key: string; chunk
     return null;
   }
 }
+
+export async function importConversationsFile(file: File, platform?: string): Promise<{ success: boolean; ingested: number; skipped: number; message: string } | null> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const url = platform ? `/api/v1/conversations/import_file?platform=${encodeURIComponent(platform)}` : '/api/v1/conversations/import_file';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${getApiKey()}`,
+      },
+      body: formData,
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error('importConversationsFile error:', err);
+    return null;
+  }
+}
+
+export async function importConversationsPath(filePath: string, platform?: string): Promise<{ success: boolean; ingested: number; skipped: number; message: string } | null> {
+  try {
+    const res = await fetch('/api/v1/conversations/import_path', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ file_path: filePath, platform }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.error('importConversationsPath error:', err);
+    return null;
+  }
+}

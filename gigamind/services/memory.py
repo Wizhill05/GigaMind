@@ -600,6 +600,128 @@ def add_conversation_log(platform: str, title: str, summary: str, messages: List
         "created_at": now_str
     }
 
+def import_conversations_data(raw_data: Any, default_platform: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Parses and batch-inserts exported chat history from Claude, ChatGPT, or generic JSON.
+    Extracts title, messages, timestamps, and preserves full transcripts.
+    """
+    if isinstance(raw_data, (bytes, bytearray)):
+        try:
+            raw_data = raw_data.decode("utf-8")
+        except UnicodeDecodeError:
+            raw_data = raw_data.decode("latin-1")
+
+    if isinstance(raw_data, str):
+        try:
+            conversations = json.loads(raw_data)
+        except Exception as e:
+            raise ValueError(f"Invalid JSON payload: {e}")
+    elif isinstance(raw_data, list):
+        conversations = raw_data
+    elif isinstance(raw_data, dict):
+        conversations = [raw_data]
+    else:
+        raise ValueError("Unsupported data format for conversations import.")
+
+    ingested_count = 0
+    skipped_count = 0
+
+    with Session(engine) as session:
+        for conv in conversations:
+            if not isinstance(conv, dict):
+                continue
+
+            # Format A: Claude Export (contains chat_messages list)
+            if "chat_messages" in conv:
+                platform = default_platform or "claude"
+                source_agent = "claude"
+                conv_uuid = conv.get("uuid") or f"claude_{uuid.uuid4().hex[:8]}"
+                conv_id = f"conv_claude_{conv_uuid.replace('-', '')[:12]}"
+                title = conv.get("name") or conv.get("summary") or "Untitled Claude Conversation"
+                created_at = conv.get("created_at") or datetime.now(timezone.utc).isoformat()
+
+                chat_msgs = conv.get("chat_messages", [])
+                messages = []
+                for m in chat_msgs:
+                    sender = "user" if m.get("sender") == "human" else ("assistant" if m.get("sender") == "assistant" else "system")
+                    text_content = m.get("text") or ""
+                    if isinstance(m.get("content"), list):
+                        text_content = "\n".join(c.get("text", "") for c in m["content"] if isinstance(c, dict) and "text" in c)
+                    if text_content.strip():
+                        messages.append({"role": sender, "content": text_content.strip()})
+
+            # Format B: ChatGPT Export (contains mapping dict)
+            elif "mapping" in conv:
+                platform = default_platform or "chatgpt"
+                source_agent = "gpt"
+                conv_uuid = conv.get("id") or f"chatgpt_{uuid.uuid4().hex[:8]}"
+                conv_id = f"conv_gpt_{conv_uuid.replace('-', '')[:12]}"
+                title = conv.get("title") or "Untitled ChatGPT Conversation"
+                create_time = conv.get("create_time")
+                created_at = datetime.fromtimestamp(create_time, tz=timezone.utc).isoformat() if create_time else datetime.now(timezone.utc).isoformat()
+
+                messages = []
+                mapping = conv.get("mapping", {})
+                for node in mapping.values():
+                    msg = node.get("message")
+                    if msg and msg.get("content") and msg.get("author"):
+                        role = msg["author"].get("role", "user")
+                        if role in ("user", "assistant", "system"):
+                            parts = msg["content"].get("parts", [])
+                            text_content = "\n".join(str(p) for p in parts if isinstance(p, str)).strip()
+                            if text_content:
+                                messages.append({"role": role, "content": text_content})
+
+            # Format C: Standard / Generic JSON (contains messages list)
+            elif "messages" in conv:
+                platform = default_platform or conv.get("platform") or "custom"
+                source_agent = conv.get("source_agent") or "user"
+                conv_id = conv.get("id") or f"conv_{platform}_{uuid.uuid4().hex[:8]}"
+                title = conv.get("title") or "Imported Conversation"
+                created_at = conv.get("created_at") or datetime.now(timezone.utc).isoformat()
+                messages = [
+                    {"role": m.get("role", "user"), "content": m.get("content", "")}
+                    for m in conv.get("messages", [])
+                    if isinstance(m, dict) and m.get("content")
+                ]
+            else:
+                continue
+
+            if not messages:
+                continue
+
+            # Check for duplicates
+            existing = session.exec(select(ConversationItem).where(ConversationItem.id == conv_id)).first()
+            if existing:
+                skipped_count += 1
+                continue
+
+            first_user_preview = next((m["content"][:200] for m in messages if m["role"] == "user"), "")
+            summary = conv.get("summary") or (f"Topic: {title}. Preview: {first_user_preview}" if first_user_preview else f"Conversation on {platform}: {title}")
+
+            item = ConversationItem(
+                id=conv_id,
+                platform=platform,
+                title=title,
+                summary=summary,
+                messages_json=json.dumps(messages),
+                embedding_json="[]",
+                source_agent=source_agent,
+                created_at=created_at
+            )
+            session.add(item)
+            ingested_count += 1
+
+        session.commit()
+
+    return {
+        "success": True,
+        "ingested": ingested_count,
+        "skipped": skipped_count,
+        "total_processed": len(conversations) if isinstance(conversations, list) else 1,
+        "message": f"Successfully imported {ingested_count} conversation(s) into database ({skipped_count} duplicate(s) skipped)."
+    }
+
 def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None, source_agent: Optional[str] = None) -> Dict[str, Any]:
     with Session(engine) as session:
         stmt = select(MemoryItem)
