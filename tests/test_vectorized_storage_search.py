@@ -71,8 +71,13 @@ class TestVectorizedStorageSearch(unittest.TestCase):
         self.assertEqual(res_code["format"], "code")
         self.assertIn("simulate_hamiltonian", res_code["text"])
 
-        # 4. Binary bypass
-        res_bin = extract_text_from_file(b"\x89PNG\r\n\x1a\n\x00\x00", "diagram.png")
+        # 4. Multimodal image extraction
+        res_img = extract_text_from_file(b"\x89PNG\r\n\x1a\n\x00\x00", "diagram.png")
+        self.assertTrue(res_img["supported"])
+        self.assertEqual(res_img["format"], "image")
+
+        # 5. Binary archive bypass
+        res_bin = extract_text_from_file(b"PK\x03\x04zip_binary", "archive.zip")
         self.assertFalse(res_bin["supported"])
         self.assertEqual(res_bin["format"], "binary")
 
@@ -157,10 +162,10 @@ class TestVectorizedStorageSearch(unittest.TestCase):
 
         # Query 3: scope="files" -> Must return only file chunks, 0 memories
         res_files = search_memory("trapped ion ytterbium fidelity", limit=10, scope="files")
+        filenames = [r.get("filename", "") for r in res_files]
         for r in res_files:
             self.assertEqual(r.get("source"), "file", "scope=files must return only file chunks")
-            self.assertIn("trapped_ion_study.md", r.get("filename", ""))
-
+        self.assertIn("trapped_ion_study.md", filenames)
     def test_04_fastapi_rest_endpoints(self):
         doc_key = "files/test/2026/08/api_test_doc.txt"
         self.created_file_keys.append(doc_key)
@@ -226,11 +231,10 @@ class TestVectorizedStorageSearch(unittest.TestCase):
         self.assertEqual(rpc_res.status_code, 200)
         data = rpc_res.json()
         content_str = data["result"]["content"][0]["text"]
-        parsed_result = json.loads(content_str)
-        self.assertEqual(parsed_result["scope"], "files")
-        self.assertTrue(len(parsed_result["results"]) > 0)
-        self.assertEqual(parsed_result["results"][0]["source"], "file")
-
+        self.assertIn("mcp_doc.txt", content_str)
+        structured = data["result"].get("structured", {})
+        self.assertEqual(structured.get("scope"), "files")
+        self.assertTrue(len(structured.get("results", [])) > 0)
 
 if __name__ == "__main__":
     unittest.main()

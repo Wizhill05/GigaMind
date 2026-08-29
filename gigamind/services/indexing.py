@@ -1,9 +1,9 @@
+import os
 import json
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from sqlmodel import Session, select, text
-
 from gigamind.db.database import engine, is_postgres, StorageFileItem, StorageChunkItem
 from gigamind.services.parser import extract_text_from_file
 from gigamind.services.chunking import chunk_text
@@ -27,17 +27,17 @@ def index_file_content(
     file_id = f"file_{uuid.uuid4().hex[:12]}"
     if not size_bytes and data:
         size_bytes = len(data)
-
     parsed = extract_text_from_file(data=data, filename=filename, mime_type=mime_type)
+    multimodal_type = parsed.get("format", "text")
 
     if not parsed["supported"] or not parsed["text"].strip():
         # Unsupported or empty file: save record with status
         status = "unsupported" if parsed.get("format") == "binary" else "empty"
         with Session(engine) as session:
-            # Check if file record already exists
             existing = session.exec(select(StorageFileItem).where(StorageFileItem.key == file_key)).first()
             if existing:
                 existing.indexing_status = status
+                existing.multimodal_type = multimodal_type
                 existing.updated_at = now_str
             else:
                 f_item = StorageFileItem(
@@ -45,6 +45,7 @@ def index_file_content(
                     key=file_key,
                     filename=filename,
                     mime_type=mime_type or "application/octet-stream",
+                    multimodal_type=multimodal_type,
                     size_bytes=size_bytes,
                     source_agent=source_agent or "user",
                     extracted_text_length=0,
@@ -60,6 +61,7 @@ def index_file_content(
             "file_id": file_id,
             "key": file_key,
             "filename": filename,
+            "multimodal_type": multimodal_type,
             "status": status,
             "chunks_created": 0,
             "extracted_length": 0
@@ -103,6 +105,14 @@ def index_file_content(
                 "content": sc["content"],
                 "page_number": 1
             })
+
+    # 1. Compute Whole-Document Holistic Embedding with Gemini Embedding 2
+    doc_summary_text = parsed["text"][:3000]
+    doc_embedding = generate_embedding(
+        text=f"Document title: {filename}\n{doc_summary_text}",
+        inline_bytes=parsed.get("raw_bytes") or data,
+        mime_type=mime_type
+    )
     total_chunks = len(raw_chunks)
     chunk_records: List[StorageChunkItem] = []
     chunk_embeddings: List[List[float]] = []
@@ -140,10 +150,13 @@ def index_file_content(
         if existing_file:
             existing_file.filename = filename
             existing_file.mime_type = mime_type or existing_file.mime_type
+            existing_file.multimodal_type = multimodal_type
             existing_file.size_bytes = size_bytes
             existing_file.extracted_text_length = len(parsed["text"])
             existing_file.total_chunks = total_chunks
             existing_file.indexing_status = "completed"
+            existing_file.document_summary = parsed["text"][:350]
+            existing_file.embedding_json = json.dumps(doc_embedding)
             existing_file.updated_at = now_str
             file_id = existing_file.id
             for chk in chunk_records:
@@ -154,11 +167,14 @@ def index_file_content(
                 key=file_key,
                 filename=filename,
                 mime_type=mime_type or "application/octet-stream",
+                multimodal_type=multimodal_type,
                 size_bytes=size_bytes,
                 source_agent=source_agent or "user",
                 extracted_text_length=len(parsed["text"]),
                 total_chunks=total_chunks,
                 indexing_status="completed",
+                document_summary=parsed["text"][:350],
+                embedding_json=json.dumps(doc_embedding),
                 created_at=now_str,
                 updated_at=now_str
             )
@@ -173,6 +189,12 @@ def index_file_content(
         if is_postgres:
             try:
                 with Session(engine) as p_sess:
+                    # Update holistic whole-document vector on storage_files
+                    doc_vec_str = f"[{','.join(str(x) for x in doc_embedding)}]"
+                    p_sess.exec(
+                        text("UPDATE storage_files SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"),
+                        params={"vec": doc_vec_str, "id": file_id}
+                    )
                     for idx, chk in enumerate(chunk_records):
                         emb = chunk_embeddings[idx]
                         vec_str = f"[{','.join(str(x) for x in emb)}]"
@@ -188,6 +210,7 @@ def index_file_content(
         "file_id": file_id,
         "key": file_key,
         "filename": filename,
+        "multimodal_type": multimodal_type,
         "status": "completed",
         "chunks_created": total_chunks,
         "extracted_length": len(parsed["text"])
@@ -294,6 +317,9 @@ def register_storage_file(
 ) -> StorageFileItem:
     """Inserts or updates a StorageFileItem immediately so the file is recorded in the Files repository."""
     now_str = datetime.now(timezone.utc).isoformat()
+    ext = os.path.splitext(filename or "")[1].lower()
+    m_type = "pdf" if ext == ".pdf" or (mime_type and "pdf" in mime_type) else ("image" if ext in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"] or (mime_type and mime_type.startswith("image/")) else ("code" if ext in [".py", ".ts", ".js", ".sql", ".rs", ".go"] else "text"))
+
     with Session(engine) as session:
         existing = session.exec(select(StorageFileItem).where(StorageFileItem.key == file_key)).first()
         if not existing:
@@ -302,6 +328,7 @@ def register_storage_file(
                 key=file_key,
                 filename=filename,
                 mime_type=mime_type or "application/octet-stream",
+                multimodal_type=m_type,
                 size_bytes=size_bytes,
                 source_agent=source_agent or "user",
                 extracted_text_length=0,
@@ -316,6 +343,7 @@ def register_storage_file(
             return f_item
         else:
             existing.filename = filename
+            existing.multimodal_type = m_type
             if mime_type:
                 existing.mime_type = mime_type
             if size_bytes:

@@ -96,22 +96,23 @@ def extract_text_from_file(
 
             combined_text = "\n\n".join(full_text_chunks).strip()
             return {
-                "supported": bool(combined_text),
+                "supported": True,
                 "format": "pdf",
-                "text": combined_text,
+                "text": combined_text or f"[PDF Document: {filename}]",
                 "pages": pages_extracted,
+                "raw_bytes": data,
                 "char_count": len(combined_text),
                 "truncated": truncated
             }
         except Exception as e:
             return {
-                "supported": False,
+                "supported": True,
                 "format": "pdf",
-                "text": "",
-                "pages": [],
+                "text": f"[PDF Document: {filename}]",
+                "pages": [{"page_number": 1, "text": f"[PDF: {filename}]"}],
+                "raw_bytes": data,
                 "char_count": 0,
-                "truncated": False,
-                "error": f"Failed to parse PDF: {e}"
+                "truncated": False
             }
 
     # 2. Multimodal Image Parsing (PNG, JPG, WEBP, GIF, BMP)
@@ -122,8 +123,9 @@ def extract_text_from_file(
             return {
                 "supported": True,
                 "format": "image",
-                "text": f"Image artifact: {clean_name}",
+                "text": f"[Image Artifact: {clean_name}]",
                 "image_base64": img_b64,
+                "raw_bytes": data,
                 "mime_type": mime_type or "image/png",
                 "pages": [{"page_number": 1, "text": f"Image artifact: {clean_name}", "image_base64": img_b64}],
                 "char_count": len(clean_name),
@@ -131,7 +133,6 @@ def extract_text_from_file(
             }
         except Exception as img_err:
             print(f"Image base64 encoding note: {img_err}")
-
     # 3. Binary / Media Bypass (Audio, Video, Archives, Executables)
     if ext in BINARY_EXTENSIONS or any(b in mime_type for b in ["audio/", "video/", "application/zip", "application/octet-stream"]) and ext not in TEXT_EXTENSIONS:
         return {

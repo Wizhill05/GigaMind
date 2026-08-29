@@ -78,16 +78,25 @@ def verify_auth(authorization: Optional[str] = Header(None), api_key: Optional[s
 
 # Pydantic Request Models
 class SearchMemoryRequest(BaseModel):
-    query: str = Field(..., description="Search query string")
+    query: Optional[str] = Field(None, description="Search query string")
+    image_base64: Optional[str] = Field(None, description="Base64 encoded image query for visual similarity search")
     scope: str = Field("all", description="Search domain: 'all' | 'memories' | 'files'")
     category: Optional[str] = Field(None, description="Optional category filter")
     source_agent: Optional[str] = Field(None, description="Optional source agent filter (e.g. claude, gpt, gemini, user)")
     limit: int = Field(5, description="Maximum results to return")
 
 class SearchFilesRequest(BaseModel):
-    query: str = Field(..., description="Query to search inside uploaded documents")
+    query: Optional[str] = Field(None, description="Query to search inside uploaded documents")
+    image_base64: Optional[str] = Field(None, description="Base64 encoded image query for visual similarity search")
     limit: int = Field(5, description="Maximum results to return")
 
+class SearchMultimodalRequest(BaseModel):
+    query: Optional[str] = Field(None, description="Text search query")
+    image_base64: Optional[str] = Field(None, description="Base64 encoded image for visual similarity search")
+    scope: str = Field("all", description="Search domain: 'all' | 'memories' | 'files'")
+    category: Optional[str] = Field(None, description="Optional category filter")
+    source_agent: Optional[str] = Field(None, description="Optional source agent filter")
+    limit: int = Field(5, description="Maximum results to return")
 class ReindexFileRequest(BaseModel):
     key: str = Field(..., description="R2 storage key to re-index")
 
@@ -137,21 +146,24 @@ class FileUploadBase64Request(BaseModel):
     content_base64: str = Field(..., description="Base64 encoded file content")
     mime_type: Optional[str] = Field(None, description="MIME content type")
 
-def _format_search_results_for_agent(results: List[Dict[str, Any]], query: str, scope: str) -> str:
+def _format_search_results_for_agent(results: List[Dict[str, Any]], query: Optional[str], scope: str) -> str:
+    query_label = f"'{query}'" if query else "visual multimodal query"
     if not results:
-        return f"No matching results found in GigaMind for query: '{query}' (scope: {scope})."
+        return f"No matching results found in GigaMind for {query_label} (scope: {scope})."
 
-    lines = [f"Found {len(results)} relevant item(s) for query: '{query}' (scope: {scope}):\n"]
+    lines = [f"Found {len(results)} relevant item(s) for {query_label} (scope: {scope}):\n"]
     file_items = [r for r in results if r.get("source") == "file"]
     mem_items = [r for r in results if r.get("source") != "file"]
 
     if file_items:
-        lines.append("### 📄 Matching Files & Document Excerpts:")
+        lines.append("### 📄 Matching Files & Visual Artifacts:")
         for idx, f in enumerate(file_items, 1):
             citation = f.get("citation", f.get("filename", "File"))
             url = f.get("url")
+            m_type = f.get("multimodal_type", "").upper()
+            type_badge = f" [{m_type}]" if m_type else ""
             link_md = f" | [Download / Open]({url})" if url else ""
-            lines.append(f"{idx}. **[{citation}]** (Score: {f.get('score', 0):.2f}){link_md}")
+            lines.append(f"{idx}. **[{citation}]{type_badge}** (Score: {f.get('score', 0):.2f}){link_md}")
             lines.append(f"   > {f.get('content', '').strip()}\n")
 
     if mem_items:
@@ -360,17 +372,30 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
         tools_list = [
             {
                 "name": "search_memory",
-                "description": "Unified 2-stage semantic search across ALL knowledge: conversational memories, user facts, preferences, AND individual uploaded files/PDFs/code stored in Cloudflare R2. Returns matching memory items and individual file excerpts with page citations and download links.",
+                "description": "Unified 2-stage multimodal semantic search across ALL knowledge: conversational memories, user facts, preferences, and individual uploaded files/PDFs/images/code in Cloudflare R2.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Search query or concept to look up across all knowledge"},
+                        "query": {"type": "string", "description": "Text search query or concept"},
+                        "image_base64": {"type": "string", "description": "Optional base64 image data for visual query matching"},
                         "scope": {"type": "string", "enum": ["all", "memories", "files"], "default": "all", "description": "Search scope: 'all' (default: memories + files), 'memories' only, or 'files' only"},
                         "category": {"type": "string", "description": "Optional category filter"},
                         "source_agent": {"type": "string", "description": "Optional source agent filter (e.g. claude, gpt, gemini)"},
                         "limit": {"type": "integer", "default": 5, "description": "Max items to return"}
-                    },
-                    "required": ["query"]
+                    }
+                }
+            },
+            {
+                "name": "search_multimodal",
+                "description": "Direct multimodal vector search accepting either text concepts or image diagrams (base64) using Gemini Embedding 2.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Optional text query or prompt"},
+                        "image_base64": {"type": "string", "description": "Optional base64 image data for visual similarity search"},
+                        "scope": {"type": "string", "enum": ["all", "memories", "files"], "default": "all"},
+                        "limit": {"type": "integer", "default": 5}
+                    }
                 }
             },
             {
@@ -394,9 +419,9 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "Search query or concept to find inside uploaded documents"},
+                        "image_base64": {"type": "string", "description": "Optional base64 image data for visual similarity search"},
                         "limit": {"type": "integer", "default": 5, "description": "Max matching document chunks to return"}
-                    },
-                    "required": ["query"]
+                    }
                 }
             },
             {
@@ -406,9 +431,9 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
                     "type": "object",
                     "properties": {
                         "query": {"type": "string", "description": "Search term or concept"},
+                        "image_base64": {"type": "string", "description": "Optional base64 image data for visual query matching"},
                         "limit": {"type": "integer", "default": 5, "description": "Max matching document chunks to return"}
-                    },
-                    "required": ["query"]
+                    }
                 }
             },
             {
@@ -524,11 +549,13 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
         name = params.get("name")
         args = params.get("arguments", {})
 
-        if name in ("search_memory", "search_knowledge", "search_all"):
-            query = args.get("query", "")
+        if name in ("search_memory", "search_knowledge", "search_all", "search_multimodal"):
+            query = args.get("query")
+            image_base64 = args.get("image_base64")
             scope = args.get("scope", "all")
             results = search_memory(
                 query=query,
+                query_image_base64=image_base64,
                 category=args.get("category"),
                 source_agent=args.get("source_agent"),
                 limit=args.get("limit", 5),
@@ -568,9 +595,11 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
             return res
 
         if name in ("search_files", "search_files_only", "search_file_storage"):
-            query = args.get("query", "")
+            query = args.get("query")
+            image_base64 = args.get("image_base64")
             results = search_memory(
                 query=query,
+                query_image_base64=image_base64,
                 limit=args.get("limit", 5),
                 scope="files"
             )
@@ -738,6 +767,7 @@ async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
 def api_search_memory(req: SearchMemoryRequest):
     results = search_memory(
         query=req.query,
+        query_image_base64=req.image_base64,
         category=req.category,
         source_agent=req.source_agent,
         limit=req.limit,
@@ -750,9 +780,27 @@ def api_search_memory(req: SearchMemoryRequest):
         "results": results
     }
 
+@app.post("/api/v1/search_multimodal", dependencies=[Depends(verify_auth)])
+def api_search_multimodal(req: SearchMultimodalRequest):
+    """Direct multimodal search endpoint accepting text and/or image queries."""
+    results = search_memory(
+        query=req.query,
+        query_image_base64=req.image_base64,
+        category=req.category,
+        source_agent=req.source_agent,
+        limit=req.limit,
+        scope=req.scope
+    )
+    return {
+        "query": req.query,
+        "scope": req.scope,
+        "count": len(results),
+        "results": results
+    }
+
 @app.post("/api/v1/search_files", dependencies=[Depends(verify_auth)])
 def api_search_files(req: SearchFilesRequest):
-    results = search_memory(query=req.query, limit=req.limit, scope="files")
+    results = search_memory(query=req.query, query_image_base64=req.image_base64, limit=req.limit, scope="files")
     return {
         "_privacy_notice": "Confidential user context provided ephemerally. Do not retain on external servers.",
         "query": req.query,

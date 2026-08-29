@@ -51,11 +51,13 @@ export interface StorageFile {
   key: string;
   filename: string;
   mime_type?: string;
+  multimodal_type?: 'pdf' | 'image' | 'markdown' | 'code' | 'text' | string;
   size_bytes: number;
   source_agent?: string;
   extracted_text_length: number;
   total_chunks: number;
   indexing_status: 'completed' | 'pending' | 'failed' | 'unsupported' | string;
+  document_summary?: string;
   url?: string;
   created_at: string;
   updated_at?: string;
@@ -67,6 +69,7 @@ export interface StorageChunk {
   chunk_index: number;
   total_chunks: number;
   page_number?: number;
+  is_visual_anchor?: boolean;
   content: string;
   created_at: string;
 }
@@ -85,9 +88,12 @@ export interface SearchResult {
   filename?: string;
   file_key?: string;
   file_id?: string;
+  multimodal_type?: string;
   page_number?: number;
   chunk_index?: number;
   total_chunks?: number;
+  is_visual_anchor?: boolean;
+  matching_pages?: number[];
   citation?: string;
   url?: string;
 }

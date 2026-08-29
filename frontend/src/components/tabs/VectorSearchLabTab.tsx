@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Code, Paperclip, ExternalLink } from 'lucide-react';
+import { Search, Code, Paperclip, ExternalLink, ImageIcon, X } from 'lucide-react';
 import { PixelSparkles, PixelTerminal } from '../ui/PixelIcons';
 import { SearchResult } from '../../types';
 import { searchMemory } from '../../api';
@@ -7,6 +7,8 @@ import { AgentBadge, CategoryBadge } from '../ui/Badge';
 
 export const VectorSearchLabTab: React.FC = () => {
   const [query, setQuery] = useState('');
+  const [queryImageBase64, setQueryImageBase64] = useState<string | null>(null);
+  const [queryImageName, setQueryImageName] = useState<string | null>(null);
   const [scope, setScope] = useState<'all' | 'memories' | 'files'>('all');
   const [category, setCategory] = useState('');
   const [sourceAgent, setSourceAgent] = useState('');
@@ -15,21 +17,34 @@ export const VectorSearchLabTab: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [showRawJson, setShowRawJson] = useState(false);
-
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim()) return;
+    if (!query.trim() && !queryImageBase64) return;
 
     setIsLoading(true);
     const res = await searchMemory(
-      query.trim(),
+      query.trim() || undefined,
       category || undefined,
       sourceAgent || undefined,
       limit,
-      scope
+      scope,
+      queryImageBase64 || undefined
     );
     setResults(res);
     setIsLoading(false);
+  };
+
+  const handleImageQuerySelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = (reader.result as string).split(',')[1];
+      setQueryImageBase64(b64);
+      setQueryImageName(file.name);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
   return (
     <div className="space-y-6 font-sans text-xs">
@@ -98,20 +113,47 @@ export const VectorSearchLabTab: React.FC = () => {
             </div>
           </div>
 
-          <div className="relative">
-            <Search className="w-4 h-4 text-[#8a8f9e] absolute left-3.5 top-3" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={
-                scope === 'files'
-                  ? "Search inside PDF whitepapers, documents, and code files..."
-                  : "Enter prompt query or context statement to test embedding relevance..."
-              }
-              className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none transition-colors font-sans"
-            />
+
+          {/* QUERY INPUT ROW WITH VISUAL QUERY UPLOAD */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-[#8a8f9e] absolute left-3.5 top-3" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Enter prompt query or concept text to test embedding relevance..."
+                className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-white placeholder-[#8a8f9e] outline-none rounded-none font-sans text-xs"
+              />
+            </div>
+
+            <label
+              className={`px-3 py-2 border transition-colors flex items-center gap-1.5 cursor-pointer font-mono text-[11px] ${
+                queryImageBase64
+                  ? 'bg-[#22c55e]/15 border-[#22c55e]/40 text-[#22c55e]'
+                  : 'bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border-[#262626]'
+              }`}
+              title="Search with Image Screenshot / Diagram"
+            >
+              <ImageIcon className="w-3.5 h-3.5" />
+              <span>{queryImageBase64 ? 'Image Attached' : 'Visual Search'}</span>
+              <input type="file" accept="image/*" className="hidden" onChange={handleImageQuerySelect} />
+            </label>
           </div>
+
+          {queryImageName && (
+            <div className="flex items-center gap-2 text-[11px] font-mono bg-[#141414] p-1.5 px-3 border border-[#262626] text-[#86efac]">
+              <ImageIcon className="w-3 h-3" />
+              <span>Visual Query: <strong>{queryImageName}</strong></span>
+              <button
+                type="button"
+                onClick={() => { setQueryImageBase64(null); setQueryImageName(null); }}
+                className="ml-auto text-[#8a8f9e] hover:text-white"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-medium text-[#8a8f9e] mb-1">

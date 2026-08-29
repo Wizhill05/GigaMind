@@ -60,12 +60,15 @@ class StorageFileItem(SQLModel, table=True):
     id: str = Field(primary_key=True)
     key: str = Field(unique=True, index=True)
     filename: str
-    mime_type: str = Field(default="application/octet-stream")
+    mime_type: Optional[str] = Field(default="application/octet-stream")
+    multimodal_type: str = Field(default="text", index=True) # pdf, image, markdown, code, binary
     size_bytes: int = Field(default=0)
     source_agent: str = Field(default="user", index=True)
     extracted_text_length: int = Field(default=0)
     total_chunks: int = Field(default=0)
     indexing_status: str = Field(default="completed", index=True) # pending, completed, failed, unsupported
+    document_summary: Optional[str] = Field(default=None)
+    embedding_json: str = Field(default="[]")
     created_at: str
     updated_at: str
 
@@ -75,13 +78,13 @@ class StorageChunkItem(SQLModel, table=True):
     file_id: str = Field(index=True)
     file_key: str = Field(index=True)
     filename: str
-    chunk_index: int = Field(default=0)
+    chunk_index: int = Field(default=0, index=True)
     total_chunks: int = Field(default=1)
-    page_number: Optional[int] = Field(default=None)
+    page_number: Optional[int] = Field(default=None, index=True)
+    is_visual_anchor: bool = Field(default=False)
     content: str
     embedding_json: str = Field(default="[]")
     created_at: str
-
 # Database Engine initialization with automatic fallback
 raw_db_url = os.getenv("DATABASE_URL")
 if raw_db_url and raw_db_url.startswith("postgres://"):
@@ -154,6 +157,16 @@ def init_db():
                     conn.execute(text("CREATE INDEX IF NOT EXISTS storage_chunks_embedding_hnsw_idx ON storage_chunks USING hnsw (embedding_vector vector_cosine_ops) WITH (m = 16, ef_construction = 64);"))
                 except Exception as s_idx_err:
                     print(f"storage_chunks HNSW index note: {s_idx_err}")
+
+                conn.execute(text("ALTER TABLE storage_files ADD COLUMN IF NOT EXISTS multimodal_type VARCHAR DEFAULT 'text';"))
+                conn.execute(text("ALTER TABLE storage_files ADD COLUMN IF NOT EXISTS document_summary TEXT;"))
+                conn.execute(text("ALTER TABLE storage_files ADD COLUMN IF NOT EXISTS embedding_json TEXT DEFAULT '[]';"))
+                conn.execute(text("ALTER TABLE storage_files ADD COLUMN IF NOT EXISTS embedding_vector vector(768);"))
+                try:
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS storage_files_embedding_hnsw_idx ON storage_files USING hnsw (embedding_vector vector_cosine_ops) WITH (m = 16, ef_construction = 64);"))
+                except Exception as sf_idx_err:
+                    print(f"storage_files HNSW index note: {sf_idx_err}")
+                conn.execute(text("ALTER TABLE storage_chunks ADD COLUMN IF NOT EXISTS is_visual_anchor BOOLEAN DEFAULT FALSE;"))
                 conn.commit()
         except Exception as e:
             print(f"pgvector/column migration note: {e}")
@@ -170,6 +183,10 @@ def init_db():
                     "ALTER TABLE memories ADD COLUMN attachments_json TEXT DEFAULT '[]';",
                     "ALTER TABLE profile ADD COLUMN source_agent TEXT DEFAULT 'user';",
                     "ALTER TABLE conversations ADD COLUMN source_agent TEXT DEFAULT 'user';",
+                    "ALTER TABLE storage_files ADD COLUMN multimodal_type TEXT DEFAULT 'text';",
+                    "ALTER TABLE storage_files ADD COLUMN document_summary TEXT;",
+                    "ALTER TABLE storage_files ADD COLUMN embedding_json TEXT DEFAULT '[]';",
+                    "ALTER TABLE storage_chunks ADD COLUMN is_visual_anchor INTEGER DEFAULT 0;",
                     "ALTER TABLE task_sessions ADD COLUMN source_agent TEXT DEFAULT 'user';"
                 ]:
                     try:

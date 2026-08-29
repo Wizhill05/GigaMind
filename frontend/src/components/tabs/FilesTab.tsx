@@ -14,7 +14,9 @@ import {
   X,
   FileCode,
   FileCheck,
-  HardDrive
+  HardDrive,
+  ImageIcon,
+  Image as LucideImage
 } from 'lucide-react';
 import { StorageFile, StorageChunk, SearchResult } from '../../types';
 import {
@@ -35,9 +37,10 @@ export const FilesTab: React.FC = () => {
 
   // Semantic File Search state
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchImageBase64, setSearchImageBase64] = useState<string | null>(null);
+  const [searchImageName, setSearchImageName] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
-
   // Selected file for viewing chunks in modal
   const [selectedFileForChunks, setSelectedFileForChunks] = useState<StorageFile | null>(null);
   const [fileChunks, setFileChunks] = useState<StorageChunk[]>([]);
@@ -64,14 +67,27 @@ export const FilesTab: React.FC = () => {
   // Handle direct file search
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!searchQuery.trim()) {
+    if (!searchQuery.trim() && !searchImageBase64) {
       setSearchResults(null);
       return;
     }
     setIsSearching(true);
-    const results = await searchFiles(searchQuery.trim(), 10);
+    const results = await searchFiles(searchQuery.trim() || undefined, 10, searchImageBase64 || undefined);
     setSearchResults(results || []);
     setIsSearching(false);
+  };
+
+  const handleImageQueryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = (reader.result as string).split(',')[1];
+      setSearchImageBase64(b64);
+      setSearchImageName(file.name);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   // Handle direct file upload
@@ -245,33 +261,63 @@ export const FilesTab: React.FC = () => {
           </div>
         </div>
 
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-[#8a8f9e] absolute left-3 top-2.5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search concepts inside PDF papers, algorithms, or code files (e.g. QAOA 128 qubits, transmon fidelity)..."
-              className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-white placeholder-[#8a8f9e] outline-none font-sans text-xs"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={isSearching}
-            className="px-4 py-2 bg-[#ff6b00] hover:bg-[#e05e00] text-white font-medium transition-colors flex items-center gap-1.5 font-sans text-xs"
-          >
-            {isSearching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-            <span>Search Files</span>
-          </button>
-          {searchResults !== null && (
-            <button
-              type="button"
-              onClick={() => { setSearchResults(null); setSearchQuery(''); }}
-              className="px-3 py-2 bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border border-[#333333] transition-colors"
+        <form onSubmit={handleSearch} className="space-y-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-[#8a8f9e] absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search concepts inside PDF papers, algorithms, or code files (e.g. QAOA 128 qubits, transmon fidelity)..."
+                className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-white placeholder-[#8a8f9e] outline-none font-sans text-xs"
+              />
+            </div>
+
+            <label
+              className={`px-3 py-2 border transition-colors flex items-center gap-1.5 cursor-pointer font-mono text-[11px] ${
+                searchImageBase64
+                  ? 'bg-[#22c55e]/15 border-[#22c55e]/40 text-[#22c55e]'
+                  : 'bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border-[#262626]'
+              }`}
+              title="Attach Image / Screenshot for Visual Similarity Search"
             >
-              Clear
+              <ImageIcon className="w-3.5 h-3.5" />
+              <span>{searchImageBase64 ? 'Image Attached' : 'Visual Search'}</span>
+              <input type="file" accept="image/*" className="hidden" onChange={handleImageQueryUpload} />
+            </label>
+
+            <button
+              type="submit"
+              disabled={isSearching}
+              className="px-4 py-2 bg-[#ff6b00] hover:bg-[#e05e00] text-white font-medium transition-colors flex items-center gap-1.5 font-sans text-xs"
+            >
+              {isSearching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+              <span>Search Files</span>
             </button>
+            {(searchResults !== null || searchImageBase64) && (
+              <button
+                type="button"
+                onClick={() => { setSearchResults(null); setSearchQuery(''); setSearchImageBase64(null); setSearchImageName(null); }}
+                className="px-3 py-2 bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border border-[#333333] transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {searchImageName && (
+            <div className="flex items-center gap-2 text-[11px] font-mono bg-[#1a1a1a] p-1.5 px-3 border border-[#262626] text-[#86efac]">
+              <ImageIcon className="w-3 h-3" />
+              <span>Query Image: <strong>{searchImageName}</strong></span>
+              <button
+                type="button"
+                onClick={() => { setSearchImageBase64(null); setSearchImageName(null); }}
+                className="ml-auto text-[#8a8f9e] hover:text-white"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
           )}
         </form>
 
@@ -382,9 +428,23 @@ export const FilesTab: React.FC = () => {
                     <tr key={file.id || file.key} className="hover:bg-[#181818] transition-colors">
                       <td className="p-3 pl-4">
                         <div className="flex items-center gap-2.5">
-                          <FileText className="w-4 h-4 text-[#ff6b00] flex-shrink-0" />
+                          {file.multimodal_type === 'image' && file.url ? (
+                            <img src={file.url} alt={file.filename} className="w-7 h-7 object-cover border border-[#333333] flex-shrink-0" />
+                          ) : (
+                            <FileText className="w-4 h-4 text-[#ff6b00] flex-shrink-0" />
+                          )}
                           <div>
-                            <div className="font-medium text-white tracking-tight">{file.filename}</div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-white tracking-tight">{file.filename}</span>
+                              <span className={`px-1.5 py-0.2 text-[9px] font-mono font-bold uppercase rounded-none border ${
+                                file.multimodal_type === 'pdf' ? 'bg-[#00f2fe]/10 text-[#00f2fe] border-[#00f2fe]/30' :
+                                file.multimodal_type === 'image' ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30' :
+                                file.multimodal_type === 'code' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
+                                'bg-[#262626] text-[#8a8f9e] border-[#333333]'
+                              }`}>
+                                {file.multimodal_type || 'text'}
+                              </span>
+                            </div>
                             <div className="text-[10px] font-mono text-[#8a8f9e] truncate max-w-xs">{file.key}</div>
                           </div>
                         </div>

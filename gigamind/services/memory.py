@@ -56,25 +56,29 @@ def _hydrate_attachments(attachments_raw: Any, media_url: Optional[str] = None, 
         })
     return hydrated
 def search_memory(
-    query: str,
+    query: Optional[str] = None,
+    query_image_base64: Optional[str] = None,
     category: Optional[str] = None,
     source_agent: Optional[str] = None,
     limit: int = 5,
     scope: str = "all"
 ) -> List[Dict[str, Any]]:
     """
-    Unified 2-Stage RAG Search Engine:
-    - scope: "all" (searches memories, profile rules & vectorized R2 files),
-             "memories" (searches textual memories only),
-             "files" (searches vectorized file storage chunks only).
-    - Stage 1: Vector Candidate Retrieval (Top 30 from memories, Top 30 from file storage).
-    - Stage 2: Cross-Encoder Neural Rerank Pass (Top limit items returned across all knowledge).
+    Hierarchical Multimodal 2-Stage RAG Search Engine:
+    - Ingests text queries or visual image queries (base64) using Gemini Embedding 2.
+    - Hierarchical Fusion: Combines whole-document holistic vectors (storage_files)
+      with surgical page/visual snippet vectors (storage_chunks).
+    - Stage 2: Cross-Encoder Neural Rerank Pass (Top limit unique items returned).
     """
     scope_clean = (scope or "all").lower().strip()
     if scope_clean not in ("all", "memories", "files"):
         scope_clean = "all"
 
-    query_vector = generate_embedding(query)
+    query_vector = generate_embedding(
+        text=query if query else None,
+        image_base64=query_image_base64,
+        mime_type="image/png"
+    )
     query_lower = (query or "").lower()
     query_keywords = [k for k in re_words if len(k) > 2] if (re_words := query_lower.split()) else []
 
@@ -172,98 +176,127 @@ def search_memory(
         # 2. VECTORIZED OBJECT STORAGE SCAN (if scope: all | files)
         # ====================================================
         if scope_clean in ("all", "files"):
-            raw_file_candidates: List[Dict[str, Any]] = []
+            distinct_files_map: Dict[str, Dict[str, Any]] = {}
             if is_postgres:
                 try:
                     vector_str = f"[{','.join(str(x) for x in query_vector)}]"
-                    sql_files = """
-                    SELECT id, file_id, file_key, filename, chunk_index, total_chunks, page_number, content,
+
+                    # 1. Whole-Document Holistic Candidates Scan
+                    sql_docs = """
+                    SELECT id, key, filename, mime_type, multimodal_type, document_summary,
+                           1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
+                    FROM storage_files
+                    WHERE embedding_vector IS NOT NULL
+                    ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
+                    LIMIT 30;
+                    """
+                    doc_rows = session.exec(text(sql_docs), params={"vec": vector_str}).all()
+                    for dr in doc_rows:
+                        url = None
+                        if storage_service.is_enabled():
+                            url = storage_service.get_presigned_download_url(dr.key, filename=dr.filename)
+
+                        distinct_files_map[dr.key] = {
+                            "id": dr.id,
+                            "file_id": dr.id,
+                            "file_key": dr.key,
+                            "filename": dr.filename,
+                            "mime_type": dr.mime_type,
+                            "multimodal_type": dr.multimodal_type or "text",
+                            "content": dr.document_summary or f"[{dr.multimodal_type.upper()}: {dr.filename}]",
+                            "score": float(dr.vector_score or 0.0),
+                            "doc_vector_score": float(dr.vector_score or 0.0),
+                            "chunk_index": 0,
+                            "total_chunks": 1,
+                            "matching_pages": [],
+                            "url": url or "",
+                            "source": "file",
+                            "category": "file"
+                        }
+
+                    # 2. Page-Level & Visual Snippet Candidates Scan
+                    sql_chunks = """
+                    SELECT id, file_id, file_key, filename, chunk_index, total_chunks, page_number, is_visual_anchor, content,
                            1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
                     FROM storage_chunks
                     WHERE embedding_vector IS NOT NULL
                     ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
                     LIMIT 60;
                     """
-                    rows_files = session.exec(text(sql_files), params={"vec": vector_str}).all()
-                    for rf in rows_files:
-                        url = None
-                        if storage_service.is_enabled():
-                            url = storage_service.get_presigned_download_url(rf.file_key, filename=rf.filename)
+                    chunk_rows = session.exec(text(sql_chunks), params={"vec": vector_str}).all()
+                    for cr in chunk_rows:
+                        fkey = cr.file_key
+                        chunk_score = float(cr.vector_score or 0.0)
+                        if fkey not in distinct_files_map:
+                            url = None
+                            if storage_service.is_enabled():
+                                url = storage_service.get_presigned_download_url(fkey, filename=cr.filename)
 
-                        raw_file_candidates.append({
-                            "id": rf.id,
-                            "source": "file",
-                            "content": rf.content,
-                            "filename": rf.filename,
-                            "file_key": rf.file_key,
-                            "file_id": rf.file_id,
-                            "page_number": rf.page_number,
-                            "chunk_index": rf.chunk_index,
-                            "total_chunks": rf.total_chunks,
-                            "score": float(rf.vector_score or 0.0),
-                            "url": url or "",
-                            "category": "file"
-                        })
-                except Exception as pg_f_err:
-                    print(f"pgvector storage_chunks query note: {pg_f_err}")
+                            distinct_files_map[fkey] = {
+                                "id": cr.id,
+                                "file_id": cr.file_id,
+                                "file_key": cr.file_key,
+                                "filename": cr.filename,
+                                "content": cr.content,
+                                "page_number": cr.page_number,
+                                "chunk_index": cr.chunk_index,
+                                "total_chunks": cr.total_chunks,
+                                "score": chunk_score,
+                                "matching_pages": [cr.page_number] if cr.page_number is not None else [],
+                                "url": url or "",
+                                "source": "file",
+                                "category": "file"
+                            }
+                        else:
+                            target = distinct_files_map[fkey]
+                            # Hierarchical fusion: 0.6 * page_score + 0.4 * doc_score
+                            doc_score = target.get("doc_vector_score", chunk_score)
+                            fused_score = round(0.6 * chunk_score + 0.4 * doc_score, 4)
+                            if chunk_score > target["score"]:
+                                target["content"] = cr.content
+                                target["score"] = fused_score
+                                target["chunk_index"] = cr.chunk_index
+                                target["total_chunks"] = cr.total_chunks
+                                target["page_number"] = cr.page_number
+                            if cr.page_number is not None and cr.page_number not in target["matching_pages"]:
+                                target["matching_pages"].append(cr.page_number)
+                except Exception as pg_hier_err:
+                    print(f"pgvector hierarchical search note: {pg_hier_err}")
                     session.rollback()
 
-            # Fallback SQLite candidate scanner for storage chunks
-            if not raw_file_candidates:
-                f_chunks = session.exec(select(StorageChunkItem).limit(100)).all()
-                for fc in f_chunks:
+            # Fallback SQLite candidate scanner
+            if not distinct_files_map:
+                s_files = session.exec(select(StorageFileItem).limit(40)).all()
+                for sf in s_files:
                     f_score = 0.0
                     try:
-                        fc_vec = json.loads(fc.embedding_json)
-                        f_score += cosine_similarity(query_vector, fc_vec) * 0.7
+                        sf_vec = json.loads(sf.embedding_json)
+                        f_score += cosine_similarity(query_vector, sf_vec) * 0.7
                     except Exception:
                         pass
-
-                    fc_lower = fc.content.lower()
-                    kw_hits = sum(1 for kw in query_keywords if kw in fc_lower)
+                    sf_lower = sf.filename.lower() + " " + (sf.document_summary or "").lower()
+                    kw_hits = sum(1 for kw in query_keywords if kw in sf_lower)
                     if query_keywords:
                         f_score += (kw_hits / len(query_keywords)) * 0.3
 
                     if f_score > 0.05:
                         url = None
                         if storage_service.is_enabled():
-                            url = storage_service.get_presigned_download_url(fc.file_key, filename=fc.filename)
-
-                        raw_file_candidates.append({
-                            "id": fc.id,
-                            "source": "file",
-                            "content": fc.content,
-                            "filename": fc.filename,
-                            "file_key": fc.file_key,
-                            "file_id": fc.file_id,
-                            "page_number": fc.page_number,
-                            "chunk_index": fc.chunk_index,
-                            "total_chunks": fc.total_chunks,
+                            url = storage_service.get_presigned_download_url(sf.key, filename=sf.filename)
+                        distinct_files_map[sf.key] = {
+                            "id": sf.id,
+                            "file_id": sf.id,
+                            "file_key": sf.key,
+                            "filename": sf.filename,
+                            "content": sf.document_summary or f"[{sf.filename}]",
                             "score": round(f_score, 4),
                             "url": url or "",
+                            "matching_pages": [],
+                            "source": "file",
                             "category": "file"
-                        })
-
-            # Group chunks by distinct file_key and keep the best representative excerpt per file
-            distinct_file_candidates: Dict[str, Dict[str, Any]] = {}
-            for fc in raw_file_candidates:
-                fkey = fc["file_key"]
-                if fkey not in distinct_file_candidates:
-                    distinct_file_candidates[fkey] = {
-                        **fc,
-                        "matching_pages": [fc["page_number"]] if fc.get("page_number") is not None else []
-                    }
-                else:
-                    if fc["score"] > distinct_file_candidates[fkey]["score"]:
-                        prev_pages = distinct_file_candidates[fkey]["matching_pages"]
-                        distinct_file_candidates[fkey] = {
-                            **fc,
-                            "matching_pages": prev_pages
                         }
-                    if fc.get("page_number") is not None and fc["page_number"] not in distinct_file_candidates[fkey]["matching_pages"]:
-                        distinct_file_candidates[fkey]["matching_pages"].append(fc["page_number"])
 
-            candidates.extend(distinct_file_candidates.values())
+            candidates.extend(distinct_files_map.values())
     # Sort all candidates by initial score
     candidates.sort(key=lambda x: x["score"], reverse=True)
     top_candidates = candidates[:50]
@@ -271,7 +304,7 @@ def search_memory(
     # ====================================================
     # STAGE 2: CROSS-ENCODER NEURAL RERANK PASS
     # ====================================================
-    reranked_results = rerank_candidates(query=query, candidates=top_candidates, top_n=limit)
+    reranked_results = rerank_candidates(query=query or "visual and multimodal search", candidates=top_candidates, top_n=limit)
 
     final_output = []
     for item in reranked_results:
@@ -284,6 +317,7 @@ def search_memory(
                 "filename": item.get("filename", ""),
                 "file_key": item.get("file_key", ""),
                 "file_id": item.get("file_id", ""),
+                "multimodal_type": item.get("multimodal_type", "text"),
                 "page_number": item.get("page_number"),
                 "chunk_index": item.get("chunk_index", 0),
                 "total_chunks": item.get("total_chunks", 1),

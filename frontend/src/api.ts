@@ -214,17 +214,25 @@ export async function fetchConversations(
 }
 
 export async function searchMemory(
-  query: string,
+  query?: string,
   category?: string,
   sourceAgent?: string,
   limit: number = 5,
-  scope: string = 'all'
+  scope: string = 'all',
+  imageBase64?: string
 ): Promise<SearchResult[] | null> {
   try {
     const res = await fetch('/api/v1/search_memory', {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ query, category, source_agent: sourceAgent, limit, scope }),
+      body: JSON.stringify({
+        query: query || null,
+        image_base64: imageBase64 || null,
+        category,
+        source_agent: sourceAgent,
+        limit,
+        scope
+      }),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -235,18 +243,48 @@ export async function searchMemory(
   }
 }
 
-export async function searchFiles(query: string, limit: number = 5): Promise<SearchResult[] | null> {
+export async function searchFiles(query?: string, limit: number = 5, imageBase64?: string): Promise<SearchResult[] | null> {
   try {
     const res = await fetch('/api/v1/search_files', {
       method: 'POST',
       headers: getHeaders(),
-      body: JSON.stringify({ query, limit }),
+      body: JSON.stringify({
+        query: query || null,
+        image_base64: imageBase64 || null,
+        limit
+      }),
     });
     if (!res.ok) return null;
     const data = await res.json();
     return data.results || [];
   } catch (err) {
     console.error('searchFiles error:', err);
+    return null;
+  }
+}
+
+export async function searchMultimodal(
+  query?: string,
+  imageBase64?: string,
+  scope: string = 'all',
+  limit: number = 5
+): Promise<SearchResult[] | null> {
+  try {
+    const res = await fetch('/api/v1/search_multimodal', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        query: query || null,
+        image_base64: imageBase64 || null,
+        scope,
+        limit
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.results || [];
+  } catch (err) {
+    console.error('searchMultimodal error:', err);
     return null;
   }
 }

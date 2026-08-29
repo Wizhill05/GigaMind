@@ -3,6 +3,7 @@ import math
 import hashlib
 import urllib.request
 import json
+import base64
 from typing import List, Optional
 
 DEFAULT_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
@@ -10,10 +11,15 @@ DEFAULT_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
 def _hash_token(token: str) -> int:
     return int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16)
 
-def generate_embedding(text: str, image_base64: Optional[str] = None, mime_type: str = "image/png") -> List[float]:
+def generate_embedding(
+    text: Optional[str] = None,
+    inline_bytes: Optional[bytes] = None,
+    image_base64: Optional[str] = None,
+    mime_type: Optional[str] = None
+) -> List[float]:
     """
     Generate Multimodal Vector Embedding using Google Gemini Embedding 2 (models/gemini-embedding-2).
-    Supports Multimodal inputs (text, documents, code, images, architecture diagrams).
+    Supports Multimodal inputs (direct PDF binaries, images, diagrams, documents, and code).
     """
     # 1. Google Gemini Embedding 2 API (models/gemini-embedding-2)
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -31,13 +37,24 @@ def generate_embedding(text: str, image_base64: Optional[str] = None, mime_type:
                 parts = []
                 if text:
                     parts.append({"text": text})
-                if image_base64:
+                if inline_bytes:
+                    b64_data = base64.b64encode(inline_bytes).decode("utf-8")
+                    parts.append({
+                        "inline_data": {
+                            "mime_type": mime_type or "application/pdf",
+                            "data": b64_data
+                        }
+                    })
+                elif image_base64:
                     parts.append({
                         "inline_data": {
                             "mime_type": mime_type or "image/png",
                             "data": image_base64
                         }
                     })
+
+                if not parts:
+                    parts.append({"text": ""})
 
                 payload = {
                     "model": model_name,
@@ -50,7 +67,7 @@ def generate_embedding(text: str, image_base64: Optional[str] = None, mime_type:
                     data=json.dumps(payload).encode("utf-8"),
                     headers={"Content-Type": "application/json"}
                 )
-                with urllib.request.urlopen(req, timeout=10) as resp:
+                with urllib.request.urlopen(req, timeout=15) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     values = data["embedding"]["values"]
                     return [float(x) for x in values[:DEFAULT_DIM]]
