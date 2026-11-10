@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useDialogFocus } from '../../hooks/useDialogFocus';
 import { X, Save, Plus, Paperclip, Loader2, Trash2, ExternalLink } from 'lucide-react';
 import { Memory, MemoryAttachment } from '../../types';
 import { uploadFile } from '../../api';
@@ -44,13 +45,9 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
     setUploadError(null);
   }, [initialMemory, isOpen]);
 
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogFocus(isOpen);
   useEffect(() => {
-    if (!isOpen) return;
-    setSaveError('');
-    const previous = document.activeElement;
-    dialogRef.current?.querySelector<HTMLElement>('input, textarea')?.focus();
-    return () => { if (previous instanceof HTMLElement) previous.focus(); };
+    if (isOpen) setSaveError('');
   }, [isOpen]);
 
   // Handle ESC key press
@@ -149,6 +146,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         aria-label="Memory record"
         onClick={(e) => e.stopPropagation()}
         className={`bg-[#181818] border border-[#262626] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 ${
@@ -307,6 +305,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
             <button
               type="button"
               onClick={handleAnimatedClose}
+              disabled={saving}
               className="bg-[#222222] text-[#8a8f9e] hover:text-white px-4 py-2 rounded-none font-medium btn-press"
             >
               Cancel

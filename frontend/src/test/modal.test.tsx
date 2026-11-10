@@ -31,3 +31,23 @@ it.each(['memory', 'rule'])('%s cannot close with Escape during save', async kin
   act(() => { vi.advanceTimersByTime(250); });
   expect(close).not.toHaveBeenCalled();
 });
+
+it.each(['memory', 'rule'])('%s traps focus and restores it on close', kind => {
+  const opener = document.createElement('button');
+  document.body.appendChild(opener);
+  opener.focus();
+  const modal = (open: boolean) => kind === 'memory'
+    ? <MemoryModal isOpen={open} onClose={() => {}} onSave={async () => {}} />
+    : <RuleModal isOpen={open} onClose={() => {}} onSave={async () => {}} />;
+  const { rerender } = render(modal(true));
+  const first = screen.getByRole('button', { name: 'Close dialog' });
+  const last = screen.getByRole('button', { name: kind === 'memory' ? 'Save Memory' : 'Save Rule' });
+  last.focus();
+  fireEvent.keyDown(document, { key: 'Tab' });
+  expect(document.activeElement).toBe(first);
+  fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+  expect(document.activeElement).toBe(last);
+  rerender(modal(false));
+  expect(document.activeElement).toBe(opener);
+  opener.remove();
+});

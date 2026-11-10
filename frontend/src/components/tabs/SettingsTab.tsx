@@ -27,7 +27,11 @@ export const SettingsTab: React.FC = () => {
 
   const handleExport = async (format: 'json' | 'csv') => {
     toast(`Exporting memories as ${format.toUpperCase()}...`, 'info');
-    await exportMemories(format);
+    try {
+      await exportMemories(format);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Export failed', 'error');
+    }
   };
 
   const handleConfirmHardReset = async (e: React.FormEvent) => {
@@ -39,15 +43,19 @@ export const SettingsTab: React.FC = () => {
 
     setIsResetting(true);
     setResetErrorMessage('');
-    const res = await hardResetMemories(resetPasswordInput.trim());
-    setIsResetting(false);
-
-    if (res && res.success) {
-      toast(res.message || 'Hard memory reset complete.', 'success');
-      setShowResetModal(false);
-      setResetPasswordInput('');
-    } else {
-      setResetErrorMessage(res?.message || 'Password verification failed');
+    try {
+      const res = await hardResetMemories(resetPasswordInput.trim());
+      if (res.success) {
+        toast(res.message || 'Hard memory reset complete.', 'success');
+        setShowResetModal(false);
+        setResetPasswordInput('');
+      } else {
+        setResetErrorMessage(res.message || 'Reset failed');
+      }
+    } catch (error) {
+      setResetErrorMessage(error instanceof Error ? error.message : 'Reset failed');
+    } finally {
+      setIsResetting(false);
     }
   };
 
