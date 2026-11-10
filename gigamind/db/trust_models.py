@@ -1,6 +1,6 @@
 from typing import Optional
 from sqlmodel import SQLModel, Field
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import UniqueConstraint, Index, CheckConstraint, func, text
 
 class MemoryProposal(SQLModel, table=True):
     __tablename__ = 'trust_proposals'
@@ -17,6 +17,10 @@ class MemoryProposal(SQLModel, table=True):
 
 class AcceptedKnowledge(SQLModel, table=True):
     __tablename__ = 'trust_knowledge'
+    __table_args__ = (
+        CheckConstraint("project_id IS NULL OR length(trim(project_id)) > 0"),
+        CheckConstraint("subject IS NULL OR length(trim(subject)) > 0"),
+    )
     id: str = Field(primary_key=True)
     proposal_id: str
     project_id: Optional[str] = Field(default=None, index=True)
@@ -53,6 +57,15 @@ class ActivityEvent(SQLModel, table=True):
     status: str = 'recorded'
     created_at: str
     updated_at: str
+
+Index(
+    'uq_trust_accepted_project_subject',
+    func.coalesce(AcceptedKnowledge.__table__.c.project_id, ''),
+    AcceptedKnowledge.__table__.c.subject,
+    unique=True,
+    sqlite_where=text("status = 'accepted' AND subject IS NOT NULL"),
+    postgresql_where=text("status = 'accepted' AND subject IS NOT NULL"),
+)
 
 def initialize_trust_tables(engine):
     SQLModel.metadata.create_all(engine, tables=[cls.__table__ for cls in (MemoryProposal, AcceptedKnowledge, KnowledgeRevision, ActivityEvent)])

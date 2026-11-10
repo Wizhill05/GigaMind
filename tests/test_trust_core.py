@@ -67,3 +67,61 @@ def test_project_and_router(setup):
     assert client.post(f"/api/v1/review/proposals/{p['id']}/resolve", json={'action':'approve','expected_revision':1}).status_code == 403
     app.dependency_overrides.clear()
     assert client.get('/api/v1/review/activity').status_code == 401
+
+def test_validation_dedup_and_database_constraint(setup):
+    from sqlalchemy.exc import IntegrityError
+    from sqlmodel import Session
+    from gigamind.db.trust_models import AcceptedKnowledge
+
+    admin, agent = setup
+    error(422, trust.create_proposal, agent, content='x', project_id='a', evidence=[{'source_type': 'doc', 'source_id': None, 'quote': None}], idempotency_key='bad')
+    first = proposal(agent)
+    memory = trust.resolve_proposal(admin, first['id'], action='approve', expected_revision=1)['memory']
+    second = proposal(agent, 'same')
+    result = trust.resolve_proposal(admin, second['id'], action='approve', expected_revision=1)
+    assert result['memory']['id'] == memory['id']
+    assert result['proposal']['accepted_memory_id'] == memory['id']
+    assert proposal(agent)['id'] == first['id']
+    with Session(trust.engine) as session:
+        session.add(AcceptedKnowledge(id='duplicate', proposal_id='x', project_id='a', subject='topic', content='x', data_json='{}', writer_id='x', created_at='x', updated_at='x'))
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_concurrent_approvals_global(setup, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    admin, _ = setup
+    one = proposal(admin, 'global1', 'first', None)
+    two = proposal(admin, 'global2', 'second', None)
+    barrier = Barrier(2)
+    original = trust.conflicts
+
+    def synchronized(*args, **kwargs):
+        result = original(*args, **kwargs)
+        barrier.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(trust, 'conflicts', synchronized)
+    def approve(p):
+        try:
+            return trust.resolve_proposal(admin, p['id'], action='approve', expected_revision=1)
+        except HTTPException as exc:
+            return exc.status_code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(approve, (one, two)))
+    assert sum(isinstance(x, dict) for x in outcomes) == 1
+    assert 409 in outcomes
+
+
+def test_postgresql_index_ddl():
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateIndex
+    from gigamind.db.trust_models import AcceptedKnowledge
+
+    index = next(i for i in AcceptedKnowledge.__table__.indexes if i.name == 'uq_trust_accepted_project_subject')
+    ddl = str(CreateIndex(index).compile(dialect=postgresql.dialect()))
+    assert 'UNIQUE INDEX' in ddl
+    assert 'coalesce' in ddl.lower()
+    assert "status = 'accepted' AND subject IS NOT NULL" in ddl
