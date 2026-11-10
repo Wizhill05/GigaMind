@@ -31,15 +31,13 @@ from gigamind.services.memory import (
     delete_conversation,
     vectorize_conversation
 )
-from gigamind.services.oauth import (
-    create_authorization_code,
-    consume_authorization_code,
-    issue_access_token,
-    verify_access_token,
-)
+from gigamind.security import Actor, ClientCredential, SCOPES, create_client, get_actor, public_client, require_scope
+from gigamind.db.database import engine
+from sqlmodel import Session, select
 
 # Initialize DB
 init_db()
+ClientCredential.__table__.create(engine, checkfirst=True)
 
 app = FastAPI(
     title="GigaMind Personal Memory Engine API",
@@ -51,7 +49,7 @@ app = FastAPI(
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o for o in os.getenv("GIGAMIND_CORS_ORIGINS", "").split(",") if o],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -62,24 +60,10 @@ assets_dir = os.path.join(frontend_dist_dir, "assets")
 if os.path.exists(assets_dir):
     app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
 
-API_KEY = os.getenv("GIGAMIND_API_KEY", "gigamind-secret-key-change-me")
+API_KEY = os.getenv("GIGAMIND_API_KEY", "")
 
-# Active SSE Session Queues Map: session_id -> asyncio.Queue
-sse_queues: Dict[str, asyncio.Queue] = {}
-# Auth Middleware Helper
-def verify_auth(authorization: Optional[str] = Header(None), api_key: Optional[str] = None):
-    token = ""
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split("Bearer ")[1].strip()
-    elif api_key:
-        token = api_key
-
-    is_valid_api_key = (token == API_KEY)
-    is_valid_oauth = token.startswith("gm_at_") or verify_access_token(token)
-
-    if not is_valid_api_key and not is_valid_oauth:
-        raise HTTPException(status_code=401, detail="Unauthorized: Missing or invalid Bearer API Key or OAuth Token")
-    return True
+def verify_auth(actor: Actor = Depends(require_scope("admin"))):
+    return actor
 
 # Pydantic Request Models
 class SearchMemoryRequest(BaseModel):
@@ -88,12 +72,12 @@ class SearchMemoryRequest(BaseModel):
     scope: str = Field("all", description="Search domain: 'all' | 'memories' | 'files'")
     category: Optional[str] = Field(None, description="Optional category filter")
     source_agent: Optional[str] = Field(None, description="Optional source agent filter (e.g. claude, gpt, gemini, user)")
-    limit: int = Field(5, description="Maximum results to return")
+    limit: int = Field(5, ge=1, le=100, description="Maximum results to return")
 
 class SearchFilesRequest(BaseModel):
     query: Optional[str] = Field(None, description="Query to search inside uploaded documents")
     image_base64: Optional[str] = Field(None, description="Base64 encoded image query for visual similarity search")
-    limit: int = Field(5, description="Maximum results to return")
+    limit: int = Field(5, ge=1, le=100, description="Maximum results to return")
 
 class SearchMultimodalRequest(BaseModel):
     query: Optional[str] = Field(None, description="Text search query")
@@ -101,7 +85,7 @@ class SearchMultimodalRequest(BaseModel):
     scope: str = Field("all", description="Search domain: 'all' | 'memories' | 'files'")
     category: Optional[str] = Field(None, description="Optional category filter")
     source_agent: Optional[str] = Field(None, description="Optional source agent filter")
-    limit: int = Field(5, description="Maximum results to return")
+    limit: int = Field(5, ge=1, le=100, description="Maximum results to return")
 class ReindexFileRequest(BaseModel):
     key: str = Field(..., description="R2 storage key to re-index")
 
@@ -163,7 +147,7 @@ class SearchConversationsRequest(BaseModel):
     query: str = Field(..., description="Query to search inside chat transcripts")
     platform: Optional[str] = Field(None, description="Optional platform filter: claude | chatgpt | gemini")
     source_agent: Optional[str] = Field(None, description="Optional source agent filter")
-    limit: int = Field(5, description="Maximum results to return")
+    limit: int = Field(5, ge=1, le=100, description="Maximum results to return")
 def _format_search_results_for_agent(results: List[Dict[str, Any]], query: Optional[str], scope: str) -> str:
     query_label = f"'{query}'" if query else "visual multimodal query"
     if not results:
@@ -222,598 +206,47 @@ def read_root(request: Request):
         "oauth_authorize": "/oauth/authorize",
         "oauth_token": "/oauth/token"
     }
-# ==========================================
-# OAUTH 2.0 DISCOVERY & ENDPOINTS
-# ==========================================
+@app.api_route("/oauth/{path:path}", methods=["GET", "POST"])
+def oauth_unavailable(path: str):
+    raise HTTPException(503, "OAuth is not configured")
 
-@app.get("/.well-known/oauth-authorization-server")
-@app.get("/.well-known/openid-configuration")
-def oauth_discovery(request: Request):
-    base_url = str(request.base_url).rstrip("/")
-    return {
-        "issuer": base_url,
-        "authorization_endpoint": f"{base_url}/oauth/authorize",
-        "token_endpoint": f"{base_url}/oauth/token",
-        "userinfo_endpoint": f"{base_url}/oauth/userinfo",
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code", "refresh_token"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic", "none"],
-        "scopes_supported": ["memory", "profile", "openid"]
-    }
+@app.api_route("/sse", methods=["GET", "POST"])
+@app.api_route("/messages", methods=["GET", "POST"])
+def legacy_mcp_unavailable(actor: Actor = Depends(get_actor)):
+    raise HTTPException(503, "MCP transport is not configured")
 
-@app.get("/oauth/authorize", response_class=HTMLResponse)
-def oauth_authorize_get(client_id: str = "claude-web", redirect_uri: str = "", state: str = "", response_type: str = "code"):
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Authorize GigaMind Memory Engine</title>
-      <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
-        .card {{ background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 32px; width: 360px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }}
-        h2 {{ font-size: 20px; margin-top: 0; color: #38bdf8; }}
-        p {{ font-size: 14px; color: #a1a1aa; margin-bottom: 24px; }}
-        input[type="password"] {{ width: 100%; padding: 12px; background: #09090b; border: 1px solid #3f3f46; border-radius: 6px; color: #fff; font-size: 14px; margin-bottom: 16px; box-sizing: border-box; }}
-        button {{ width: 100%; padding: 12px; background: #0284c7; border: none; border-radius: 6px; color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; }}
-        button:hover {{ background: #0369a1; }}
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        <h2>🧠 Connect GigaMind</h2>
-        <p>Enter your GigaMind Master Password to authorize access to your personal memory database.</p>
-        <form method="POST" action="/oauth/authorize">
-          <input type="hidden" name="client_id" value="{client_id}">
-          <input type="hidden" name="redirect_uri" value="{redirect_uri}">
-          <input type="hidden" name="state" value="{state}">
-          <input type="hidden" name="response_type" value="{response_type}">
-          <input type="password" name="password" placeholder="Enter GigaMind Master Password" required autofocus />
-          <button type="submit">Authorize Connection</button>
-        </form>
-      </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+class ClientRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    scopes: List[str]
+    project_ids: List[str]
 
-@app.post("/oauth/authorize")
-def oauth_authorize_post(
-    client_id: str = Form(""),
-    redirect_uri: str = Form(""),
-    state: str = Form(""),
-    password: str = Form("")
-):
-    if password != API_KEY:
-        return HTMLResponse("<h3>❌ Invalid Master Password</h3><p><a href='javascript:history.back()'>Try again</a></p>", status_code=401)
+@app.get("/api/v1/admin/clients")
+def list_clients(actor: Actor = Depends(require_scope("admin"))):
+    with Session(engine) as session:
+        return {"clients": [public_client(c) for c in session.exec(select(ClientCredential)).all()]}
 
-    code = create_authorization_code(client_id, redirect_uri)
-    target_url = f"{redirect_uri}?code={code}"
-    if state:
-        target_url += f"&state={state}"
-    return RedirectResponse(url=target_url, status_code=303)
+@app.post("/api/v1/admin/clients")
+def add_client(req: ClientRequest, actor: Actor = Depends(require_scope("admin"))):
+    if not set(req.scopes).issubset(SCOPES - {"admin"}) or not req.project_ids or any(not p.strip() for p in req.project_ids):
+        raise HTTPException(422, "Valid non-admin scopes and project IDs are required")
+    client, token = create_client(req.name, req.scopes, req.project_ids)
+    return {"client": public_client(client), "token": token}
 
-@app.post("/oauth/token")
-def oauth_token(
-    grant_type: str = Form("authorization_code"),
-    code: str = Form(""),
-    redirect_uri: str = Form(""),
-    client_id: str = Form("")
-):
-    if grant_type == "authorization_code":
-        consume_authorization_code(code, client_id, redirect_uri)
+@app.post("/api/v1/admin/clients/{client_id}/revoke")
+def revoke_client(client_id: str, actor: Actor = Depends(require_scope("admin"))):
+    with Session(engine) as session:
+        client = session.get(ClientCredential, client_id)
+        if not client:
+            raise HTTPException(404, "Client not found")
+        client.revoked = True
+        session.add(client)
+        session.commit()
+        return {"client": public_client(client)}
 
-    token_data = issue_access_token()
-    return JSONResponse(content=token_data)
+@app.get("/health/live")
+def live():
+    return {"status": "ok"}
 
-@app.get("/oauth/userinfo")
-def oauth_userinfo():
-    return {
-        "sub": "gigamind_user",
-        "name": "Aryan Singh",
-        "email": "user@gigamind.local"
-    }
-
-# ==========================================
-# FastMCP SSE & JSON-RPC MCP ENDPOINTS
-# ==========================================
-
-@app.get("/sse")
-async def mcp_sse_endpoint(request: Request):
-    session_id = f"session_{uuid.uuid4().hex[:10]}"
-    base_url = str(request.base_url).rstrip("/")
-    message_endpoint = f"{base_url}/messages?sessionId={session_id}"
-
-    queue = asyncio.Queue()
-    sse_queues[session_id] = queue
-
-    async def event_generator():
-        try:
-            yield f"event: endpoint\ndata: {message_endpoint}\n\n"
-            while True:
-                try:
-                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"event: message\ndata: {msg}\n\n"
-                except asyncio.TimeoutError:
-                    yield ": ping\n\n"
-        finally:
-            sse_queues.pop(session_id, None)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        }
-    )
-
-@app.post("/messages")
-async def mcp_messages_endpoint(request: Request, sessionId: str = ""):
-    body = await request.json()
-    msg_id = body.get("id")
-    method = body.get("method")
-    params = body.get("params", {})
-
-    queue = sse_queues.get(sessionId)
-
-    async def send_rpc_response(result=None, error=None):
-        payload = {"jsonrpc": "2.0"}
-        if msg_id is not None:
-            payload["id"] = msg_id
-        if error:
-            payload["error"] = error
-        else:
-            payload["result"] = result
-
-        payload_json = json.dumps(payload)
-
-        if queue:
-            await queue.put(payload_json)
-
-        return payload
-
-    if method == "initialize":
-        res = await send_rpc_response(result={
-            "protocolVersion": params.get("protocolVersion", "2024-11-05"),
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "gigamind-mcp-server", "version": "1.0.0"}
-        })
-        return res
-
-    if method == "tools/list":
-        tools_list = [
-            {
-                "name": "search_memory",
-                "description": "Unified 2-stage multimodal semantic search across ALL knowledge: conversational memories, user facts, preferences, and individual uploaded files/PDFs/images/code in Cloudflare R2.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Text search query or concept"},
-                        "image_base64": {"type": "string", "description": "Optional base64 image data for visual query matching"},
-                        "scope": {"type": "string", "enum": ["all", "memories", "files"], "default": "all", "description": "Search scope: 'all' (default: memories + files), 'memories' only, or 'files' only"},
-                        "category": {"type": "string", "description": "Optional category filter"},
-                        "source_agent": {"type": "string", "description": "Optional source agent filter (e.g. claude, gpt, gemini)"},
-                        "limit": {"type": "integer", "default": 5, "description": "Max items to return"}
-                    }
-                }
-            },
-            {
-                "name": "search_multimodal",
-                "description": "Direct multimodal vector search accepting either text concepts or image diagrams (base64) using Gemini Embedding 2.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Optional text query or prompt"},
-                        "image_base64": {"type": "string", "description": "Optional base64 image data for visual similarity search"},
-                        "scope": {"type": "string", "enum": ["all", "memories", "files"], "default": "all"},
-                        "limit": {"type": "integer", "default": 5}
-                    }
-                }
-            },
-            {
-                "name": "search_memories",
-                "description": "Search ONLY user conversational memories, notes, facts, and profile knowledge. Excludes uploaded document files.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query for memories, facts, or preferences"},
-                        "category": {"type": "string", "description": "Optional category filter"},
-                        "source_agent": {"type": "string", "description": "Optional source agent filter"},
-                        "limit": {"type": "integer", "default": 5, "description": "Max memories to return"}
-                    },
-                    "required": ["query"]
-                }
-            },
-            {
-                "name": "search_files",
-                "description": "Search ONLY individual uploaded files, PDFs, research papers, markdown docs, and code files stored in Cloudflare R2. Returns matching document excerpts with page numbers, filenames, and direct download links.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query or concept to find inside uploaded documents"},
-                        "image_base64": {"type": "string", "description": "Optional base64 image data for visual similarity search"},
-                        "limit": {"type": "integer", "default": 5, "description": "Max matching document chunks to return"}
-                    }
-                }
-            },
-            {
-                "name": "search_file_storage",
-                "description": "Semantic vector search inside PDF research papers, code files, and documents stored in Cloudflare R2. Alias for search_files.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search term or concept"},
-                        "image_base64": {"type": "string", "description": "Optional base64 image data for visual query matching"},
-                        "limit": {"type": "integer", "default": 5, "description": "Max matching document chunks to return"}
-                    }
-                }
-            },
-            {
-                "name": "search_chat_transcripts",
-                "description": "Semantic vector search specifically across past conversation transcripts, chat history logs, and prompt sessions from Claude, ChatGPT, and AI agent platforms.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query or topic to find inside past chat transcripts"},
-                        "platform": {"type": "string", "description": "Optional platform filter (claude, chatgpt, gemini)"},
-                        "limit": {"type": "integer", "default": 5, "description": "Max matching conversation transcripts to return"}
-                    },
-                    "required": ["query"]
-                }
-            },
-            {
-                "name": "get_user_profile",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "category": {"type": "string"},
-                        "source_agent": {"type": "string"}
-                    }
-                }
-            },
-            {
-                "name": "add_memory",
-                "description": "Save a new fact, project decision, or research context with optional attached files to GigaMind memory.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "content": {"type": "string", "description": "Text content of the memory"},
-                        "category": {"type": "string", "default": "general"},
-                        "source_agent": {"type": "string", "default": "claude", "description": "Source agent or model (e.g. claude, gpt, gemini, user)"},
-                        "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags array"},
-                        "file_keys": {"type": "array", "items": {"type": "string"}, "description": "Optional list of Cloudflare R2 storage keys to attach"}
-                    },
-                    "required": ["content"]
-                }
-            },
-            {
-                "name": "upload_file_to_storage",
-                "description": "Upload a research document, PDF, diagram, or code artifact directly to Cloudflare R2 object storage with zero egress fees.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filename": {"type": "string", "description": "Name of the file (e.g. quantum_research.pdf)"},
-                        "content_base64": {"type": "string", "description": "Base64-encoded binary content of the file (max 15MB)"},
-                        "mime_type": {"type": "string", "description": "Optional MIME type (e.g. application/pdf, text/markdown)"}
-                    },
-                    "required": ["filename", "content_base64"]
-                }
-            },
-            {
-                "name": "get_file_download_url",
-                "description": "Generate a secure, time-limited presigned download URL for an R2 storage key.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "key": {"type": "string", "description": "R2 storage key (e.g. files/2026/08/mem_123_spec.pdf)"},
-                        "expires_in_seconds": {"type": "integer", "default": 3600, "description": "URL validity duration in seconds"}
-                    },
-                    "required": ["key"]
-                }
-            },
-            {
-                "name": "get_file_upload_url",
-                "description": "Generate a direct presigned PUT URL for streaming large uploads directly to Cloudflare R2.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filename": {"type": "string", "description": "Target filename"},
-                        "content_type": {"type": "string", "default": "application/octet-stream", "description": "MIME type"}
-                    },
-                    "required": ["filename"]
-                }
-            },
-            {
-                "name": "list_storage_files",
-                "description": "List files and artifacts stored in the Cloudflare R2 knowledge bucket.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "prefix": {"type": "string", "default": "", "description": "Key prefix filter (e.g. files/2026/)"},
-                        "limit": {"type": "integer", "default": 50, "description": "Max files to return"}
-                    }
-                }
-            },
-            {
-                "name": "set_profile_rule",
-                "description": "Store or update a permanent profile key-value rule.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "key": {"type": "string"},
-                        "value": {"type": "string"},
-                        "category": {"type": "string", "default": "general"},
-                        "source_agent": {"type": "string", "default": "claude", "description": "Source agent or model (e.g. claude, gpt, gemini, user)"}
-                    },
-                    "required": ["key", "value"]
-                }
-            },
-            {
-                "name": "delete_memory",
-                "description": "Permanently delete a specific memory item from the GigaMind database. MANDATORY CONFIRMATION PROTOCOL: You MUST explicitly ask the user for permission and receive an affirmative response with the memory ID and summary before calling this tool. NEVER delete memories autonomously without direct user confirmation.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "memory_id": {
-                            "type": "string",
-                            "description": "The exact ID of the memory item to delete (e.g. 'mem_2b2d33ca34d0')"
-                        },
-                        "user_confirmed": {
-                            "type": "boolean",
-                            "description": "MUST be true. Indicates that the user explicitly authorized the deletion of this memory."
-                        }
-                    },
-                    "required": ["memory_id", "user_confirmed"]
-                }
-            }
-        ]
-        res = await send_rpc_response(result={"tools": tools_list})
-        return res
-
-    if method == "tools/call":
-        name = params.get("name")
-        args = params.get("arguments", {})
-
-        if name in ("search_memory", "search_knowledge", "search_all", "search_multimodal"):
-            query = args.get("query")
-            image_base64 = args.get("image_base64")
-            scope = args.get("scope", "all")
-            results = search_memory(
-                query=query,
-                query_image_base64=image_base64,
-                category=args.get("category"),
-                source_agent=args.get("source_agent"),
-                limit=args.get("limit", 5),
-                scope=scope
-            )
-            formatted_text = _format_search_results_for_agent(results, query, scope)
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": formatted_text}],
-                "structured": {
-                    "query": query,
-                    "scope": scope,
-                    "count": len(results),
-                    "results": results
-                }
-            })
-            return res
-
-        if name in ("search_memories", "search_memories_only"):
-            query = args.get("query", "")
-            results = search_memory(
-                query=query,
-                category=args.get("category"),
-                source_agent=args.get("source_agent"),
-                limit=args.get("limit", 5),
-                scope="memories"
-            )
-            formatted_text = _format_search_results_for_agent(results, query, "memories")
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": formatted_text}],
-                "structured": {
-                    "query": query,
-                    "scope": "memories",
-                    "count": len(results),
-                    "results": results
-                }
-            })
-            return res
-
-        if name in ("search_files", "search_files_only", "search_file_storage"):
-            query = args.get("query")
-            image_base64 = args.get("image_base64")
-            results = search_memory(
-                query=query,
-                query_image_base64=image_base64,
-                limit=args.get("limit", 5),
-                scope="files"
-            )
-            formatted_text = _format_search_results_for_agent(results, query, "files")
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": formatted_text}],
-                "structured": {
-                    "query": query,
-                    "scope": "files",
-                    "count": len(results),
-                    "results": results
-                }
-            })
-            return res
-        if name in ("search_chat_transcripts", "search_conversations"):
-            query = args.get("query", "")
-            platform = args.get("platform")
-            results = search_conversations(
-                query=query,
-                platform=platform,
-                source_agent=args.get("source_agent"),
-                limit=args.get("limit", 5)
-            )
-            lines = [f"Found {len(results)} matching conversation transcript(s) for query: '{query}':\n"]
-            for idx, c in enumerate(results, 1):
-                lines.append(f"{idx}. **[{c.get('platform', 'chat').upper()}] {c.get('title', 'Conversation')}** (Score: {c.get('score', 0):.2f}):")
-                lines.append(f"   Summary: {c.get('summary', '')}")
-                lines.append(f"   Date: {c.get('created_at', '')[:10]} | Messages: {c.get('messages_count', len(c.get('messages', [])))}\n")
-            formatted_text = "\n".join(lines)
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": formatted_text}],
-                "structured": {
-                    "query": query,
-                    "count": len(results),
-                    "results": results
-                }
-            })
-            return res
-
-        if name == "get_user_profile":
-            rules = get_profile_rules(category=args.get("category"), source_agent=args.get("source_agent"))
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps({"profile": rules}, indent=2)}]
-            })
-            return res
-
-        if name == "add_memory":
-            mem = add_memory(
-                content=args.get("content", ""),
-                category=args.get("category", "general"),
-                source_agent=args.get("source_agent", "claude"),
-                tags=args.get("tags", []),
-                file_keys=args.get("file_keys", [])
-            )
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps({"success": True, "memory": mem}, indent=2)}]
-            })
-            return res
-
-        if name == "upload_file_to_storage":
-            if not storage_service.is_enabled():
-                res = await send_rpc_response(error={"code": -32000, "message": "Cloudflare R2 storage is not configured on this GigaMind server."})
-                return res
-            try:
-                b64_str = args.get("content_base64", "")
-                file_bytes = base64.b64decode(b64_str)
-                uploaded = storage_service.upload_file(
-                    data=file_bytes,
-                    filename=args.get("filename", "agent_file"),
-                    mime_type=args.get("mime_type")
-                )
-                if not uploaded:
-                    res = await send_rpc_response(error={"code": -32000, "message": "Failed to upload file to Cloudflare R2."})
-                    return res
-
-                # Immediately extract text, chunk, and compute vector embeddings for Neon pgvector
-                idx_res = index_file_content(
-                    file_key=uploaded["key"],
-                    filename=uploaded["filename"],
-                    data=file_bytes,
-                    mime_type=uploaded.get("mime_type"),
-                    size_bytes=len(file_bytes)
-                )
-                uploaded["indexed_chunks"] = idx_res.get("chunks_created", 0)
-                uploaded["indexing_status"] = idx_res.get("status", "completed")
-
-                res = await send_rpc_response(result={
-                    "content": [{"type": "text", "text": json.dumps({"success": True, "file": uploaded}, indent=2)}]
-                })
-                return res
-            except Exception as up_err:
-                res = await send_rpc_response(error={"code": -32000, "message": f"Upload error: {up_err}"})
-                return res
-
-        if name == "get_file_download_url":
-            if not storage_service.is_enabled():
-                res = await send_rpc_response(error={"code": -32000, "message": "Cloudflare R2 storage is not configured."})
-                return res
-            url = storage_service.get_presigned_download_url(
-                key=args.get("key", ""),
-                expires_in=args.get("expires_in_seconds", 3600)
-            )
-            if not url:
-                res = await send_rpc_response(error={"code": -32000, "message": f"Could not generate URL for key: {args.get('key')}"})
-                return res
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps({"key": args.get("key"), "url": url}, indent=2)}]
-            })
-            return res
-
-        if name == "delete_memory":
-            memory_id = args.get("memory_id", "").strip()
-            user_confirmed = args.get("user_confirmed", False)
-            if not user_confirmed:
-                res = await send_rpc_response(error={
-                    "code": -32000,
-                    "message": "Permission denied. You must explicitly ask the user for confirmation and pass user_confirmed=true before deleting a memory."
-                })
-                return res
-
-            if not memory_id:
-                res = await send_rpc_response(error={
-                    "code": -32602,
-                    "message": "memory_id argument is required."
-                })
-                return res
-
-            success = delete_memory(memory_id)
-            if not success:
-                res = await send_rpc_response(error={
-                    "code": -32000,
-                    "message": f"Memory item '{memory_id}' not found."
-                })
-                return res
-
-            res = await send_rpc_response(result={
-                "content": [{
-                    "type": "text",
-                    "text": json.dumps({
-                        "success": True,
-                        "deleted_memory_id": memory_id,
-                        "message": f"Memory {memory_id} was permanently deleted upon user confirmation."
-                    }, indent=2)
-                }]
-            })
-            return res
-
-        if name == "get_file_upload_url":
-            if not storage_service.is_enabled():
-                res = await send_rpc_response(error={"code": -32000, "message": "Cloudflare R2 storage is not configured."})
-                return res
-            upload_info = storage_service.get_presigned_upload_url(
-                filename=args.get("filename", "file"),
-                content_type=args.get("content_type", "application/octet-stream")
-            )
-            if not upload_info:
-                res = await send_rpc_response(error={"code": -32000, "message": "Failed to generate presigned upload URL."})
-                return res
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps(upload_info, indent=2)}]
-            })
-            return res
-
-        if name == "list_storage_files":
-            if not storage_service.is_enabled():
-                res = await send_rpc_response(result={
-                    "content": [{"type": "text", "text": json.dumps({"enabled": False, "files": []}, indent=2)}]
-                })
-                return res
-            files = storage_service.list_files(prefix=args.get("prefix", ""), limit=args.get("limit", 50))
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps({"enabled": True, "files": files, "count": len(files)}, indent=2)}]
-            })
-            return res
-
-        if name == "set_profile_rule":
-            rule = set_profile_rule(key=args.get("key", ""), value=args.get("value", ""), category=args.get("category", "general"), source_agent=args.get("source_agent", "claude"))
-            res = await send_rpc_response(result={
-                "content": [{"type": "text", "text": json.dumps({"success": True, "rule": rule}, indent=2)}]
-            })
-            return res
-
-    res = await send_rpc_response(error={"code": -32601, "message": "Method not found"})
-    return res
 # ==========================================
 # REST API ENDPOINTS (ChatGPT & Gemini)
 # ==========================================
@@ -1018,16 +451,7 @@ async def api_import_conversations_file(file: UploadFile = File(...), platform: 
 
 @app.post("/api/v1/conversations/import_path", dependencies=[Depends(verify_auth)])
 def api_import_conversations_path(req: ImportConversationsPathRequest):
-    """Reads a local conversations.json file directly from disk and batch-imports into database."""
-    if not os.path.exists(req.file_path):
-        raise HTTPException(status_code=404, detail=f"File not found at path: {req.file_path}")
-    try:
-        with open(req.file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        res = import_conversations_data(data, default_platform=req.platform)
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to import from path: {e}")
+    raise HTTPException(403, "Server-path import is disabled; upload a file instead")
 
 
 @app.post("/api/v1/conversations/search", dependencies=[Depends(verify_auth)])
