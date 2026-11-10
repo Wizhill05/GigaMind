@@ -7,10 +7,11 @@ import { AgentBadge, CategoryBadge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 
 interface ProfileRulesTabProps {
+  refreshVersion: number;
   onOpenNewRuleModal: () => void;
 }
 
-export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleModal }) => {
+export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleModal, refreshVersion }) => {
   const [rules, setRules] = useState<ProfileRule[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
@@ -27,7 +28,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
 
   useEffect(() => {
     loadRules();
-  }, [categoryFilter, sourceAgentFilter]);
+  }, [categoryFilter, sourceAgentFilter, refreshVersion]);
 
   const handleDelete = async (id: string) => {
     if (window.confirm(`Confirm deletion of profile rule: ${id}?`)) {

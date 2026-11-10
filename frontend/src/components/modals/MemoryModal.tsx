@@ -44,6 +44,15 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
     setUploadError(null);
   }, [initialMemory, isOpen]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    setSaveError('');
+    const previous = document.activeElement;
+    dialogRef.current?.querySelector<HTMLElement>('input, textarea')?.focus();
+    return () => { if (previous instanceof HTMLElement) previous.focus(); };
+  }, [isOpen]);
+
   // Handle ESC key press
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -53,7 +62,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isExiting]);
+  }, [isOpen, isExiting, saving, onClose]);
 
   const handleAnimatedClose = () => {
     if (saving) return;
@@ -137,6 +146,10 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
       }`}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Memory record"
         onClick={(e) => e.stopPropagation()}
         className={`bg-[#181818] border border-[#262626] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 ${
           isExiting ? 'animate-scale-out' : 'animate-scale-in'
@@ -149,6 +162,8 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
           </h3>
           <button
             onClick={handleAnimatedClose}
+            disabled={saving}
+            aria-label="Close dialog"
             className="text-[#8a8f9e] hover:text-white transition-colors btn-press"
           >
             <X className="w-4 h-4" />
@@ -301,7 +316,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
               disabled={saving}
               className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2 rounded-none shadow-sm btn-press"
             >
-              Save Memory
+              {saving ? 'Saving...' : 'Save Memory'}
             </button>
           </div>
         </form>

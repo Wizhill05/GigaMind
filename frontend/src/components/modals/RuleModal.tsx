@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { PixelShield } from '../ui/PixelIcons';
 
@@ -17,6 +17,15 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
   const [saveError, setSaveError] = useState('');
   const [isExiting, setIsExiting] = useState(false);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    setSaveError('');
+    const previous = document.activeElement;
+    dialogRef.current?.querySelector<HTMLElement>('input, textarea')?.focus();
+    return () => { if (previous instanceof HTMLElement) previous.focus(); };
+  }, [isOpen]);
+
   // Handle ESC key press
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -26,7 +35,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isExiting]);
+  }, [isOpen, isExiting, saving, onClose]);
 
   const handleAnimatedClose = () => {
     if (saving) return;
@@ -70,6 +79,10 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
       }`}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Rule record"
         onClick={(e) => e.stopPropagation()}
         className={`bg-[#181818] border border-[#262626] max-w-xl w-full p-6 rounded-none shadow-2xl space-y-4 ${
           isExiting ? 'animate-scale-out' : 'animate-scale-in'
@@ -80,7 +93,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
             <PixelShield className="w-4 h-4 text-[#ff6b00]" />
             <span>Define Identity & Profile Rule</span>
           </h3>
-          <button onClick={handleAnimatedClose} className="text-[#8a8f9e] hover:text-white transition-colors btn-press">
+          <button onClick={handleAnimatedClose} disabled={saving} aria-label="Close dialog" className="text-[#8a8f9e] hover:text-white transition-colors btn-press">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -156,7 +169,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
               disabled={saving}
               className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2 rounded-none shadow-sm btn-press"
             >
-              Save Rule
+              {saving ? 'Saving...' : 'Save Rule'}
             </button>
           </div>
         </form>

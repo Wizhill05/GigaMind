@@ -168,13 +168,14 @@ export const AppContent: React.FC = () => {
 
         {/* SCROLLABLE MAIN CONTENT CANVAS WITH SMOOTH ANIMATED TAB TRANSITIONS */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          <div key={`${activeTab}-${refreshVersion}`} className="max-w-6xl mx-auto space-y-6 animate-slide-up">
+          <div key={activeTab} className="max-w-6xl mx-auto space-y-6 animate-slide-up">
             {activeTab === 'overview' && (
               <OverviewTab stats={stats} onNavigateTab={(tab) => setActiveTab(tab)} />
             )}
 
             {activeTab === 'memories' && (
               <MemoriesTab
+                refreshVersion={refreshVersion}
                 onOpenNewModal={handleOpenNewMemoryModal}
                 onOpenEditModal={handleOpenEditMemoryModal}
               />
@@ -183,7 +184,7 @@ export const AppContent: React.FC = () => {
             {activeTab === 'files' && <FilesTab />}
 
             {activeTab === 'rules' && (
-              <ProfileRulesTab onOpenNewRuleModal={() => setIsRuleModalOpen(true)} />
+              <ProfileRulesTab refreshVersion={refreshVersion} onOpenNewRuleModal={() => setIsRuleModalOpen(true)} />
             )}
 
             {activeTab === 'transcripts' && (

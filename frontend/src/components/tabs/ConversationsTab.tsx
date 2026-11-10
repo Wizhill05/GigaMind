@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   AlertCircle,
   X,
-  Terminal,
   FolderInput,
   Search,
   Sparkles,
@@ -24,7 +23,6 @@ import { Conversation } from '../../types';
 import {
   fetchConversations,
   importConversationsFile,
-  importConversationsPath,
   searchConversations,
   deleteConversation,
   vectorizeConversation,
@@ -53,7 +51,6 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
 
   // Import Chat History State
   const [showImportCard, setShowImportCard] = useState(false);
-  const [localPathInput, setLocalPathInput] = useState('C:\\Users\\Aryan\\Downloads\\conversations-000\\conversations.json');
   const [importPlatform, setImportPlatform] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
@@ -88,34 +85,6 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
     const res = await searchConversations(searchQuery.trim(), platformFilter || undefined, sourceAgentFilter || undefined, 10);
     setSearchResults(res || []);
     setIsSearching(false);
-  };
-
-  // Handle local path import
-  const handleImportFromPath = async () => {
-    if (!localPathInput.trim()) {
-      toast('Please enter a valid file path', 'error');
-      return;
-    }
-
-    setIsImporting(true);
-    setImportStatus('Reading and ingesting conversations from local path...');
-    toast('Starting chat transcript import...', 'info');
-
-    const res = await importConversationsPath(localPathInput.trim(), importPlatform || undefined);
-    setIsImporting(false);
-
-    if (res && res.success) {
-      toast(res.message, 'success');
-      setImportStatus(res.message);
-      loadConversations();
-      setTimeout(() => {
-        setShowImportCard(false);
-        setImportStatus(null);
-      }, 3000);
-    } else {
-      toast('Failed to import conversations. Verify the file path.', 'error');
-      setImportStatus('Error: Failed to import from specified path.');
-    }
   };
 
   // Handle file upload import
@@ -256,54 +225,17 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* METHOD A: DIRECT LOCAL PATH INGESTION */}
-            <div className="bg-[#0f0f0f] border border-[#262626] p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-3.5 h-3.5 text-[#ff6b00]" />
-                <span className="font-semibold text-white text-xs">Option 1: Ingest from Local File Path</span>
-              </div>
-              <p className="text-[11px] text-[#8a8f9e]">
-                Directly reads <code>conversations.json</code> from disk for instant zero-network batch ingestion:
-              </p>
-
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={localPathInput}
-                  onChange={(e) => setLocalPathInput(e.target.value)}
-                  placeholder="C:\Users\...\conversations.json"
-                  className="w-full bg-[#161616] border border-[#333333] focus:border-[#ff6b00] p-2 text-white font-mono text-[11px] outline-none"
-                />
-
-                <div className="flex items-center justify-between gap-2">
-                  <select
-                    value={importPlatform}
-                    onChange={(e) => setImportPlatform(e.target.value)}
-                    className="bg-[#161616] border border-[#333333] text-white p-1.5 text-xs outline-none"
-                  >
-                    <option value="">Auto-Detect Format (Claude/GPT)</option>
-                    <option value="claude">Claude Export</option>
-                    <option value="chatgpt">ChatGPT Export</option>
-                  </select>
-
-                  <button
-                    onClick={handleImportFromPath}
-                    disabled={isImporting}
-                    className="px-4 py-1.5 bg-[#ff6b00] hover:bg-[#e05e00] text-white font-medium transition-colors flex items-center gap-1.5 text-xs disabled:opacity-50"
-                  >
-                    {isImporting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                    <span>{isImporting ? 'Ingesting...' : 'Import from Path'}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
+            <select value={importPlatform} onChange={e => setImportPlatform(e.target.value)} aria-label="Import format" className="bg-[#161616] text-white p-2">
+              <option value="">Auto-Detect Format (Claude/GPT)</option>
+              <option value="claude">Claude Export</option>
+              <option value="chatgpt">ChatGPT Export</option>
+            </select>
             {/* METHOD B: BROWSER FILE UPLOAD */}
             <div className="bg-[#0f0f0f] border border-[#262626] p-4 flex flex-col justify-between space-y-3">
               <div>
                 <div className="flex items-center gap-2">
                   <FileJson className="w-3.5 h-3.5 text-[#22c55e]" />
-                  <span className="font-semibold text-white text-xs">Option 2: Upload JSON Export</span>
+                  <span className="font-semibold text-white text-xs">Upload JSON Export</span>
                 </div>
                 <p className="text-[11px] text-[#8a8f9e] mt-1">
                   Select and upload an exported <code>conversations.json</code> file from Claude/ChatGPT settings:

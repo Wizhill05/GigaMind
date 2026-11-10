@@ -29,11 +29,11 @@ export class ApiError extends Error {
 async function checkedFetch(input: string, init: RequestInit): Promise<Response> {
   let response: Response;
   try { response = await fetch(input, init); }
-  catch (error) { throw new ApiError(0, error instanceof Error ? `Network error: ${error.message}` : 'Network error'); }
+  catch (error) { if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') throw error; throw new ApiError(0, error instanceof Error ? `Network error: ${error.message}` : 'Network error'); }
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null;
-    throw new ApiError(response.status, typeof detail === 'string' ? detail : `Request failed (${response.status})`);
+    throw new ApiError(response.status, typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(item => typeof item?.msg === 'string' ? item.msg : JSON.stringify(item)).join('; ') : `Request failed (${response.status})`);
   }
   return response;
 }
@@ -50,19 +50,11 @@ export async function fetchMemories(
   query?: string,
   signal?: AbortSignal
 ): Promise<{ memories: Memory[]; total: number; page: number; pages: number } | null> {
-  try {
-    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-    if (category) params.append('category', category);
-    if (sourceAgent) params.append('source_agent', sourceAgent);
-    if (query) params.append('q', query);
-
-    const res = await fetch(`/api/v1/memories?${params.toString()}`, { headers: getHeaders(), signal });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error('fetchMemories error:', err);
-    return null;
-  }
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (category) params.append('category', category);
+  if (sourceAgent) params.append('source_agent', sourceAgent);
+  if (query) params.append('q', query);
+  return (await checkedFetch(`/api/v1/memories?${params.toString()}`, { headers: getHeaders(), signal })).json();
 }
 
 export async function addMemory(data: {
@@ -96,16 +88,8 @@ export async function updateMemory(
 }
 
 export async function deleteMemory(id: string): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/v1/memories/${id}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
-    });
-    return res.ok;
-  } catch (err) {
-    console.error('deleteMemory error:', err);
-    return false;
-  }
+  await checkedFetch(`/api/v1/memories/${id}`, { method: 'DELETE', headers: getHeaders() });
+  return true;
 }
 
 export async function exportMemories(format: 'json' | 'csv' = 'json'): Promise<void> {

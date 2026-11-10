@@ -7,17 +7,20 @@ import { AgentBadge, CategoryBadge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 
 interface MemoriesTabProps {
+  refreshVersion: number;
   onOpenNewModal: () => void;
   onOpenEditModal: (mem: Memory) => void;
 }
 
-export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpenEditModal }) => {
+export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpenEditModal, refreshVersion }) => {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [reload, setReload] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
@@ -53,36 +56,32 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
     setReindexingKey(null);
   };
 
-  const loadMemories = async () => {
-    setIsLoading(true);
-    const res = await fetchMemories(page, 10, categoryFilter || undefined, sourceAgentFilter || undefined);
-    if (res) {
-      setMemories(res.memories);
-      setTotalPages(res.pages || 1);
-      setTotalCount(res.total || 0);
-    }
-    setIsLoading(false);
-  };
-
   useEffect(() => {
     if (activeSubTab !== 'memories') { void loadStorageFiles(); return; }
     const controller = new AbortController();
     setIsLoading(true);
+    setLoadError('');
     void fetchMemories(page, 10, categoryFilter || undefined, sourceAgentFilter || undefined, debouncedSearch || undefined, controller.signal).then(res => {
       if (controller.signal.aborted) return;
       if (res) { setMemories(res.memories); setTotalPages(res.pages || 1); setTotalCount(res.total || 0); }
       else toast('Could not load memories', 'error');
       setIsLoading(false);
+    }).catch(error => {
+      if (controller.signal.aborted) return;
+      setLoadError(error instanceof Error ? error.message : 'Could not load memories');
+      setIsLoading(false);
     });
     return () => controller.abort();
-  }, [page, categoryFilter, sourceAgentFilter, debouncedSearch, activeSubTab]);
+  }, [page, categoryFilter, sourceAgentFilter, debouncedSearch, activeSubTab, reload, refreshVersion]);
   const handleDelete = async (id: string) => {
     if (window.confirm(`Confirm deletion of memory item: ${id}?`)) {
+      try {
       const ok = await deleteMemory(id);
       if (ok) {
         toast(`Memory ${id} deleted successfully`, 'success');
-        loadMemories();
+        setReload(value => value + 1);
       }
+      } catch (error) { toast(error instanceof Error ? error.message : 'Delete failed', 'error'); }
     }
   };
 
@@ -315,6 +314,8 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
               </div>
             ))}
           </div>
+        ) : loadError ? (
+          <div role="alert" className="p-4 text-red-400">{loadError} <button onClick={() => setReload(value => value + 1)}>Retry</button></div>
         ) : filteredMemories.length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e]">
             No memory records match the selected filter criteria
