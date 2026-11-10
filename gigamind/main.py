@@ -4,7 +4,10 @@ import asyncio
 import uuid
 import base64
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, BackgroundTasks, Query
+from contextlib import asynccontextmanager
+from sqlalchemy import text
+from gigamind.protocol import manager, mcp_endpoint
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -39,12 +42,30 @@ from sqlmodel import Session, select
 init_db()
 ClientCredential.__table__.create(engine, checkfirst=True)
 
+@asynccontextmanager
+async def lifespan(app):
+    async with manager.run():
+        yield
+
 app = FastAPI(
+    lifespan=lifespan,
     title="GigaMind Personal Memory Engine API",
     description="Single Source of Truth (SSOT) personal memory database for AI models.",
     version="1.0.0",
     openapi_url="/openapi.json"
 )
+
+class MCPMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] in ("/mcp", "/mcp/"):
+            await mcp_endpoint(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
+
+app.add_middleware(MCPMiddleware)
 
 # Enable CORS
 app.add_middleware(
@@ -199,12 +220,12 @@ def read_root(request: Request):
     return {
         "status": "online",
         "name": "GigaMind Personal Memory Engine",
-        "runtime": "Python (FastAPI + FastMCP)",
+        "runtime": "Python (FastAPI + MCP SDK)",
         "dashboard_ui": "/dashboard",
-        "mcp_endpoint": "/sse",
+        "mcp_endpoint": "/mcp",
         "openapi_spec": "/openapi.json",
-        "oauth_authorize": "/oauth/authorize",
-        "oauth_token": "/oauth/token"
+        "legacy_sse": "unavailable",
+        "oauth": "unavailable"
     }
 @app.api_route("/oauth/{path:path}", methods=["GET", "POST"])
 def oauth_unavailable(path: str):
@@ -246,6 +267,18 @@ def revoke_client(client_id: str, actor: Actor = Depends(require_scope("admin"))
 @app.get("/health/live")
 def live():
     return {"status": "ok"}
+
+@app.get("/health/ready")
+def ready():
+    key = os.getenv("GIGAMIND_API_KEY", "")
+    if not key or key == "gigamind-secret-key-change-me":
+        raise HTTPException(503, "Admin credential is not configured")
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(503, "Database unavailable")
+    return {"status": "ready"}
 
 # ==========================================
 # REST API ENDPOINTS (ChatGPT & Gemini)
@@ -379,8 +412,8 @@ def api_export_memories(format: str = "json"):
         )
 
 @app.get("/api/v1/memories", dependencies=[Depends(verify_auth)])
-def api_get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None, source_agent: Optional[str] = None):
-    return get_memories(page=page, limit=limit, category=category, source_agent=source_agent)
+def api_get_memories(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100), category: Optional[str] = None, source_agent: Optional[str] = None, q: Optional[str] = None):
+    return get_memories(page=page, limit=limit, category=category, source_agent=source_agent, q=q)
 
 @app.delete("/api/v1/memories/{id}", dependencies=[Depends(verify_auth)])
 def api_delete_memory(id: str):
@@ -413,7 +446,7 @@ def api_update_memory(id: str, req: UpdateMemoryRequest):
         raise HTTPException(status_code=404, detail=f"Memory '{id}' not found")
     return {"success": True, "memory": updated}
 @app.get("/api/v1/conversations", dependencies=[Depends(verify_auth)])
-def api_get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = None, source_agent: Optional[str] = None):
+def api_get_conversations(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100), platform: Optional[str] = None, source_agent: Optional[str] = None):
     return get_conversations(page=page, limit=limit, platform=platform, source_agent=source_agent)
 
 
@@ -570,7 +603,7 @@ def api_reindex_file(req: ReindexFileRequest, background_tasks: BackgroundTasks)
     return {"success": True, "key": req.key, "indexing": "queued"}
 
 @app.get("/api/v1/files/indexed", dependencies=[Depends(verify_auth)])
-def api_list_indexed_files(limit: int = 100):
+def api_list_indexed_files(limit: int = Query(100, ge=1, le=100)):
     """Returns indexed files with chunk counts and vector status from Neon PostgreSQL."""
     files = list_indexed_storage_files(limit=limit)
     return {"files": files, "count": len(files)}
@@ -611,7 +644,7 @@ def api_get_file_upload_url(req: PresignedUploadUrlRequest):
     return {"success": True, **upload_data}
 
 @app.get("/api/v1/files", dependencies=[Depends(verify_auth)])
-def api_list_files(prefix: str = "", limit: int = 100):
+def api_list_files(prefix: str = "", limit: int = Query(100, ge=1, le=100)):
     """Lists files currently indexed in the Cloudflare R2 bucket."""
     if not storage_service.is_enabled():
         return {"enabled": False, "files": [], "message": "Cloudflare R2 storage is not configured."}

@@ -1,6 +1,6 @@
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
-mcp>=1.2.0
+mcp==1.26.0
 sqlmodel>=0.0.16
 pydantic>=2.7.0
 python-dotenv>=1.0.1
