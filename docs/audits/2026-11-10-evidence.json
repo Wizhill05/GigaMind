@@ -1,0 +1,87 @@
+[
+  {
+    "case": "REST auth control",
+    "observed": 401
+  },
+  {
+    "case": "Forged prefixed token",
+    "observed": 200
+  },
+  {
+    "case": "Invalid OAuth authorization code",
+    "observed": {
+      "status": 200,
+      "token_issued": true
+    }
+  },
+  {
+    "case": "Unknown OAuth grant",
+    "observed": {
+      "status": 200,
+      "token_issued": true
+    }
+  },
+  {
+    "case": "Unauthenticated MCP write without session",
+    "observed": {
+      "status": 200,
+      "persisted": true
+    }
+  },
+  {
+    "case": "Memory write without Gemini config",
+    "observed": 500
+  },
+  {
+    "case": "Memory category and agent filters",
+    "observed": {
+      "excluded_id_returned": true
+    }
+  },
+  {
+    "case": "SQLite semantic vectors ignored",
+    "observed": {
+      "stored_vector_identical_to_query": true,
+      "nonlexical_query_results": 0
+    }
+  },
+  {
+    "case": "Delete reports success but survives new session",
+    "observed": {
+      "returned": true,
+      "still_present": true
+    }
+  },
+  {
+    "case": "Edited parent retains old chunks",
+    "observed": {
+      "children_before": 3,
+      "children_after": 3,
+      "old_content_retained": true
+    }
+  },
+  {
+    "case": "Keyword scan truncates corpus",
+    "observed": {
+      "late_id_returned": false
+    }
+  },
+  {
+    "case": "Single-object conversation JSON",
+    "observed": {
+      "success": true,
+      "ingested": 0,
+      "skipped": 0,
+      "total_processed": 1,
+      "message": "Successfully imported 0 conversation(s) into database (0 duplicate(s) skipped)."
+    }
+  },
+  {
+    "case": "Reset reports purge but survives new session",
+    "observed": {
+      "before": 71,
+      "reported_purged": 71,
+      "after": 71
+    }
+  }
+]
