@@ -21,6 +21,8 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => { const timer = setTimeout(() => setDebouncedSearch(searchFilter), 400); return () => clearTimeout(timer); }, [searchFilter]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [activeSubTab, setActiveSubTab] = useState<'memories' | 'files'>('memories');
@@ -63,12 +65,17 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   };
 
   useEffect(() => {
-    if (activeSubTab === 'memories') {
-      loadMemories();
-    } else {
-      loadStorageFiles();
-    }
-  }, [page, categoryFilter, sourceAgentFilter, activeSubTab]);
+    if (activeSubTab !== 'memories') { void loadStorageFiles(); return; }
+    const controller = new AbortController();
+    setIsLoading(true);
+    void fetchMemories(page, 10, categoryFilter || undefined, sourceAgentFilter || undefined, debouncedSearch || undefined, controller.signal).then(res => {
+      if (controller.signal.aborted) return;
+      if (res) { setMemories(res.memories); setTotalPages(res.pages || 1); setTotalCount(res.total || 0); }
+      else toast('Could not load memories', 'error');
+      setIsLoading(false);
+    });
+    return () => controller.abort();
+  }, [page, categoryFilter, sourceAgentFilter, debouncedSearch, activeSubTab]);
   const handleDelete = async (id: string) => {
     if (window.confirm(`Confirm deletion of memory item: ${id}?`)) {
       const ok = await deleteMemory(id);
@@ -86,14 +93,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const filteredMemories = memories.filter((mem) => {
-    if (!searchFilter.trim()) return true;
-    return (
-      mem.content.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      mem.category.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      mem.tags.some((t) => t.toLowerCase().includes(searchFilter.toLowerCase()))
-    );
-  });
+  const filteredMemories = memories;
 
   // Keyboard Arrow Navigation inside list
   useEffect(() => {
@@ -255,7 +255,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
             <input
               type="text"
               value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
+              onChange={(e) => { setSearchFilter(e.target.value); setPage(1); }}
               placeholder="Filter memory records... (Use ↑ ↓ arrow keys to navigate)"
               className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none font-sans transition-colors"
             />

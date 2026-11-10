@@ -22,29 +22,41 @@ function getHeaders(): HeadersInit {
   };
 }
 
-export async function fetchStats(): Promise<Stats | null> {
-  try {
-    const res = await fetch('/api/v1/stats', { headers: getHeaders() });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error('fetchStats error:', err);
-    return null;
+export class ApiError extends Error {
+  constructor(public status: number, message: string) { super(message); this.name = 'ApiError'; }
+}
+
+async function checkedFetch(input: string, init: RequestInit): Promise<Response> {
+  let response: Response;
+  try { response = await fetch(input, init); }
+  catch (error) { throw new ApiError(0, error instanceof Error ? `Network error: ${error.message}` : 'Network error'); }
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null;
+    throw new ApiError(response.status, typeof detail === 'string' ? detail : `Request failed (${response.status})`);
   }
+  return response;
+}
+
+export async function fetchStats(): Promise<Stats> {
+  return (await checkedFetch('/api/v1/stats', { headers: getHeaders() })).json();
 }
 
 export async function fetchMemories(
   page: number = 1,
   limit: number = 20,
   category?: string,
-  sourceAgent?: string
+  sourceAgent?: string,
+  query?: string,
+  signal?: AbortSignal
 ): Promise<{ memories: Memory[]; total: number; page: number; pages: number } | null> {
   try {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (category) params.append('category', category);
     if (sourceAgent) params.append('source_agent', sourceAgent);
+    if (query) params.append('q', query);
 
-    const res = await fetch(`/api/v1/memories?${params.toString()}`, { headers: getHeaders() });
+    const res = await fetch(`/api/v1/memories?${params.toString()}`, { headers: getHeaders(), signal });
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {
@@ -63,36 +75,24 @@ export async function addMemory(data: {
   media_url?: string;
   media_type?: string;
 }): Promise<{ success: boolean; memory?: Memory } | null> {
-  try {
-    const res = await fetch('/api/v1/add_memory', {
+    const res = await checkedFetch('/api/v1/add_memory', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(data),
     });
-    if (!res.ok) return null;
     return await res.json();
-  } catch (err) {
-    console.error('addMemory error:', err);
-    return null;
-  }
 }
 
 export async function updateMemory(
   id: string,
   data: { content?: string; category?: string; source_agent?: string; tags?: string[]; attachments?: MemoryAttachment[] }
 ): Promise<{ success: boolean; memory?: Memory } | null> {
-  try {
-    const res = await fetch(`/api/v1/memories/${id}`, {
+    const res = await checkedFetch(`/api/v1/memories/${id}`, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(data),
     });
-    if (!res.ok) return null;
     return await res.json();
-  } catch (err) {
-    console.error('updateMemory error:', err);
-    return null;
-  }
 }
 
 export async function deleteMemory(id: string): Promise<boolean> {
@@ -166,18 +166,12 @@ export async function setProfileRule(data: {
   category?: string;
   source_agent?: string;
 }): Promise<{ success: boolean; rule?: ProfileRule } | null> {
-  try {
-    const res = await fetch('/api/v1/set_profile_rule', {
+    const res = await checkedFetch('/api/v1/set_profile_rule', {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(data),
     });
-    if (!res.ok) return null;
     return await res.json();
-  } catch (err) {
-    console.error('setProfileRule error:', err);
-    return null;
-  }
 }
 
 export async function deleteProfileRule(id: string): Promise<boolean> {

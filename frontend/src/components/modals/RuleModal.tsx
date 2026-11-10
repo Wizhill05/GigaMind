@@ -5,7 +5,7 @@ import { PixelShield } from '../ui/PixelIcons';
 interface RuleModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (data: { key: string; value: string; category: string; source_agent: string }) => void;
+  onSave: (data: { key: string; value: string; category: string; source_agent: string }) => Promise<void>;
 }
 
 export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave }) => {
@@ -13,6 +13,8 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
   const [value, setValue] = useState('');
   const [category, setCategory] = useState('general');
   const [sourceAgent, setSourceAgent] = useState('user');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [isExiting, setIsExiting] = useState(false);
 
   // Handle ESC key press
@@ -27,6 +29,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
   }, [isOpen, isExiting]);
 
   const handleAnimatedClose = () => {
+    if (saving) return;
     setIsExiting(true);
     setTimeout(() => {
       setIsExiting(false);
@@ -36,11 +39,15 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     if (!key.trim() || !value.trim()) return;
 
-    onSave({
+    setSaving(true);
+    setSaveError('');
+    try {
+    await onSave({
       key: key.trim().toLowerCase().replace(/\s+/g, '_'),
       value: value.trim(),
       category: category.trim() || 'general',
@@ -50,7 +57,9 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
     setValue('');
     setCategory('general');
     setSourceAgent('user');
-    handleAnimatedClose();
+    onClose();
+    } catch (error) { setSaveError(error instanceof Error ? error.message : 'Save failed'); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -77,6 +86,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          {saveError && <p role="alert" className="text-red-400">{saveError}</p>}
           <div>
             <label className="block text-xs font-medium text-[#c1c5d0] mb-1">
               Rule Key (Unique Identifier)
@@ -143,6 +153,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({ isOpen, onClose, onSave })
             </button>
             <button
               type="submit"
+              disabled={saving}
               className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2 rounded-none shadow-sm btn-press"
             >
               Save Rule

@@ -5,7 +5,7 @@ import { setApiKey } from '../api';
 
 interface AuthGateProps {
   onAuthenticate: () => void;
-  errorNotice?: boolean;
+  errorNotice?: string;
 }
 
 export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice }) => {
@@ -51,7 +51,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
 
           {errorNotice && (
             <div className="bg-rose-500/10 border border-rose-500/30 p-3 text-xs text-rose-400 rounded-none text-center">
-              Invalid Master Password. Please check your key and try again.
+              {errorNotice}
             </div>
           )}
 

@@ -16,13 +16,15 @@ import { TranscriptDrawer } from './components/modals/TranscriptDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { Stats, Memory, Conversation } from './types';
-import { fetchStats, addMemory, updateMemory, setProfileRule, getApiKey, deleteConversation, vectorizeConversation } from './api';
+import { ApiError, fetchStats, addMemory, updateMemory, setProfileRule, getApiKey, deleteConversation, vectorizeConversation } from './api';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [stats, setStats] = useState<Stats | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
+  const [authError, setAuthError] = useState('');
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   // Modals & Palette state
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
@@ -42,14 +44,16 @@ export const AppContent: React.FC = () => {
       return;
     }
 
-    const data = await fetchStats();
-    if (data) {
+    try {
+      const data = await fetchStats();
       setStats(data);
       setIsAuthenticated(true);
       setShowAuthGate(false);
-    } else {
+      setAuthError('');
+    } catch (error) {
       setIsAuthenticated(false);
       setShowAuthGate(true);
+      setAuthError(error instanceof ApiError && error.status === 401 ? 'Invalid master key.' : error instanceof Error ? error.message : 'Unable to connect.');
     }
   };
 
@@ -82,20 +86,25 @@ export const AppContent: React.FC = () => {
 
   const handleSaveMemory = async (data: { content: string; category: string; source_agent: string; tags: string[] }) => {
     if (editingMemory) {
-      await updateMemory(editingMemory.id, data);
+      const result = await updateMemory(editingMemory.id, data);
+      if (!result?.success) throw new Error("Memory update failed.");
       toast(`Memory ${editingMemory.id} updated successfully`, 'success');
     } else {
-      await addMemory(data);
+      const result = await addMemory(data);
+      if (!result?.success) throw new Error("Memory save failed.");
       toast(`New memory saved to repository`, 'success');
     }
-    loadStats();
+    setRefreshVersion(v => v + 1);
+    void loadStats();
   };
 
   // Rule modal handlers
   const handleSaveRule = async (data: { key: string; value: string; category: string; source_agent: string }) => {
-    await setProfileRule(data);
+    const result = await setProfileRule(data);
+    if (!result?.success) throw new Error("Rule save failed.");
     toast(`Profile rule '${data.key}' saved successfully`, 'success');
-    loadStats();
+    setRefreshVersion(v => v + 1);
+    void loadStats();
   };
 
   // Transcript drawer handlers
@@ -130,10 +139,11 @@ export const AppContent: React.FC = () => {
       {showAuthGate && (
         <AuthGate
           onAuthenticate={loadStats}
-          errorNotice={!isAuthenticated && !!getApiKey()}
+          errorNotice={authError}
         />
       )}
 
+      {isAuthenticated && <>
       {/* LEFT SIDEBAR NAVIGATION */}
       <Sidebar
         activeTab={activeTab}
@@ -150,7 +160,7 @@ export const AppContent: React.FC = () => {
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* TOP BREADCRUMB HEADER */}
         <Header
-          onRefresh={loadStats}
+          onRefresh={() => { setRefreshVersion(v => v + 1); void loadStats(); }}
           isAuthenticated={isAuthenticated}
           onOpenNewMemoryModal={handleOpenNewMemoryModal}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
@@ -158,7 +168,7 @@ export const AppContent: React.FC = () => {
 
         {/* SCROLLABLE MAIN CONTENT CANVAS WITH SMOOTH ANIMATED TAB TRANSITIONS */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          <div key={activeTab} className="max-w-6xl mx-auto space-y-6 animate-slide-up">
+          <div key={`${activeTab}-${refreshVersion}`} className="max-w-6xl mx-auto space-y-6 animate-slide-up">
             {activeTab === 'overview' && (
               <OverviewTab stats={stats} onNavigateTab={(tab) => setActiveTab(tab)} />
             )}
@@ -187,6 +197,7 @@ export const AppContent: React.FC = () => {
         </main>
       </div>
 
+      </>}
       {/* MODALS & DRAWERS */}
       <MemoryModal
         isOpen={isMemoryModalOpen}

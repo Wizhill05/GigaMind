@@ -6,7 +6,7 @@ import { uploadFile } from '../../api';
 interface MemoryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (data: { content: string; category: string; source_agent: string; tags: string[]; attachments?: MemoryAttachment[] }) => void;
+  onSave: (data: { content: string; category: string; source_agent: string; tags: string[]; attachments?: MemoryAttachment[] }) => Promise<void>;
   initialMemory?: Memory | null;
 }
 export const MemoryModal: React.FC<MemoryModalProps> = ({
@@ -22,6 +22,8 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
   const [attachments, setAttachments] = useState<MemoryAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [isExiting, setIsExiting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -54,6 +56,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
   }, [isOpen, isExiting]);
 
   const handleAnimatedClose = () => {
+    if (saving) return;
     setIsExiting(true);
     setTimeout(() => {
       setIsExiting(false);
@@ -99,8 +102,9 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
     setAttachments((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     if (!content.trim()) return;
 
     const tags = tagsInput
@@ -108,14 +112,19 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
       .map((t) => t.trim())
       .filter(Boolean);
 
-    onSave({
+    setSaving(true);
+    setSaveError('');
+    try {
+    await onSave({
       content: content.trim(),
       category: category.trim() || 'general',
       source_agent: sourceAgent.trim() || 'user',
       tags,
       attachments,
     });
-    handleAnimatedClose();
+    onClose();
+    } catch (error) { setSaveError(error instanceof Error ? error.message : 'Save failed'); }
+    finally { setSaving(false); }
   };
 
   const isEdit = !!initialMemory;
@@ -147,6 +156,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          {saveError && <p role="alert" className="text-red-400">{saveError}</p>}
           <div>
             <label className="block text-xs font-medium text-[#c1c5d0] mb-1">
               Memory Statement / Fact Content
@@ -288,6 +298,7 @@ export const MemoryModal: React.FC<MemoryModalProps> = ({
             </button>
             <button
               type="submit"
+              disabled={saving}
               className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-5 py-2 rounded-none shadow-sm btn-press"
             >
               Save Memory
