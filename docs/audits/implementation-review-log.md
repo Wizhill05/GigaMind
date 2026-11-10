@@ -14,3 +14,13 @@ Not release-ready. Required follow-up:
 - Commit meaningful isolated behavior tests. Existing-suite 4-pass/14-fail is not acceptance.
 
 Integration does not imply completion of the audited roadmap. Original isolated audit and implementation contract remain authoritative scope.
+
+2026-11-10, parent full-diff review of 5f9094d and e6e7aea
+
+Integrated as intermediate foundations only. Parent TestClient checks independently passed: missing/forged REST credentials rejected, unauthenticated MCP rejected, incomplete OAuth returns unavailable, scoped credential creation, denial of legacy admin routes, revocation enforced, admin stats still available. Parent production frontend build passed.
+
+Security blockers: MCP and OAuth deliberately unavailable, no supported SDK transport, no grant lifecycle, no readiness/schema validation, limited input/upload bounds, no persistent tests. Credential lifecycle lacks expiry/timestamps/last use and service-level validation. Root metadata still advertises unavailable features.
+
+Frontend blockers: Escape listeners retain a pre-save closure and can close pending-save dialogs; save errors are not reset on new modal opening. Backend does not read the new q parameter. Delete refresh ignores active search. Category/source pagination reset incomplete. Most API functions still suppress errors. Review console and behavior tests absent. Active-tab remount refresh is an intermediate approach, not shared query invalidation.
+
+Trust correction 5665f851 returned no changes. Its dependency concern is now resolved by integrating security.py. The next trust task is narrowed to proposal/approval/revision core with independent SQLite tests; no further partial scaffold is accepted as completion.
