@@ -884,6 +884,8 @@ def backfill_conversation_vectors() -> int:
     return count
 
 def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None, source_agent: Optional[str] = None, q: Optional[str] = None, project_id: Optional[str] = None) -> Dict[str, Any]:
+    page = max(1, page)
+    limit = max(1, min(limit, 100))
     with Session(engine) as session:
         stmt = select(MemoryItem).where(MemoryItem.parent_id == None)
         if project_id and project_id.strip():
@@ -1112,24 +1114,21 @@ def delete_profile_rule(rule_id: str) -> bool:
 
 def get_stats() -> Dict[str, Any]:
     with Session(engine) as session:
-        memories = session.exec(select(MemoryItem)).all()
-        profile_rules = session.exec(select(ProfileItem)).all()
-        chat_logs = session.exec(select(ConversationItem)).all()
-        task_sessions = session.exec(select(TaskSessionItem)).all()
-        storage_files = session.exec(select(StorageFileItem)).all()
-        storage_chunks = session.exec(select(StorageChunkItem)).all()
+        def count(model, *conditions):
+            return session.exec(select(func.count()).select_from(model).where(*conditions)).one()
 
-        source_distribution = {}
-        for mem in memories:
-            agent = getattr(mem, "source_agent", "user") or "user"
-            source_distribution[agent] = source_distribution.get(agent, 0) + 1
-
+        agent = func.coalesce(func.nullif(MemoryItem.source_agent, ""), "user")
+        distribution = session.exec(
+            select(agent, func.count())
+            .where(MemoryItem.parent_id == None)
+            .group_by(agent)
+        ).all()
         return {
-            "total_memories": len(memories),
-            "total_profile_rules": len(profile_rules),
-            "total_chat_logs": len(chat_logs),
-            "total_task_sessions": len(task_sessions),
-            "total_storage_files": len(storage_files),
-            "total_storage_chunks": len(storage_chunks),
-            "source_distribution": source_distribution
+            "total_memories": count(MemoryItem, MemoryItem.parent_id == None),
+            "total_profile_rules": count(ProfileItem),
+            "total_chat_logs": count(ConversationItem),
+            "total_task_sessions": count(TaskSessionItem),
+            "total_storage_files": count(StorageFileItem),
+            "total_storage_chunks": count(StorageChunkItem),
+            "source_distribution": dict(distribution),
         }
