@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 from sqlmodel import Session, select, text
+from sqlalchemy import func
 from gigamind.db.database import engine, is_postgres, ProfileItem, MemoryItem, ConversationItem, TaskSessionItem, StorageFileItem, StorageChunkItem
 from gigamind.services.embedding import generate_embedding, cosine_similarity
 from gigamind.services.chunking import chunk_text
@@ -98,10 +99,12 @@ def search_memory(
                            1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
                     FROM memories
                     WHERE embedding_vector IS NOT NULL
+                      AND (:category IS NULL OR category = :category)
+                      AND (:source_agent IS NULL OR source_agent = :source_agent)
                     ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
                     LIMIT 40;
                     """
-                    rows = session.exec(text(sql), params={"vec": vector_str}).all()
+                    rows = session.exec(text(sql), params={"vec": vector_str, "category": category, "source_agent": source_agent}).all()
                     for r in rows:
                         raw_mem_candidates.append({
                             "id": r.id,
@@ -122,7 +125,12 @@ def search_memory(
                     session.rollback()
 
             # Keyword scan for memories
-            keyword_memories = session.exec(select(MemoryItem).limit(60)).all()
+            mem_stmt = select(MemoryItem)
+            if category:
+                mem_stmt = mem_stmt.where(MemoryItem.category == category)
+            if source_agent:
+                mem_stmt = mem_stmt.where(MemoryItem.source_agent == source_agent)
+            keyword_memories = session.exec(mem_stmt).all()
             for mem in keyword_memories:
                 kw_score = 0.0
                 mem_lower = mem.content.lower()
@@ -155,7 +163,12 @@ def search_memory(
             candidates.extend(distinct_mem_map.values())
 
             # Profile rules scan
-            profiles = session.exec(select(ProfileItem)).all()
+            profile_stmt = select(ProfileItem)
+            if category:
+                profile_stmt = profile_stmt.where(ProfileItem.category == category)
+            if source_agent:
+                profile_stmt = profile_stmt.where(ProfileItem.source_agent == source_agent)
+            profiles = session.exec(profile_stmt).all()
             for prof in profiles:
                 p_text = f"{prof.key}: {prof.value}".lower()
                 p_score = 0.0
@@ -870,16 +883,19 @@ def backfill_conversation_vectors() -> int:
             count += 1
     return count
 
-def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None, source_agent: Optional[str] = None) -> Dict[str, Any]:
+def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None, source_agent: Optional[str] = None, q: Optional[str] = None, project_id: Optional[str] = None) -> Dict[str, Any]:
     with Session(engine) as session:
-        stmt = select(MemoryItem)
+        stmt = select(MemoryItem).where(MemoryItem.parent_id == None)
+        if project_id and project_id.strip():
+            raise ValueError("Project-scoped memory listing is not yet supported")
+        if q and q.strip():
+            stmt = stmt.where(MemoryItem.content.icontains(q.strip(), autoescape=True))
         if category:
             stmt = stmt.where(MemoryItem.category == category)
         if source_agent:
             stmt = stmt.where(MemoryItem.source_agent == source_agent)
 
-        all_items = session.exec(stmt).all()
-        total = len(all_items)
+        total = session.exec(select(func.count()).select_from(stmt.subquery())).one()
 
         offset = (page - 1) * limit
         items = session.exec(stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)).all()
@@ -913,70 +929,22 @@ def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None,
 
 def delete_memory(memory_id: str) -> bool:
     with Session(engine) as session:
-        all_to_delete = session.exec(select(MemoryItem).where((MemoryItem.id == memory_id) | (MemoryItem.parent_id == memory_id))).all()
-        if not all_to_delete:
+        items = session.exec(select(MemoryItem).where((MemoryItem.id == memory_id) | (MemoryItem.parent_id == memory_id))).all()
+        if not items:
             return False
-
-        # Extract all referenced R2 storage keys to purge
-        keys_to_purge = set()
-        for item in all_to_delete:
-            raw_att = getattr(item, "attachments_json", "[]")
-            if raw_att:
-                try:
-                    parsed = json.loads(raw_att)
-                    for a in parsed:
-                        if isinstance(a, dict):
-                            k = a.get("key")
-                            if k and not k.startswith("http"):
-                                keys_to_purge.add(k)
-                except Exception:
-                    pass
+        for item in items:
             session.delete(item)
-        # Cascade delete from Cloudflare R2 and purge vectorized chunks
-        if keys_to_purge:
-            for k in keys_to_purge:
-                try:
-                    delete_storage_file_index(k)
-                except Exception:
-                    pass
-            if storage_service.is_enabled():
-                try:
-                    storage_service.delete_files(list(keys_to_purge))
-                except Exception as e:
-                    print(f"R2 cascading cleanup note: {e}")
-
+        session.commit()
         return True
+
 
 def reset_all_memories() -> int:
     with Session(engine) as session:
-        all_mems = session.exec(select(MemoryItem)).all()
-        count = len(all_mems)
-        keys_to_purge = set()
-        for mem in all_mems:
-            raw_att = getattr(mem, "attachments_json", "[]")
-            if raw_att:
-                try:
-                    parsed = json.loads(raw_att)
-                    for a in parsed:
-                        if isinstance(a, dict):
-                            k = a.get("key")
-                            if k and not k.startswith("http"):
-                                keys_to_purge.add(k)
-                except Exception:
-                    pass
-            session.delete(mem)
-        # Cascade batch delete from Cloudflare R2 and purge all storage chunks
-        try:
-            delete_all_storage_file_indexes()
-        except Exception:
-            pass
-
-        if keys_to_purge and storage_service.is_enabled():
-            try:
-                storage_service.delete_files(list(keys_to_purge))
-            except Exception as e:
-                print(f"R2 cascading purge note: {e}")
-
+        items = session.exec(select(MemoryItem)).all()
+        count = sum(item.parent_id is None for item in items)
+        for item in items:
+            session.delete(item)
+        session.commit()
         return count
 
 def export_all_memories() -> List[Dict[str, Any]]:
@@ -1014,6 +982,12 @@ def update_memory(
         if content is not None:
             item.content = content
             item.embedding_json = json.dumps(generate_embedding(content))
+            for child in session.exec(select(MemoryItem).where(MemoryItem.parent_id == memory_id)).all():
+                session.delete(child)
+            item.total_chunks = None
+            if is_postgres:
+                vector = json.loads(item.embedding_json)
+                session.exec(text("UPDATE memories SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": json.dumps(vector), "id": memory_id})
         if category is not None:
             item.category = category
         if source_agent is not None:

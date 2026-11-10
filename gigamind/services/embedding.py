@@ -5,7 +5,7 @@ import urllib.request
 import urllib.error
 import json
 import base64
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 
 load_dotenv()
