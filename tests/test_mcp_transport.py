@@ -57,14 +57,16 @@ def test_transport(server):
                     assert found.structuredContent['results'][0]['id'] in found.content[0].text
                     assert (await session.call_tool('search_memory', {'query': '', 'limit': 101})).isError
                     assert (await session.call_tool('delete_memory', {})).isError
-        with pytest.raises(ExceptionGroup):
-          async with httpx.AsyncClient(trust_env=False, headers={'Authorization': 'Bearer ' + created['token']}) as client:
+        async with httpx.AsyncClient(trust_env=False, headers={'Authorization': 'Bearer ' + created['token']}) as client:
             async with streamable_http_client(server + '/mcp', http_client=client) as (read, write, _):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     assert (await session.call_tool('get_server_status', {})).structuredContent == {'status': 'online'}
                     assert (await session.call_tool('get_user_profile', {})).isError
                     assert httpx.post(server + '/api/v1/admin/clients/' + created['client']['id'] + '/revoke', headers=admin, trust_env=False).status_code == 200
-                    with pytest.raises(Exception):
-                        await session.call_tool('get_server_status', {})
+                    response = await client.post(server + '/mcp', json={
+                        'jsonrpc': '2.0', 'id': 99, 'method': 'tools/call',
+                        'params': {'name': 'get_server_status', 'arguments': {}}
+                    })
+                    assert response.status_code == 401
     asyncio.run(exercise())

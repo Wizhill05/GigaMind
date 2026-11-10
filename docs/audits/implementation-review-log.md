@@ -35,3 +35,9 @@ Four tables, service module, router and both tests read in full. Staged on the i
 - Lists load all rows then filter in Python; enforce project predicates in SQL and add stable bounded pagination.
 - Two test functions cover happy-path and limited isolation only. Add actual conflicting/concurrent approvals, restore and fresh-session persistence, idempotent races, denied global/activity access and structured router validation.
 - Router must be mounted and tables migrated during application integration, and approved knowledge must participate in scoped retrieval in a later unit.
+
+2026-11-10, parent full-diff review of 0988a68 and a43e11e
+
+Read all changed application sources, tests and dependency changes. Accepted working admin MCP transport as a bounded foundation: actual SDK initialize/list/call passed in parent run with mcp==1.26.0, REST q forwarded, readiness and list bounds work. Scoped trust tools/OAuth remain missing and scheduled later. Parent fixed test's broad ExceptionGroup catch that could mask AssertionError, replacing it with an explicit post-revocation 401 assertion. Parent reran MCP+trust tests: 3 passed.
+
+Accepted frontend save/search fixes as intermediate progress. Parent fixed Escape regression test: immediate assertion could pass before the 180ms close timer, so advance fake timers past close before assertion. Parent reran tests: 6 passed. Build passed. Remaining frontend work: all helper/caller error propagation, cross-tab invalidation, indexing polling, focus trap, authentication/list scenarios and new review console. Six focused tests do not establish whole-UI correctness.

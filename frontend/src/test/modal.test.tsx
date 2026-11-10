@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryModal } from '../components/modals/MemoryModal';
 import { RuleModal } from '../components/modals/RuleModal';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 it.each(['memory', 'rule'])('%s keeps draft after failure and closes after retry', async kind => {
   const close = vi.fn();
   const save = vi.fn().mockRejectedValueOnce(new Error('Save failed')).mockResolvedValueOnce(undefined);
@@ -20,6 +20,7 @@ it.each(['memory', 'rule'])('%s keeps draft after failure and closes after retry
   await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
 });
 it.each(['memory', 'rule'])('%s cannot close with Escape during save', async kind => {
+  vi.useFakeTimers();
   const close = vi.fn();
   const save = vi.fn(() => new Promise<void>(() => {}));
   render(kind === 'memory' ? <MemoryModal isOpen onClose={close} onSave={save} /> : <RuleModal isOpen onClose={close} onSave={save} />);
@@ -27,5 +28,6 @@ it.each(['memory', 'rule'])('%s cannot close with Escape during save', async kin
   if (kind === 'rule') fireEvent.change(screen.getByPlaceholderText('e.g. Python / TypeScript with strict typing'), { target: { value: 'value' } });
   fireEvent.click(screen.getByRole('button', { name: kind === 'memory' ? 'Save Memory' : 'Save Rule' }));
   fireEvent.keyDown(window, { key: 'Escape' });
+  act(() => { vi.advanceTimersByTime(250); });
   expect(close).not.toHaveBeenCalled();
 });
