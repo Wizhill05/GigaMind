@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -7,8 +8,21 @@ from sqlmodel import Session, select, text
 from gigamind.db.database import engine, is_postgres, StorageFileItem, StorageChunkItem
 from gigamind.services.parser import extract_text_from_file
 from gigamind.services.chunking import chunk_text
+from gigamind.services import embedding
 from gigamind.services.embedding import generate_embedding
 from gigamind.services.storage import storage_service
+
+
+def _validate_vector(vector):
+    try:
+        valid = (len(vector) == embedding.DEFAULT_DIM and embedding.DEFAULT_DIM > 0
+                 and all(math.isfinite(float(value)) for value in vector)
+                 and any(float(value) != 0 for value in vector))
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+    if not valid:
+        raise ValueError("Invalid embedding vector")
+    return [float(value) for value in vector]
 
 
 def index_file_content(
@@ -17,7 +31,8 @@ def index_file_content(
     data: bytes,
     mime_type: Optional[str] = None,
     source_agent: str = "user",
-    size_bytes: int = 0
+    size_bytes: int = 0,
+    publication_guard=None,
 ) -> Dict[str, Any]:
     """
     Parses binary data, extracts semantic text, chunks it, computes 768-dim embeddings,
@@ -34,8 +49,22 @@ def index_file_content(
         # Unsupported or empty file: save record with status
         status = "unsupported" if parsed.get("format") == "binary" else "empty"
         with Session(engine) as session:
+            if publication_guard:
+                publication_guard(session)
             existing = session.exec(select(StorageFileItem).where(StorageFileItem.key == file_key)).first()
+            old_chunks = session.exec(
+                select(StorageChunkItem).where(StorageChunkItem.file_key == file_key)
+            ).all()
+            for chunk in old_chunks:
+                session.delete(chunk)
             if existing:
+                file_id = existing.id
+                existing.filename = filename
+                existing.size_bytes = size_bytes
+                existing.extracted_text_length = 0
+                existing.total_chunks = 0
+                existing.document_summary = None
+                existing.embedding_json = "[]"
                 existing.indexing_status = status
                 existing.multimodal_type = multimodal_type
                 existing.updated_at = now_str
@@ -55,6 +84,12 @@ def index_file_content(
                     updated_at=now_str
                 )
                 session.add(f_item)
+            session.flush()
+            if is_postgres:
+                session.exec(
+                    text("UPDATE storage_files SET embedding_vector = NULL WHERE id = :id"),
+                    params={"id": file_id},
+                )
             session.commit()
 
         return {
@@ -113,6 +148,7 @@ def index_file_content(
         inline_bytes=parsed.get("raw_bytes") or data,
         mime_type=mime_type
     )
+    doc_embedding = _validate_vector(doc_embedding)
     total_chunks = len(raw_chunks)
     chunk_records: List[StorageChunkItem] = []
     chunk_embeddings: List[List[float]] = []
@@ -124,6 +160,7 @@ def index_file_content(
             image_base64=rc.get("image_base64"),
             mime_type=mime_type or "image/png"
         )
+        emb = _validate_vector(emb)
         chunk_embeddings.append(emb)
         chunk_item = StorageChunkItem(
             id=chk_id,
@@ -141,6 +178,8 @@ def index_file_content(
 
     # Persist in Neon DB
     with Session(engine) as session:
+        if publication_guard:
+            publication_guard(session)
         # Remove any old file record or chunks for this key
         old_chunks = session.exec(select(StorageChunkItem).where(StorageChunkItem.file_key == file_key)).all()
         for oc in old_chunks:
@@ -183,28 +222,20 @@ def index_file_content(
         for chk in chunk_records:
             session.add(chk)
 
-        session.commit()
-
-        # Update pgvector embedding_vector column for PostgreSQL
+        session.flush()
         if is_postgres:
-            try:
-                with Session(engine) as p_sess:
-                    # Update holistic whole-document vector on storage_files
-                    doc_vec_str = f"[{','.join(str(x) for x in doc_embedding)}]"
-                    p_sess.exec(
-                        text("UPDATE storage_files SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"),
-                        params={"vec": doc_vec_str, "id": file_id}
-                    )
-                    for idx, chk in enumerate(chunk_records):
-                        emb = chunk_embeddings[idx]
-                        vec_str = f"[{','.join(str(x) for x in emb)}]"
-                        p_sess.exec(
-                            text("UPDATE storage_chunks SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"),
-                            params={"vec": vec_str, "id": chk.id}
-                        )
-                    p_sess.commit()
-            except Exception as p_err:
-                print(f"storage_chunks pgvector update note: {p_err}")
+            doc_vec_str = f"[{','.join(str(x) for x in doc_embedding)}]"
+            session.exec(
+                text("UPDATE storage_files SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"),
+                params={"vec": doc_vec_str, "id": file_id},
+            )
+            for chk, emb in zip(chunk_records, chunk_embeddings):
+                vec_str = f"[{','.join(str(x) for x in emb)}]"
+                session.exec(
+                    text("UPDATE storage_chunks SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"),
+                    params={"vec": vec_str, "id": chk.id},
+                )
+        session.commit()
 
     return {
         "file_id": file_id,
@@ -217,7 +248,7 @@ def index_file_content(
     }
 
 
-def reindex_storage_file_by_key(key: str) -> Optional[Dict[str, Any]]:
+def reindex_storage_file_by_key(key: str, publication_guard=None) -> Optional[Dict[str, Any]]:
     """Downloads an existing file from R2 and executes full re-indexing."""
     if not storage_service.is_enabled():
         return None
@@ -227,7 +258,7 @@ def reindex_storage_file_by_key(key: str) -> Optional[Dict[str, Any]]:
         return None
 
     filename = key.split("/")[-1]
-    return index_file_content(file_key=key, filename=filename, data=data)
+    return index_file_content(file_key=key, filename=filename, data=data, publication_guard=publication_guard)
 
 
 def delete_storage_file_index(key: str) -> bool:
