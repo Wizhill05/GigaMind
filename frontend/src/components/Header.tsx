@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import React, { useState, useEffect } from 'react';
 import { Plus, RefreshCw, Search, ExternalLink, Upload } from 'lucide-react';
 import { PixelKey } from './ui/PixelIcons';
@@ -86,6 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
         <span className="font-semibold tracking-tight text-white text-sm">GigaMind</span>
         <span className="text-[#8a8f9e]">/</span>
         <span className="text-[#8a8f9e] font-normal">Console</span>
+        {import.meta.env.VITE_SYNTHETIC_DEMO === '1' && <span>Synthetic demo · External indexing and storage unavailable</span>}
       </div>
 
       {/* RIGHT ACTIONS - UNIFORM h-8 (32px) HEIGHT FOR ALL BUTTONS */}

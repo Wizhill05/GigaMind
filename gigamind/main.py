@@ -99,7 +99,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-frontend_dist_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+frontend_dist_dir = os.getenv("GIGAMIND_STATIC_DIST") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 assets_dir = os.path.join(frontend_dist_dir, "assets")
 if os.path.exists(assets_dir):
     app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")

@@ -1,12 +1,13 @@
-# Synthetic demo corpus
+# Synthetic demo
 
-This isolated dataset describes fictional projects and fictional assistant preferences. It is not a profile of the operator. It includes 64 legacy memories, 15 conversations, approved knowledge with evidence, pending proposals, and a superseded decision. Source memories are pending indexing; no embeddings or provider calls are made. The labeled queries in `fixtures/demo/corpus.json` test lexical retrieval only, not semantic retrieval quality. Global rules and project rules are queried in their respective scopes.
+The corpus contains fictional projects, conversations and preferences. Source indexes remain pending; no semantic vectors or retrieval quality are claimed. External indexing and storage are unavailable. Legacy memories and accepted context are separate surfaces.
 
-From the repository directory, an operator can create a **new** local database and start the application with their own API key:
+From the repository root, with the project's Python environment and existing frontend npm dependencies installed, run:
 
 ```sh
-PYTHON_DOTENV_DISABLED=1 DATABASE_URL='' DB_PATH=/tmp/unused.db python -m gigamind.cli.demo --db /tmp/gigamind-synthetic-demo.db
-PYTHON_DOTENV_DISABLED=1 DATABASE_URL='' DB_PATH=/tmp/gigamind-synthetic-demo.db GIGAMIND_API_KEY='<operator-provided-key>' uvicorn gigamind.main:app --host 0.0.0.0 --port 8000
+python -m gigamind.cli.demo_server --runtime-dir /tmp/gigamind-demo-1 --host 127.0.0.1 --port 8000
 ```
 
-Choose another nonexistent path for each new corpus. The command refuses existing files and production environments. Source indexes await a real configured provider and normal indexing; no provider credentials are supplied by the demo. Legacy dashboard records and approved context knowledge are separate application surfaces.
+The directory must be new and its parent must exist; paths containing symlinks are refused. The launcher prints the path to a generated admin key file. Read that file through Codex and enter its contents in the dashboard's Master Key dialog. The directory and key are private to the machine user. Keep the key private. For access over Tailscale, pass the machine's Tailscale IP as `--host` and open `http://<tailscale-ip>:8000/dashboard` directly. The default listens only on loopback.
+
+The process runs in the foreground. Stop it with Ctrl+C or SIGTERM. Each run requires a new directory. Database, build assets, npm cache and key stay in that directory, including after a build or startup failure, for inspection. Check the error output and choose a new directory to retry; remove old demo directories only when no longer needed. No existing database or environment file is used. Do not use real data or credentials in this demo.
