@@ -1,6 +1,8 @@
 """Local SQLite snapshots. Callers must supply both paths explicitly."""
 import hashlib
+import hmac
 import os
+import re
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -48,7 +50,19 @@ def backup(db, output):
     return _copy(db, output)
 
 
-def restore(db, output):
+def restore(db, output, expected_sha256=None):
+    if expected_sha256 is not None:
+        if (not isinstance(expected_sha256, str)
+                or not re.fullmatch(r'[0-9a-fA-F]{64}', expected_sha256)):
+            raise ValueError('Expected SHA-256 must be 64 hexadecimal characters')
+        source = _path(db)
+        if source.is_symlink() or not source.is_file():
+            raise ValueError('Source must be an existing regular file, not a symlink')
+        with source.open('rb') as artifact:
+            actual = hashlib.file_digest(artifact, 'sha256').hexdigest()
+        if not hmac.compare_digest(actual, expected_sha256.lower()):
+            raise ValueError('Input SHA-256 mismatch')
+
     def validate(path):
         # The database module registers models but initializes an engine at import.
         # Force that unused engine to be in-memory, regardless of inherited settings.
