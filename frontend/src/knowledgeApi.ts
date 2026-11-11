@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { ApiError, getApiKey } from "./api";
 
+const timestamp = z.iso.datetime({ offset: true });
+export const isKnowledgeTimestamp = (value: string) =>
+  value === "" || timestamp.safeParse(value).success;
+
 const evidence = z.object({
   source_type: z.string(),
   source_id: z.string(),
@@ -94,8 +98,17 @@ export const restoreKnowledge = (
     method: "POST",
     body: JSON.stringify({ revision, expected_revision }),
   });
-export const setKnowledgeValidity = (id: string, expected_revision: number, valid_from: string | null, valid_until: string | null) =>
-  request(`/memories/${encodeURIComponent(id)}/validity`, z.object({ memory }), {
-    method: "POST",
-    body: JSON.stringify({ expected_revision, valid_from, valid_until }),
-  });
+export const setKnowledgeValidity = (
+  id: string,
+  expected_revision: number,
+  valid_from: string | null,
+  valid_until: string | null,
+) =>
+  request(
+    `/memories/${encodeURIComponent(id)}/validity`,
+    z.object({ memory }),
+    {
+      method: "POST",
+      body: JSON.stringify({ expected_revision, valid_from, valid_until }),
+    },
+  );

@@ -29,18 +29,44 @@ const json = (body: unknown, status = 200) =>
 test("validity conflict reload preserves the precise draft and retries with current revision", async () => {
   let revision = 2;
   const precise = "2026-01-01T00:00:00.123456Z";
-  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = String(input);
-    if (url.endsWith("/history")) return json({ revisions: [{ revision: 1, status: "accepted", snapshot: { ...memory, valid_until: null } }] });
-    if (init?.method === "POST") {
-      if (revision === 2) { revision = 3; return json({ detail: "stale" }, 409); }
-      return json({ memory: { ...memory, revision: 4 } });
-    }
-    return json({ memories: [{ ...memory, revision, valid_from: precise, valid_until: revision === 3 ? "2027-01-01T00:00:00Z" : null }], total: 1 });
-  });
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/history"))
+        return json({
+          revisions: [
+            {
+              revision: 1,
+              status: "accepted",
+              snapshot: { ...memory, valid_until: null },
+            },
+          ],
+        });
+      if (init?.method === "POST") {
+        if (revision === 2) {
+          revision = 3;
+          return json({ detail: "stale" }, 409);
+        }
+        return json({ memory: { ...memory, revision: 4 } });
+      }
+      return json({
+        memories: [
+          {
+            ...memory,
+            revision,
+            valid_from: precise,
+            valid_until: revision === 3 ? "2027-01-01T00:00:00Z" : null,
+          },
+        ],
+        total: 1,
+      });
+    });
   render(<KnowledgeTab refreshVersion={0} />);
   fireEvent.click(await screen.findByText("History and actions"));
-  expect(await screen.findByText(/Keeps current bound/)).toHaveTextContent("Unbounded");
+  expect(await screen.findByText(/Keeps current bound/)).toHaveTextContent(
+    "Unbounded",
+  );
   fireEvent.click(screen.getByText("Save validity"));
   await screen.findByRole("alert");
   fireEvent.click(screen.getByText("Reload"));
@@ -48,8 +74,16 @@ test("validity conflict reload preserves the precise draft and retries with curr
   expect(screen.getByLabelText("Valid from")).toHaveValue(precise);
   expect(screen.getByLabelText("Valid until")).toHaveValue("");
   fireEvent.click(screen.getByText("Save validity"));
-  await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2));
-  expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(2),
+  );
+  expect(
+    fetcher.mock.calls
+      .filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body))),
+  ).toEqual([
     { expected_revision: 2, valid_from: precise, valid_until: null },
     { expected_revision: 3, valid_from: precise, valid_until: null },
   ]);
@@ -61,11 +95,14 @@ afterEach(() => {
   sessionStorage.clear();
 });
 test("rejects naive timestamps and retains drafts rejected by the server", async () => {
-  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    if (init?.method === "POST") return json({ detail: "Invalid validity interval" }, 422);
-    if (String(input).endsWith("/history")) return json({ revisions: [] });
-    return json({ memories: [memory], total: 1 });
-  });
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (input, init) => {
+      if (init?.method === "POST")
+        return json({ detail: "Invalid validity interval" }, 422);
+      if (String(input).endsWith("/history")) return json({ revisions: [] });
+      return json({ memories: [memory], total: 1 });
+    });
   render(<KnowledgeTab refreshVersion={0} />);
   fireEvent.click(await screen.findByText("History and actions"));
   const from = screen.getByLabelText("Valid from");
@@ -73,11 +110,15 @@ test("rejects naive timestamps and retains drafts rejected by the server", async
   fireEvent.change(from, { target: { value: "2026-01-01T00:00:00" } });
   fireEvent.click(screen.getByText("Save validity"));
   expect(screen.getByRole("alert")).toHaveTextContent("timezone");
-  expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  expect(
+    fetcher.mock.calls.filter(([, init]) => init?.method === "POST"),
+  ).toHaveLength(0);
   fireEvent.change(from, { target: { value: "2027-01-01T00:00:00Z" } });
   fireEvent.change(until, { target: { value: "2026-01-01T00:00:00Z" } });
   fireEvent.click(screen.getByText("Save validity"));
-  expect(await screen.findByText(/Invalid validity interval/)).toBeInTheDocument();
+  expect(
+    await screen.findByText(/Invalid validity interval/),
+  ).toBeInTheDocument();
   expect(from).toHaveValue("2027-01-01T00:00:00Z");
   expect(until).toHaveValue("2026-01-01T00:00:00Z");
 });
@@ -431,4 +472,128 @@ test("App gates knowledge and header refresh updates the selected revision", asy
       }),
     ),
   );
+});
+
+test("invalid calendar dates never submit validity changes", async () => {
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (url) =>
+      String(url).endsWith("/history")
+        ? json({ revisions: [] })
+        : json({ memories: [memory], total: 1 }),
+    );
+  render(<KnowledgeTab refreshVersion={0} />);
+  fireEvent.click(await screen.findByText("History and actions"));
+  for (const value of ["2026-02-30T00:00:00Z", "2026-01-01T25:00:00Z"]) {
+    fireEvent.change(screen.getByLabelText("Valid from"), {
+      target: { value },
+    });
+    fireEvent.click(screen.getByText("Save validity"));
+    expect(screen.getByRole("alert")).toHaveTextContent("timezone");
+  }
+  expect(
+    fetcher.mock.calls.filter(([, init]) => init?.method === "POST"),
+  ).toHaveLength(0);
+});
+
+test.each(["list", "history", "validity"])(
+  "a late %s response after credential replacement clears the private view and permits retry",
+  async (stage) => {
+    localStorage.setItem("gigamind_master_key", "old");
+    let finish: (response: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    let delay = true;
+    const fetcher = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (url, init) => {
+        if (
+          delay &&
+          ((stage === "list" && String(url).includes("/knowledge?")) ||
+            (stage === "history" && String(url).endsWith("/history")) ||
+            (stage === "validity" && init?.method === "POST"))
+        )
+          return pending;
+        if (String(url).endsWith("/history")) return json({ revisions: [] });
+        return json({ memories: [memory], total: 1 });
+      });
+    render(<KnowledgeTab refreshVersion={0} />);
+    if (stage !== "list")
+      fireEvent.click(await screen.findByText("History and actions"));
+    if (stage === "validity")
+      fireEvent.click(screen.getByText("Save validity"));
+    localStorage.setItem("gigamind_master_key", "new");
+    delay = false;
+    await act(async () => {
+      finish(
+        stage === "history"
+          ? json({ revisions: [] })
+          : stage === "validity"
+            ? json({ memory })
+            : json({ memories: [memory], total: 1 }),
+      );
+      await pending;
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "API key changed",
+    );
+    expect(screen.queryByText("Approved fact")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading knowledge...")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Reload"));
+    await screen.findByText("Approved fact");
+    expect(fetcher.mock.calls[fetcher.mock.calls.length - 1]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer new",
+    });
+  },
+);
+
+test("App locks navigation for one validity save and preserves its draft on failure", async () => {
+  const { App } = await import("../App");
+  let finish: (response: Response) => void = () => {};
+  const pending = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/validity") && init?.method === "POST")
+        return pending;
+      if (String(url).includes("/knowledge?"))
+        return json({ memories: [memory], total: 1 });
+      if (String(url).endsWith("/history")) return json({ revisions: [] });
+      return json({
+        total_memories: 0,
+        total_storage_files: 0,
+        total_profile_rules: 0,
+        total_chat_logs: 0,
+      });
+    });
+  render(<App />);
+  fireEvent.change(screen.getByLabelText("Master API Key"), {
+    target: { value: "master" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Authorize Connection" }));
+  const sidebar = within(await screen.findByRole("complementary"));
+  fireEvent.click(sidebar.getByRole("button", { name: "Approved Knowledge" }));
+  fireEvent.click(await screen.findByText("History and actions"));
+  const draft = "2026-01-01T00:00:00.123456Z";
+  fireEvent.change(screen.getByLabelText("Valid from"), {
+    target: { value: draft },
+  });
+  fireEvent.click(screen.getByText("Save validity"));
+  fireEvent.click(screen.getByText("Save validity"));
+  expect(sidebar.getByRole("button", { name: /^Memories/ })).toBeDisabled();
+  expect(screen.getByTitle("Refresh telemetry")).toBeDisabled();
+  expect(
+    fetcher.mock.calls.filter(([, init]) => init?.method === "POST"),
+  ).toHaveLength(1);
+  await act(async () => {
+    finish(json({ detail: "Try again" }, 503));
+    await pending;
+  });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Try again");
+  expect(screen.getByLabelText("Valid from")).toHaveValue(draft);
+  expect(sidebar.getByRole("button", { name: /^Memories/ })).toBeEnabled();
+  expect(screen.getByText("Save validity")).toBeEnabled();
 });
