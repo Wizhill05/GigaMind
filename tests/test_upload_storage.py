@@ -91,3 +91,22 @@ def test_unknown_remote_outcome_is_not_reported_as_success():
     with pytest.raises(TimeoutError, match="acknowledgement lost"):
         service(Store()).create_immutable_object("key", b"first", "text/plain")
     assert objects == {"key": b"first"}
+
+
+def test_bounded_get_closes_body_on_success_and_oversize():
+    from io import BytesIO
+
+    class Store:
+        def __init__(self, data):
+            self.body = BytesIO(data)
+
+        def get_object(self, **request):
+            return {"Body": self.body}
+
+    small = Store(b"abc")
+    assert service(small).get_bounded_object("key", 3) == b"abc"
+    assert small.body.closed
+    large = Store(b"abcd")
+    with pytest.raises(ValueError):
+        service(large).get_bounded_object("key", 3)
+    assert large.body.closed

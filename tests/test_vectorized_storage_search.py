@@ -213,24 +213,19 @@ class TestVectorizedStorageSearch(unittest.TestCase):
             "mime_type": "text/plain",
         }
 
-        # Mock storage_service.upload_file so test runs without needing live AWS credentials
+        # Keep storage external while exercising the durable upload route.
         with (
             patch("gigamind.main.storage_service.is_enabled", return_value=True),
-            patch(
-                "gigamind.main.storage_service.upload_file",
-                return_value={
-                    "key": doc_key,
-                    "filename": "api_test_doc.txt",
-                    "size_bytes": 50,
-                },
-            ),
+            patch("gigamind.main.storage_service.generate_storage_key", return_value=doc_key),
+            patch("gigamind.main.storage_service.create_immutable_object"),
+            patch("gigamind.main.storage_service.get_bounded_object", return_value=base64.b64decode(file_payload["content_base64"])),
         ):
             up_res = self.client.post(
                 "/api/v1/files/upload_base64",
                 json=file_payload,
                 headers=self.auth_headers,
             )
-            self.assertEqual(up_res.status_code, 200)
+            self.assertEqual(up_res.status_code, 202)
             self.assertTrue(up_res.json()["success"])
 
         # Directly index the content for immediate search test

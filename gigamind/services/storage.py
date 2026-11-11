@@ -53,7 +53,7 @@ class StorageService:
             try:
                 s3_config = Config(
                     signature_version="s3v4",
-                    retries={"max_attempts": 3, "mode": "standard"},
+                    retries={"total_max_attempts": 1, "mode": "standard"},
                     connect_timeout=5,
                     read_timeout=15,
                 )
@@ -87,6 +87,28 @@ class StorageService:
             ContentType=mime_type,
             IfNoneMatch="*",
         )
+
+    def get_bounded_object(self, key: str, limit: int = 20_000_000) -> bytes:
+        """Read at most limit bytes, closing the response even on failure."""
+        if not self.is_enabled():
+            raise RuntimeError("Storage is not configured")
+        response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+        body = response["Body"]
+        try:
+            if response.get("ContentLength", 0) > limit:
+                raise ValueError("Remote object exceeds size limit")
+            chunks = []
+            total = 0
+            while True:
+                chunk = body.read(min(65536, limit + 1 - total))
+                if not chunk:
+                    return b"".join(chunks)
+                total += len(chunk)
+                if total > limit:
+                    raise ValueError("Remote object exceeds size limit")
+                chunks.append(chunk)
+        finally:
+            body.close()
 
     def generate_storage_key(self, filename: str, prefix: str = "files") -> str:
         """Generate isolated hierarchical storage key: prefix/YYYY/MM/{uuid}_{filename}"""

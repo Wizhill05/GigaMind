@@ -216,14 +216,14 @@ def record_unknown(key, job_id, *, engine=None, clock=jobs.utcnow):
         if (
             not manifest
             or manifest.job_id != job_id
-            or manifest.state not in {"inflight", "unknown"}
+            or manifest.state not in {"inflight", "unknown", "verified"}
         ):
             raise jobs.Conflict("Upload is not in flight")
         manifest.state = "unknown"
         session.commit()
 
 
-def verify_upload(key, job_id, remote_bytes, *, engine=None, clock=jobs.utcnow):
+def verify_upload(key, job_id, remote_bytes, *, engine=None, clock=jobs.utcnow, require_current=False):
     """Verify fetched remote bytes; a missing or mismatched object remains unresolved."""
     validate_key(key)
     if remote_bytes is not None and not isinstance(remote_bytes, bytes):
@@ -234,10 +234,11 @@ def verify_upload(key, job_id, remote_bytes, *, engine=None, clock=jobs.utcnow):
         else None
     )
     with Session(jobs.resolve_engine(engine)) as session:
-        jobs.lock_resource(session, key, jobs.stamp(clock()))
+        owner = jobs.lock_resource(session, key, jobs.stamp(clock()))
         manifest = session.get(UploadManifest, key)
         if (
-            not manifest
+            (require_current and (owner.deleted or owner.current_job_id != job_id))
+            or not manifest
             or manifest.job_id != job_id
             or manifest.state not in {"inflight", "unknown", "verified"}
         ):

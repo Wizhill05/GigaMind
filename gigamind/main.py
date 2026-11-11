@@ -3,6 +3,7 @@ import json
 import asyncio
 import uuid
 import base64
+import binascii
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, BackgroundTasks, Query
 from contextlib import asynccontextmanager
@@ -17,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict, StrictInt
 from gigamind.db.database import init_db
 from gigamind.services.storage import storage_service
-from gigamind.services.indexing import index_file_content, list_indexed_storage_files, get_file_chunks, register_storage_file
+from gigamind.services.indexing import list_indexed_storage_files, get_file_chunks
 from gigamind.services.memory import (
     search_memory,
     add_memory,
@@ -45,6 +46,8 @@ from gigamind.db.migrations import schema_ready
 from gigamind.routers.review import router as review_router
 from gigamind.routers.oauth import router as oauth_router
 from gigamind.routers.jobs import router as jobs_router
+from gigamind.routers.upload_recovery import router as upload_recovery_router
+from gigamind.services import upload_http
 from gigamind.db import memory_index  # register before migration
 from gigamind.services.oauth import resource_config
 from gigamind.services import file_lifecycle, jobs
@@ -71,6 +74,7 @@ app = FastAPI(
 app.include_router(review_router)
 app.include_router(oauth_router)
 app.include_router(jobs_router)
+app.include_router(upload_recovery_router)
 
 class MCPMiddleware:
     def __init__(self, app):
@@ -619,81 +623,23 @@ def api_get_stats():
 # CLOUDFLARE R2 FILE STORAGE ENDPOINTS
 # ==========================================
 
-@app.post("/api/v1/files/upload", dependencies=[Depends(verify_auth)])
-async def api_upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...), prefix: str = "files"):
-    """Streams binary file directly to Cloudflare R2 and triggers background vector indexing."""
-    if not storage_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
-
-    file_bytes = await file.read()
-    file_meta = storage_service.upload_file(
-        data=file_bytes,
-        filename=file.filename or "unnamed_file",
-        mime_type=file.content_type,
-        prefix=prefix
-    )
-    if not file_meta:
-        raise HTTPException(status_code=500, detail="Failed to upload file to Cloudflare R2.")
-
-
-    # Immediately register in database so the file is visible in the dashboard table
-    register_storage_file(
-        file_key=file_meta["key"],
-        filename=file_meta["filename"],
-        mime_type=file_meta.get("mime_type"),
-        size_bytes=len(file_bytes),
-        source_agent="user"
-    )
-    # Enqueue background text extraction and vector indexing
-    background_tasks.add_task(
-        index_file_content,
-        file_key=file_meta["key"],
-        filename=file_meta["filename"],
-        data=file_bytes,
-        mime_type=file_meta.get("mime_type"),
-        size_bytes=len(file_bytes)
-    )
-
-    return {"success": True, "file": file_meta, "indexing": "queued"}
-
-@app.post("/api/v1/files/upload_base64", dependencies=[Depends(verify_auth)])
-def api_upload_file_base64(req: FileUploadBase64Request, background_tasks: BackgroundTasks, prefix: str = "files"):
-    """Uploads base64 encoded file payload to Cloudflare R2 and enqueues vector indexing."""
-    if not storage_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
+@app.post("/api/v1/files/upload", status_code=202)
+async def api_upload_file(file: UploadFile = File(...), prefix: str = "files", actor: Actor = Depends(verify_auth)):
     try:
-        data = base64.b64decode(req.content_base64)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid base64 payload: {e}")
+        data = await file.read(upload_http.LIMIT + 1)
+        return await asyncio.to_thread(upload_http.upload, data, file.filename, file.content_type, prefix, actor)
+    finally:
+        await file.close()
 
-    file_meta = storage_service.upload_file(
-        data=data,
-        filename=req.filename,
-        mime_type=req.mime_type,
-        prefix=prefix
-    )
-    if not file_meta:
-        raise HTTPException(status_code=500, detail="Failed to upload base64 file to Cloudflare R2.")
-
-    # Immediately register in database so the file is visible in the dashboard table
-    register_storage_file(
-        file_key=file_meta["key"],
-        filename=file_meta["filename"],
-        mime_type=file_meta.get("mime_type"),
-        size_bytes=len(data),
-        source_agent="user"
-    )
-
-    background_tasks.add_task(
-        index_file_content,
-        file_key=file_meta["key"],
-        filename=file_meta["filename"],
-        data=data,
-        mime_type=file_meta.get("mime_type"),
-        size_bytes=len(data)
-    )
-
-    return {"success": True, "file": file_meta, "indexing": "queued"}
+@app.post("/api/v1/files/upload_base64", status_code=202)
+def api_upload_file_base64(req: FileUploadBase64Request, prefix: str = "files", actor: Actor = Depends(verify_auth)):
+    if len(req.content_base64) > 4 * ((upload_http.LIMIT + 2) // 3):
+        raise HTTPException(413, "File exceeds size limit")
+    try:
+        data = base64.b64decode(req.content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, "Invalid base64 payload") from None
+    return upload_http.upload(data, req.filename, req.mime_type, prefix, actor)
 
 
 @app.post("/api/v1/files/reindex", status_code=202, dependencies=[Depends(verify_auth)])
