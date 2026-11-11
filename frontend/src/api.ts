@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Memory, MemoryAttachment, StorageFile, StorageChunk, ProfileRule, Conversation, SearchResult, Stats } from './types';
 
 const API_KEY_KEY = 'gigamind_master_key';
@@ -316,25 +317,54 @@ export async function searchMultimodal(
   }
 }
 
-export async function uploadFile(file: File, prefix: string = 'files'): Promise<{ success: boolean; file?: MemoryAttachment; error?: string }> {
+export async function uploadFile(
+  file: File,
+  prefix: string = "files",
+): Promise<{ success: boolean; file?: MemoryAttachment; error?: string }> {
   try {
     const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch(`/api/v1/files/upload?prefix=${encodeURIComponent(prefix)}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${getApiKey()}`,
+    formData.append("file", file);
+    const res = await fetch(
+      `/api/v1/files/upload?prefix=${encodeURIComponent(prefix)}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${getApiKey()}`,
+        },
+        body: formData,
       },
-      body: formData,
-    });
+    );
     if (!res.ok) {
-      const errJson = (await res.json().catch(() => ({}))) as { detail?: string };
-      return { success: false, error: errJson.detail || 'Upload failed' };
+      const body: unknown = await res.json().catch(() => null);
+      const detail = z.object({ detail: z.json() }).safeParse(body);
+      const recoverable = z
+        .object({ message: z.string(), key: z.string(), job_id: z.string() })
+        .safeParse(detail.success ? detail.data.detail : null);
+      const error = recoverable.success
+        ? `${recoverable.data.message}. Recovery reference: ${recoverable.data.key}, job ${recoverable.data.job_id}`
+        : detail.success
+          ? typeof detail.data.detail === "string"
+            ? detail.data.detail
+            : JSON.stringify(detail.data.detail)
+          : `Upload failed (${res.status})`;
+      return { success: false, error };
     }
-    return await res.json();
+    const body: unknown = await res.json();
+    return z
+      .object({
+        success: z.literal(true),
+        file: z.object({
+          key: z.string().min(1),
+          filename: z.string().min(1),
+          mime_type: z.string().optional(),
+          size_bytes: z.number().int().nonnegative().optional(),
+          url: z.string().optional(),
+          created_at: z.string().optional(),
+        }),
+      })
+      .parse(body);
   } catch (err: unknown) {
-    console.error('uploadFile error:', err);
-    const message = err instanceof Error ? err.message : 'Network error';
+    const message = err instanceof Error ? err.message : "Network error";
     return { success: false, error: message };
   }
 }

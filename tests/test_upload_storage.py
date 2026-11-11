@@ -110,3 +110,13 @@ def test_bounded_get_closes_body_on_success_and_oversize():
     with pytest.raises(ValueError):
         service(large).get_bounded_object("key", 3)
     assert large.body.closed
+
+
+@pytest.mark.parametrize("limit", [-1, True, "20", 20_000_001])
+def test_invalid_read_limit_never_contacts_storage(limit):
+    class Store:
+        def get_object(self, **request):
+            raise AssertionError("invalid limit attempted storage IO")
+
+    with pytest.raises(ValueError, match="Invalid object read limit"):
+        service(Store()).get_bounded_object("key", limit)

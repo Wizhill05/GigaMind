@@ -92,6 +92,8 @@ class StorageService:
         """Read at most limit bytes, closing the response even on failure."""
         if not self.is_enabled():
             raise RuntimeError("Storage is not configured")
+        if type(limit) is not int or not 0 <= limit <= 20_000_000:
+            raise ValueError("Invalid object read limit")
         response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
         body = response["Body"]
         try:

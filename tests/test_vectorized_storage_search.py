@@ -216,9 +216,15 @@ class TestVectorizedStorageSearch(unittest.TestCase):
         # Keep storage external while exercising the durable upload route.
         with (
             patch("gigamind.main.storage_service.is_enabled", return_value=True),
-            patch("gigamind.main.storage_service.generate_storage_key", return_value=doc_key),
+            patch(
+                "gigamind.main.storage_service.generate_storage_key",
+                return_value=doc_key,
+            ),
             patch("gigamind.main.storage_service.create_immutable_object"),
-            patch("gigamind.main.storage_service.get_bounded_object", return_value=base64.b64decode(file_payload["content_base64"])),
+            patch(
+                "gigamind.main.storage_service.get_bounded_object",
+                return_value=base64.b64decode(file_payload["content_base64"]),
+            ),
         ):
             up_res = self.client.post(
                 "/api/v1/files/upload_base64",
