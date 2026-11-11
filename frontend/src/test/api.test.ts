@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { ApiError, fetchMemories, uploadFile } from "../api";
+import { ApiError, fetchMemories, uploadFile, recoverUpload } from "../api";
 afterEach(() => vi.unstubAllGlobals());
 it("reports structured validation details", async () => {
   vi.stubGlobal(
@@ -67,4 +67,21 @@ it("rejects malformed upload success rather than passing unchecked data into att
       ),
   );
   expect((await uploadFile(new File(["abc"], "a.txt"))).success).toBe(false);
+});
+
+
+it.each([
+  { key: "files/key", job_id: "job", state: "queued", verified: false },
+  { key: "files/other", job_id: "job", state: "queued", verified: true },
+  { key: "files/key", job_id: "other", state: "queued", verified: true },
+  { key: "files/key", job_id: "job", verified: true },
+])("rejects malformed or mismatched recovery responses", async (payload) => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    expect(url).toBe("/api/v1/files/upload/recover");
+    expect(init?.method).toBe("POST");
+    return new Response(JSON.stringify(payload), { status: 200 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  await expect(recoverUpload({ key: "files/key", job_id: "job" })).rejects.toThrow();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });

@@ -39,6 +39,7 @@ export const FilesTab: React.FC<{
 }> = ({ onMutation, refreshVersion }) => {
   const [files, setFiles] = useState<StorageFile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [localRevision, setLocalRevision] = useState(0);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [filterText, setFilterText] = useState<string>("");
 
@@ -104,7 +105,7 @@ export const FilesTab: React.FC<{
       alive.current = false;
       listRequest.current?.abort();
     };
-  }, [refreshVersion]);
+  }, [refreshVersion, localRevision]);
 
   useEffect(() => () => chunkRequest.current?.abort(), []);
 
@@ -165,7 +166,7 @@ export const FilesTab: React.FC<{
       imageReader.current?.abort();
       imageReader.current = null;
     };
-  }, [refreshVersion, searchVersion]);
+  }, [refreshVersion, searchVersion, localRevision]);
 
   const handleImageQueryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -204,25 +205,30 @@ export const FilesTab: React.FC<{
   const [failures, setFailures] = useState<{ id: number; name: string; error: string; credential: string; recovery?: UploadRecoveryReference }[]>([]);
   const nextFailure = useRef(0);
   const refreshAfterUpload = () => {
-    if (onMutation) onMutation();
-    else void loadFiles();
+    setLocalRevision(value => value + 1);
+    onMutation?.();
   };
   const handleRecovery = async (failure: typeof failures[number]) => {
-    if (uploadBusy.current || !failure.recovery || getApiKey() !== failure.credential) return;
+    if (uploadBusy.current || mutations.current.size || !failure.recovery || getApiKey() !== failure.credential) return;
     uploadBusy.current = true;
     setRecovering(true);
+    let verified = false;
     try {
       const result = await recoverUpload(failure.recovery);
       if (!alive.current || getApiKey() !== failure.credential) return;
       setFailures(current => current.filter(item => item.id !== failure.id));
       toast(`Upload verified (job ${result.job_id}, ${result.state}). See Jobs for indexing status.`, "success");
-      refreshAfterUpload();
+      verified = true;
     } catch (error) {
       if (alive.current && getApiKey() === failure.credential)
         setFailures(current => current.map(item => item.id === failure.id ? { ...item, error: error instanceof Error ? error.message : "Verification failed" } : item));
     } finally {
       uploadBusy.current = false;
-      if (alive.current) setRecovering(false);
+      if (alive.current) {
+        setRecovering(false);
+        if (getApiKey() !== failure.credential) setFailures(current => current.filter(item => item.credential === getApiKey()));
+        else if (verified) refreshAfterUpload();
+      }
     }
   };
 
@@ -231,7 +237,7 @@ export const FilesTab: React.FC<{
     const input = e.currentTarget;
     const selected = Array.from(input.files ?? []);
     input.value = "";
-    if (!selected.length || uploadBusy.current) return;
+    if (!selected.length || uploadBusy.current || mutations.current.size) return;
     uploadBusy.current = true;
     const credential = getApiKey();
     setIsUploading(true);
@@ -242,15 +248,21 @@ export const FilesTab: React.FC<{
         const result = await uploadFile(file, "files");
         if (!alive.current || getApiKey() !== credential) break;
         if (result.success) successCount++;
-        else setFailures(current => [...current, { id: nextFailure.current++, name: file.name, error: result.error, credential, recovery: result.recovery }]);
+        else {
+          const failure = { id: nextFailure.current++, name: file.name, error: result.error, credential, recovery: result.recovery };
+          setFailures(current => [...current, failure]);
+        }
       }
       if (successCount && alive.current && getApiKey() === credential) {
         toast(`Uploaded ${successCount} file(s). Indexing is pending. See Jobs.`, "success");
-        refreshAfterUpload();
       }
     } finally {
       uploadBusy.current = false;
-      if (alive.current) setIsUploading(false);
+      if (alive.current) {
+        setIsUploading(false);
+        if (getApiKey() !== credential) setFailures(current => current.filter(item => item.credential === getApiKey()));
+        else if (successCount) refreshAfterUpload();
+      }
     }
   };
 
@@ -258,7 +270,7 @@ export const FilesTab: React.FC<{
     file: StorageFile,
     action: "delete" | "index",
   ) => {
-    if (mutations.current.has(file.key)) return;
+    if (uploadBusy.current || mutations.current.has(file.key)) return;
     if (
       action === "delete" &&
       !window.confirm(`Delete ${file.filename} and its vector chunks?`)
@@ -405,18 +417,18 @@ export const FilesTab: React.FC<{
               multiple
               className="hidden"
               onChange={handleFileUpload}
-              disabled={isUploading || recovering}
+              disabled={isUploading || recovering || Object.values(reindexingKeys).some(Boolean)}
             />
           </label>
         </div>
       </div>
 
-      {failures.map(failure => (
+      {failures.filter(failure => failure.credential === getApiKey()).map(failure => (
         <div key={failure.id} role="alert" className="border border-red-800 p-3 text-white space-y-2">
           <p>{failure.name}: {failure.error}</p>
           {failure.recovery && <p>Recovery reference: {failure.recovery.key}, job {failure.recovery.job_id}</p>}
-          {failure.recovery && <button disabled={isUploading || recovering || getApiKey() !== failure.credential} onClick={() => void handleRecovery(failure)}>Verify existing upload</button>}
-          <button disabled={isUploading || recovering} onClick={() => setFailures(current => current.filter(item => item.id !== failure.id))}>Dismiss</button>
+          {failure.recovery && <button disabled={isUploading || recovering || Object.values(reindexingKeys).some(Boolean) || getApiKey() !== failure.credential} onClick={() => void handleRecovery(failure)}>Verify existing upload</button>}
+          <button disabled={isUploading || recovering || Object.values(reindexingKeys).some(Boolean)} onClick={() => setFailures(current => current.filter(item => item.id !== failure.id))}>Dismiss</button>
         </div>
       ))}
 
@@ -813,7 +825,7 @@ export const FilesTab: React.FC<{
 
                           <button
                             onClick={() => handleReindex(file)}
-                            disabled={isReindexing}
+                            disabled={isReindexing || isUploading || recovering}
                             className="p-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-[#22c55e] border border-[#333333] transition-colors"
                             title="Re-Index Vectors"
                           >
@@ -824,7 +836,7 @@ export const FilesTab: React.FC<{
 
                           <button
                             onClick={() => handleDelete(file)}
-                            disabled={isReindexing}
+                            disabled={isReindexing || isUploading || recovering}
                             className="p-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-red-400 border border-[#333333] transition-colors"
                             title="Delete File from R2"
                           >
