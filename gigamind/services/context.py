@@ -93,10 +93,8 @@ def search_accepted(actor, query, project_id=None, limit=5):
 def get_memory(actor, memory_id):
     result = trust.get_memory(actor, memory_id)
     memory = result["memory"]
-    from types import SimpleNamespace
-
     if memory["status"] == "deleted" or not knowledge_validity.active(
-        SimpleNamespace(**memory)
+        memory["valid_from"], memory["valid_until"]
     ):
         raise HTTPException(404, "Memory not found")
     result["memory"]["source"] = "accepted_knowledge"

@@ -141,7 +141,7 @@ def test_http_contract(records):
 
 def test_v4_upgrade_preserves_row(records):
     from sqlalchemy import text
-    from gigamind.db.migrations import schema_version
+    from gigamind.db.migrations import schema_version, VERSION
 
     admin, _, memory = records
     with trust.engine.begin() as conn:
@@ -150,7 +150,7 @@ def test_v4_upgrade_preserves_row(records):
         conn.execute(text("DELETE FROM schema_migrations"))
         conn.execute(text("INSERT INTO schema_migrations (version) VALUES (4)"))
     migrate(trust.engine)
-    assert schema_version(trust.engine) == 5 and schema_ready(trust.engine)
+    assert schema_version(trust.engine) == VERSION and schema_ready(trust.engine)
     row = trust.get_memory(admin, memory["id"])["memory"]
     assert (
         row["content"] == "apple fact"

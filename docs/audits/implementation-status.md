@@ -32,6 +32,10 @@ Additional reviewed units:
 - Conversation reliability is reviewed and accepted: checked API responses, source-role/evidence retention, list/search abort/retry, filtered deletion/last-page recovery, shared App/tab/drawer mutation locks, credential/unmount guards, import retry/pending state, stats refresh and bounded exact-source drawer refresh. Frontend86 tests and production build pass; the new exact REST source lookup is admin-only.
 - Local SQLite backup/new-path restore is reviewed and accepted, including input digest/WAL checks, observed concurrent write, actual credential/upload services and trust-history recovery. Parent59 focused checks pass. PostgreSQL and object recovery remain unfinished.
 
+In review:
+- Temporal validity schema5, revision-checked edits and retrieval filters are provisionally integrated; parent42 focused checks pass. Native window/migration, actual SDK, rollback and complete scope checks remain.
+- Profile error handling and the Coordination console are provisionally integrated. Combined frontend90 tests/build pass, plus final4 focused StrictMode/profile tests. Their stale credential, conflict and shared mutation lifecycle corrections remain required.
+
 Still required:
 - Approved records are available through scoped context/MCP tools and a dedicated Knowledge console. They remain separate from legacy MemoryItem storage; richer retrieval and clear source presentation remain required.
 - Handoff/issue console, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD. Approved-record deletion, read redaction and admin audit/restore are implemented with stale-supersession protection.
@@ -39,6 +43,6 @@ Still required:
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Automatic import indexing jobs, live-provider multimodal/token acceptance and complete source state presentation. Upload indexing, file reindex/deletion, Jobs progress/retries and reference-safe shared-attachment GC are implemented.
 - Remaining UI API errors/cancellation/invalidation and component scenarios; handoff/retrieval inspector screens; review activity is implemented.
-- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:278 backend tests pass with24 optional native checks skipped; all24 native checks passed separately. The frontend suite has86 passing tests and a successful production build. Hosted CI has not been run.
+- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:278 backend tests pass with24 optional native checks skipped; all24 native checks passed separately. The frontend suite has90 passing tests and a successful production build. Hosted CI has not been run.
 
 Every agent change requires parent full-diff review and relevant local tests before acceptance. See implementation-review-log.md for findings and verification limits.

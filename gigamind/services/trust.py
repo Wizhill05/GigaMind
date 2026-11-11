@@ -412,7 +412,8 @@ def get_memory(actor, memory_id):
         from gigamind.services import knowledge_validity
 
         if not actor.is_admin and (
-            m.status == "deleted" or not knowledge_validity.active(m)
+            m.status == "deleted"
+            or not knowledge_validity.active(m.valid_from, m.valid_until)
         ):
             fail(404, "Memory not found")
         return {"memory": memory_dict(m)}
@@ -428,7 +429,8 @@ def get_history(actor, memory_id):
         from gigamind.services import knowledge_validity
 
         if not actor.is_admin and (
-            m.status == "deleted" or not knowledge_validity.active(m)
+            m.status == "deleted"
+            or not knowledge_validity.active(m.valid_from, m.valid_until)
         ):
             fail(404, "Memory not found")
         rows = s.exec(

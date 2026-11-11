@@ -119,7 +119,7 @@ export async function hardResetMemories(password: string): Promise<{ success: bo
 }
 
 const profileRuleSchema = z.object({
-  id: z.string(), key: z.string(), value: z.string(), category: z.string(),
+  id: z.string().min(1), key: z.string(), value: z.string(), category: z.string(),
   source_agent: z.string(), updated_at: z.string(),
 });
 

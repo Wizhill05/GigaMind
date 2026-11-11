@@ -39,10 +39,10 @@ def active_clause(now=None):
     )
 
 
-def active(memory, now=None):
+def active(valid_from, valid_until, now=None):
     now = normalize(now) if now is not None else current_time()
-    return (memory.valid_from is None or memory.valid_from <= now) and (
-        memory.valid_until is None or now < memory.valid_until
+    return (valid_from is None or valid_from <= now) and (
+        valid_until is None or now < valid_until
     )
 
 
