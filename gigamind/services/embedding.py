@@ -5,6 +5,7 @@ import urllib.request
 import urllib.error
 import json
 import base64
+import math
 from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 
@@ -40,6 +41,7 @@ class GeminiKeyPool:
     Thread-safe Round-Robin API Key Pool with automated cooldown tracking
     and instant failover across multiple Gemini API keys.
     """
+
     def __init__(self):
         self._lock = threading.Lock()
         self._index = 0
@@ -50,7 +52,7 @@ class GeminiKeyPool:
         if not keys:
             raise RuntimeError(
                 "GEMINI_API_KEY environment variable is required. "
-                "You can provide multiple comma-separated keys (e.g. GEMINI_API_KEY=\"key1,key2,key3\")."
+                'You can provide multiple comma-separated keys (e.g. GEMINI_API_KEY="key1,key2,key3").'
             )
 
         now = time.time()
@@ -78,111 +80,157 @@ class GeminiKeyPool:
             return {
                 "total_keys": len(keys),
                 "active_keys": sum(1 for k in keys if now >= self._cooldowns.get(k, 0)),
-                "cooling_down_keys": sum(1 for k in keys if now < self._cooldowns.get(k, 0))
+                "cooling_down_keys": sum(
+                    1 for k in keys if now < self._cooldowns.get(k, 0)
+                ),
             }
 
 
 key_pool = GeminiKeyPool()
 
 
+MAX_TEXT_BYTES = 8192
+MAX_RESPONSE_BYTES = 250_000
+
+
+def _binary_part(inline_bytes, image_base64, mime_type):
+    from gigamind.services.parser import binary_mime, MAX_INLINE_BYTES
+
+    if inline_bytes is not None and image_base64 is not None:
+        raise ValueError("Provide only one binary input")
+    if image_base64 is not None:
+        if (
+            not isinstance(image_base64, str)
+            or len(image_base64) > ((MAX_INLINE_BYTES + 2) // 3) * 4
+        ):
+            raise ValueError("Invalid or oversized base64 input")
+        try:
+            inline_bytes = base64.b64decode(image_base64, validate=True)
+        except (ValueError, TypeError):
+            raise ValueError("Invalid base64 input") from None
+    if inline_bytes is None:
+        return None
+    if (
+        not isinstance(inline_bytes, bytes)
+        or not inline_bytes
+        or len(inline_bytes) > MAX_INLINE_BYTES
+    ):
+        raise ValueError("Invalid or oversized binary input")
+    detected = binary_mime(inline_bytes)
+    if detected is None or (mime_type is not None and mime_type != detected):
+        raise ValueError("Unsupported or mismatched embedding MIME type")
+    if image_base64 is not None and not detected.startswith("image/"):
+        raise ValueError("Image input must be PNG or JPEG")
+    if detected == "application/pdf":
+        import io
+        import pypdf
+
+        try:
+            reader = pypdf.PdfReader(io.BytesIO(inline_bytes))
+            valid = not reader.is_encrypted and 1 <= len(reader.pages) <= 6
+        except Exception:
+            valid = False
+        if not valid:
+            raise ValueError(
+                "PDF embedding input must contain one to six unencrypted pages"
+            )
+    return {
+        "inline_data": {
+            "mime_type": detected,
+            "data": base64.b64encode(inline_bytes).decode("ascii"),
+        }
+    }
+
+
+def _response_vector(data):
+    try:
+        values = data["embedding"]["values"]
+        valid = (
+            isinstance(values, list)
+            and len(values) == DEFAULT_DIM
+            and DEFAULT_DIM > 0
+            and all(
+                isinstance(x, (int, float))
+                and not isinstance(x, bool)
+                and math.isfinite(x)
+                for x in values
+            )
+            and any(x != 0 for x in values)
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        valid = False
+    if not valid:
+        raise ValueError("Invalid embedding response")
+    return [float(value) for value in values]
+
+
 def generate_embedding(
     text: Optional[str] = None,
     inline_bytes: Optional[bytes] = None,
     image_base64: Optional[str] = None,
-    mime_type: Optional[str] = None
+    mime_type: Optional[str] = None,
 ) -> List[float]:
-    """
-    Exclusively generates multimodal vector embeddings using Google Gemini Embedding 2 (models/gemini-embedding-2).
-    Uses a thread-safe round-robin API key rotation pool with automated failover.
-    Supports direct PDF binaries, images (PNG/JPG/WEBP), diagrams, documents, and code.
-    """
+    """Submit bounded content and accept only complete, finite provider vectors."""
+    parts = []
+    if text is not None:
+        if (
+            not isinstance(text, str)
+            or not text.strip()
+            or len(text.encode("utf-8")) > MAX_TEXT_BYTES
+        ):
+            raise ValueError(
+                "Embedding text is empty or exceeds the application byte limit"
+            )
+        parts.append({"text": text})
+    binary = _binary_part(inline_bytes, image_base64, mime_type)
+    if binary is not None:
+        parts.append(binary)
+    if not parts:
+        raise ValueError("Embedding input is empty")
     keys = _get_api_keys()
     if not keys:
         raise RuntimeError("GEMINI_API_KEY environment variable is required.")
-
-    parts = []
-    if text:
-        parts.append({"text": text})
-    if inline_bytes:
-        b64_data = base64.b64encode(inline_bytes).decode("utf-8")
-        parts.append({
-            "inline_data": {
-                "mime_type": mime_type or "application/pdf",
-                "data": b64_data
-            }
-        })
-    elif image_base64:
-        parts.append({
-            "inline_data": {
-                "mime_type": mime_type or "image/png",
-                "data": image_base64
-            }
-        })
-
-    if not parts:
-        parts.append({"text": text or ""})
-
     payload = {
         "model": MODEL_NAME,
         "content": {"parts": parts},
-        "output_dimensionality": DEFAULT_DIM
+        "output_dimensionality": DEFAULT_DIM,
     }
-
     max_attempts = max(len(keys) * 2, 4)
-    last_error = None
-
     for attempt in range(max_attempts):
         active_key = key_pool.get_next_key()
-        url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:embedContent?key={active_key}"
-
+        # Credentials are headers, never part of a URL or exception message.
+        req = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:embedContent",
+            data=json.dumps(payload, allow_nan=False).encode("utf-8"),
+            headers={"Content-Type": "application/json", "x-goog-api-key": active_key},
+        )
         try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                values = data["embedding"]["values"]
-                return [float(x) for x in values[:DEFAULT_DIM]]
-        except urllib.error.HTTPError as http_err:
-            last_error = http_err
-            err_body = ""
-            try:
-                err_body = http_err.read().decode("utf-8")
-            except Exception:
-                pass
-
-            # Quota exhausted / Rate limit hit on this specific key
-            if http_err.code in (429, 403):
-                sleep_time = 3.5
-                try:
-                    err_json = json.loads(err_body)
-                    for detail in err_json.get("error", {}).get("details", []):
-                        if "retryDelay" in detail:
-                            delay_str = detail["retryDelay"].replace("s", "")
-                            sleep_time = max(float(delay_str) + 0.5, 3.5)
-                except Exception:
-                    pass
-
-                key_pool.mark_rate_limited(active_key, retry_delay=sleep_time)
-
-                # If multiple keys are configured, rotate immediately without sleeping
-                if len(keys) > 1 and attempt < max_attempts - 1:
-                    continue
-                else:
-                    time.sleep(min(sleep_time, 5.0))
-                    continue
-
-            raise RuntimeError(f"Gemini Embedding 2 API Error (HTTP {http_err.code}): {err_body or http_err}") from http_err
-        except Exception as e:
-            last_error = e
+            with urllib.request.urlopen(req, timeout=20) as response:
+                raw = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_RESPONSE_BYTES:
+                raise ValueError("Embedding response exceeds limit")
+            return _response_vector(json.loads(raw))
+        except urllib.error.HTTPError as exc:
+            code = exc.code
+            exc.close()
+            alternate_key = code == 403 and len(keys) > 1
+            if code != 429 and not alternate_key and not 500 <= code <= 599:
+                raise RuntimeError(
+                    f"Gemini embedding request failed (HTTP {code})"
+                ) from None
+            if code == 429 or alternate_key:
+                key_pool.mark_rate_limited(active_key)
+            if attempt < max_attempts - 1 and len(keys) == 1:
+                time.sleep(min(2**attempt, 5))
+        except (ValueError, TypeError, OverflowError, UnicodeError):
+            # Malformed successful responses are not useful retry candidates.
+            raise RuntimeError(
+                "Gemini embedding returned an invalid response"
+            ) from None
+        except Exception:
             if attempt < max_attempts - 1:
-                time.sleep(1.0)
-                continue
-            raise RuntimeError(f"Gemini Embedding 2 connection error: {e}") from e
-
-    raise RuntimeError(f"Gemini Embedding 2 failed after {max_attempts} attempts across {len(keys)} API key(s): {last_error}")
+                time.sleep(min(2**attempt, 5))
+    raise RuntimeError("Gemini embedding request failed after retries")
 
 
 def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:

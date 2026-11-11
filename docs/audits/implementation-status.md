@@ -20,6 +20,7 @@ Additional reviewed integration:
 - Admin jobs API and standalone worker, controlled graceful shutdown/renewal and native clean startup. Automatic source pipelines remain unfinished. Current-resource ownership and durable tombstones now fence stale publishers and block re-enqueue after forgetting, with native concurrency checks.
 - Auth/list race, deletion and activity behavior verified in 36 frontend tests; production build passes. Client expiry, throttled last use, atomic rotation/revocation and v2 legacy migration are verified, including native races.
 - Full decoded transcript lexical search without a provider, optional existing vector candidates with SQL prefilters, source snippets and native search checks.
+- MIME-safe text/image embedding requests, all-page PDF anchors, stored-metadata reindex and strict provider-vector validation. Offline payload and native publication checks pass; live-provider OCR/token/relevance acceptance remains unfinished.
 
 In flight:
 - File lifecycle route/job progress integration, credential console and remaining memory-engine features. Reference-safe durable cleanup core, credential lifecycle and review activity console are reviewed and integrated.

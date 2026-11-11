@@ -1,0 +1,13 @@
+# File embedding contracts
+
+Text is sent as text parts, PNG/JPEG as their detected MIME type, and each PDF page as a separate PDF request. The parser retains blank pages and page numbers; extracted text is chunked per page, including late pages. Visual anchors identify the submitted page. They do not claim OCR completeness. Invalid, encrypted or over-limit documents are rejected as unsupported rather than silently accepting a truncated local extraction.
+
+The application accepts at most 20 MB per file, 100 PDF pages, 500,000 extracted characters, 10 MB per inline part and 40 MB of serialized PDF pages. Plain text must be UTF-8. Images must have PNG/JPEG signatures; the provider still validates image decoding. A declared binary MIME type or recognized extension conflicting with the signature is rejected. Other image formats, audio and video are unsupported by this file pipeline.
+
+Google documents an 8,192-token overall embedding input limit, a maximum of one PDF with six pages per request, and recommends one page for PDF quality. It supports PNG/JPEG images. See [Google embedding limits](https://ai.google.dev/gemini-api/docs/embeddings#supported-modalities) and [PDF limits](https://ai.google.dev/gemini-api/docs/embeddings#pdf-limits). The [REST examples](https://ai.google.dev/gemini-api/docs/embeddings#embed-images) use inline_data/mime_type and x-goog-api-key; output_dimensionality is explicit.
+
+The text request boundary uses an 8,192 UTF-8 byte application limit. File text chunks are smaller still. These byte limits and one-page requests do not measure a scanned page's provider OCR tokens. A provider can process a page incompletely without exposing that through its embedding response. No OCR coverage, live-provider interoperability or semantic relevance claim follows from the local tests.
+
+The file navigation vector is the arithmetic mean of its chunk vectors. It is not an independently embedded whole-document summary. Retrieval should inspect page chunks for evidence. Queued reindexing uses stored filename/MIME/source metadata, with signature inference when no metadata exists. Source bytes remain in storage when provider calls fail. Provider failures cannot publish partial chunks, and stale job ownership is checked in the publication transaction.
+
+The HTTP client sends credentials only in the API-key header and sanitizes failures. Successful responses must have exactly the configured number of finite numeric components and a nonzero vector; strings, booleans, malformed JSON, wrong dimensions and oversized responses are rejected. Tests inspect the outgoing requests with a fake HTTP boundary and generated PDFs. They do not call Google.

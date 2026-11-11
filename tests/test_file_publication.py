@@ -86,7 +86,7 @@ def test_replacement_and_failures(database, monkeypatch):
     calls = iter([[1, 2, 3], [0, 0, 0]])
     monkeypatch.setattr(indexing, "generate_embedding", lambda **kw: next(calls))
     with pytest.raises(ValueError):
-        publish(b"new")
+        publish(b"new|second")
     assert snapshot(database) == before
 
 

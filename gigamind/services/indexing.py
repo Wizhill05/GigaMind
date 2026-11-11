@@ -53,6 +53,7 @@ def index_file_content(
         size_bytes = len(data)
     parsed = extract_text_from_file(data=data, filename=filename, mime_type=mime_type)
     multimodal_type = parsed.get("format", "text")
+    mime_type = parsed.get("mime_type") or mime_type
 
     if not parsed["supported"] or not parsed["text"].strip():
         # Unsupported or empty file: save record with status
@@ -113,78 +114,83 @@ def index_file_content(
             "status": status,
             "chunks_created": 0,
             "extracted_length": 0,
+            "reason": parsed.get("error"),
         }
 
-    # Generate semantic chunks with page / line tracking
+    # Each PDF page gets a visual anchor, including pages without extractable text.
     raw_chunks: List[Dict[str, Any]] = []
-
     pages = parsed.get("pages", [])
-    if parsed.get("format") == "image":
+    if multimodal_type == "pdf":
+        for page in pages:
+            number = page["page_number"]
+            raw_chunks.append(
+                {
+                    "content": f"PDF page {number}",
+                    "page_number": number,
+                    "inline_bytes": page["raw_bytes"],
+                    "mime_type": "application/pdf",
+                    "is_visual_anchor": True,
+                }
+            )
+            if page["text"]:
+                for chunk in chunk_text(
+                    page["text"], chunk_size=1200, chunk_overlap=200, min_threshold=1500
+                ):
+                    raw_chunks.append(
+                        {"content": chunk["content"], "page_number": number}
+                    )
+    elif multimodal_type == "image":
         raw_chunks.append(
             {
                 "content": parsed["text"],
                 "page_number": 1,
-                "image_base64": parsed.get("image_base64"),
+                "inline_bytes": data,
+                "mime_type": parsed["mime_type"],
+                "is_visual_anchor": True,
             }
         )
-    elif pages and len(pages) > 1:
-        # Multi-page document (e.g. PDF): preserve page-level semantic cohesion
-        for p in pages:
-            p_num = p["page_number"]
-            p_text = p["text"].strip()
-            if not p_text:
-                continue
-            # If page text is within standard threshold (1500 chars), keep as 1 clean chunk
-            if len(p_text) <= 1500:
-                raw_chunks.append({"content": p_text, "page_number": p_num})
-            else:
-                sub_chunks = chunk_text(
-                    p_text, chunk_size=1200, chunk_overlap=200, min_threshold=1500
-                )
-                for sc in sub_chunks:
-                    raw_chunks.append({"content": sc["content"], "page_number": p_num})
     else:
-        # Single page / code / markdown: dense semantic chunks (1200 chars)
-        sub_chunks = chunk_text(
+        for chunk in chunk_text(
             parsed["text"], chunk_size=1200, chunk_overlap=200, min_threshold=1500
-        )
-        for sc in sub_chunks:
-            raw_chunks.append({"content": sc["content"], "page_number": 1})
+        ):
+            raw_chunks.append({"content": chunk["content"], "page_number": 1})
 
-    # 1. Compute Whole-Document Holistic Embedding with Gemini Embedding 2
-    doc_summary_text = parsed["text"][:3000]
-    doc_embedding = generate_embedding(
-        text=f"Document title: {filename}\n{doc_summary_text}",
-        inline_bytes=parsed.get("raw_bytes") or data,
-        mime_type=mime_type,
-    )
-    doc_embedding = _validate_vector(doc_embedding)
     total_chunks = len(raw_chunks)
+    if not total_chunks:
+        raise ValueError("No indexable content")
     chunk_records: List[StorageChunkItem] = []
     chunk_embeddings: List[List[float]] = []
-
     for idx, rc in enumerate(raw_chunks):
-        chk_id = f"{file_id}_chk_{idx}"
-        emb = generate_embedding(
-            text=rc["content"],
-            image_base64=rc.get("image_base64"),
-            mime_type=mime_type or "image/png",
-        )
+        if rc.get("inline_bytes"):
+            emb = generate_embedding(
+                inline_bytes=rc["inline_bytes"], mime_type=rc["mime_type"]
+            )
+        else:
+            emb = generate_embedding(text=rc["content"])
         emb = _validate_vector(emb)
         chunk_embeddings.append(emb)
-        chunk_item = StorageChunkItem(
-            id=chk_id,
-            file_id=file_id,
-            file_key=file_key,
-            filename=filename,
-            chunk_index=idx,
-            total_chunks=total_chunks,
-            page_number=rc.get("page_number"),
-            content=rc["content"],
-            embedding_json=json.dumps(emb),
-            created_at=now_str,
+        chunk_records.append(
+            StorageChunkItem(
+                id=f"{file_id}_chk_{idx}",
+                file_id=file_id,
+                file_key=file_key,
+                filename=filename,
+                chunk_index=idx,
+                total_chunks=total_chunks,
+                page_number=rc.get("page_number"),
+                is_visual_anchor=rc.get("is_visual_anchor", False),
+                content=rc["content"],
+                embedding_json=json.dumps(emb),
+                created_at=now_str,
+            )
         )
-        chunk_records.append(chunk_item)
+    # The mean is a navigation vector, not a claim of document-level semantic quality.
+    doc_embedding = _validate_vector(
+        [
+            sum(vector[i] for vector in chunk_embeddings) / len(chunk_embeddings)
+            for i in range(embedding.DEFAULT_DIM)
+        ]
+    )
 
     # Persist in Neon DB
     with Session(engine) as session:
@@ -274,12 +280,23 @@ def reindex_storage_file_by_key(
         return None
 
     data = storage_service.download_file(key)
-    if not data:
+    if data is None:
         return None
 
-    filename = key.split("/")[-1]
+    with Session(engine) as session:
+        stored = session.exec(
+            select(StorageFileItem).where(StorageFileItem.key == key)
+        ).first()
+        filename = stored.filename if stored else key.split("/")[-1]
+        mime_type = stored.mime_type if stored else None
+        source_agent = stored.source_agent if stored else "user"
     return index_file_content(
-        file_key=key, filename=filename, data=data, publication_guard=publication_guard
+        file_key=key,
+        filename=filename,
+        data=data,
+        mime_type=mime_type,
+        source_agent=source_agent,
+        publication_guard=publication_guard,
     )
 
 
@@ -321,28 +338,37 @@ def delete_all_storage_file_indexes() -> int:
 def list_indexed_storage_files(limit: int = 100) -> List[Dict[str, Any]]:
     """Returns list of indexed files with chunk counts, statuses, and presigned download links."""
     with Session(engine) as session:
-        files = session.exec(select(StorageFileItem).order_by(StorageFileItem.created_at.desc()).limit(limit)).all()
+        files = session.exec(
+            select(StorageFileItem)
+            .order_by(StorageFileItem.created_at.desc())
+            .limit(limit)
+        ).all()
         res = []
         for f in files:
             url = None
             if storage_service.is_enabled():
-                url = storage_service.get_presigned_download_url(f.key, filename=f.filename)
+                url = storage_service.get_presigned_download_url(
+                    f.key, filename=f.filename
+                )
 
-            res.append({
-                "id": f.id,
-                "key": f.key,
-                "filename": f.filename,
-                "mime_type": f.mime_type,
-                "size_bytes": f.size_bytes,
-                "source_agent": f.source_agent,
-                "extracted_text_length": f.extracted_text_length,
-                "total_chunks": f.total_chunks,
-                "indexing_status": f.indexing_status,
-                "url": url,
-                "created_at": f.created_at,
-                "updated_at": f.updated_at
-            })
+            res.append(
+                {
+                    "id": f.id,
+                    "key": f.key,
+                    "filename": f.filename,
+                    "mime_type": f.mime_type,
+                    "size_bytes": f.size_bytes,
+                    "source_agent": f.source_agent,
+                    "extracted_text_length": f.extracted_text_length,
+                    "total_chunks": f.total_chunks,
+                    "indexing_status": f.indexing_status,
+                    "url": url,
+                    "created_at": f.created_at,
+                    "updated_at": f.updated_at,
+                }
+            )
         return res
+
 
 def get_file_chunks(key: str) -> List[Dict[str, Any]]:
     """Returns all semantic chunks and page citations extracted from a specific file key."""
@@ -359,26 +385,41 @@ def get_file_chunks(key: str) -> List[Dict[str, Any]]:
                 "chunk_index": c.chunk_index,
                 "total_chunks": c.total_chunks,
                 "page_number": c.page_number,
+                "is_visual_anchor": c.is_visual_anchor,
                 "content": c.content,
-                "created_at": c.created_at
+                "created_at": c.created_at,
             }
             for c in chunks
         ]
+
 
 def register_storage_file(
     file_key: str,
     filename: str,
     mime_type: Optional[str] = None,
     size_bytes: int = 0,
-    source_agent: str = "user"
+    source_agent: str = "user",
 ) -> StorageFileItem:
     """Inserts or updates a StorageFileItem immediately so the file is recorded in the Files repository."""
     now_str = datetime.now(timezone.utc).isoformat()
     ext = os.path.splitext(filename or "")[1].lower()
-    m_type = "pdf" if ext == ".pdf" or (mime_type and "pdf" in mime_type) else ("image" if ext in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"] or (mime_type and mime_type.startswith("image/")) else ("code" if ext in [".py", ".ts", ".js", ".sql", ".rs", ".go"] else "text"))
+    m_type = (
+        "pdf"
+        if ext == ".pdf" or (mime_type and "pdf" in mime_type)
+        else (
+            "image"
+            if ext in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"]
+            or (mime_type and mime_type.startswith("image/"))
+            else (
+                "code" if ext in [".py", ".ts", ".js", ".sql", ".rs", ".go"] else "text"
+            )
+        )
+    )
 
     with Session(engine) as session:
-        existing = session.exec(select(StorageFileItem).where(StorageFileItem.key == file_key)).first()
+        existing = session.exec(
+            select(StorageFileItem).where(StorageFileItem.key == file_key)
+        ).first()
         if not existing:
             f_item = StorageFileItem(
                 id=f"file_{uuid.uuid4().hex[:12]}",
@@ -390,9 +431,11 @@ def register_storage_file(
                 source_agent=source_agent or "user",
                 extracted_text_length=0,
                 total_chunks=0,
-                indexing_status="completed" if not storage_service.is_enabled() else "pending",
+                indexing_status="completed"
+                if not storage_service.is_enabled()
+                else "pending",
                 created_at=now_str,
-                updated_at=now_str
+                updated_at=now_str,
             )
             session.add(f_item)
             session.commit()
