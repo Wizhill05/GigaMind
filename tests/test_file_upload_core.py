@@ -1,18 +1,20 @@
 from datetime import datetime
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi import HTTPException
 from sqlmodel import Session, create_engine, select
 
 from gigamind.db.database import StorageFileItem
-from gigamind.db.jobs import Job, ResourceJobState
+from gigamind.db.jobs import Job, ResourceJobState, UploadManifest
 from gigamind.services import file_uploads, jobs
 
 
 @pytest.fixture
 def engine(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'uploads.db'}")
-    for model in (StorageFileItem, Job, ResourceJobState):
+    for model in (StorageFileItem, Job, ResourceJobState, UploadManifest):
         model.__table__.create(engine)
     yield engine
     engine.dispose()
@@ -86,12 +88,13 @@ def test_failure_after_metadata_is_added_rolls_back(engine, monkeypatch):
 
     monkeypatch.setattr(Session, "commit", fail_commit)
     with pytest.raises(RuntimeError):
-        prepare(engine)
+        prepare(engine, sha256=hashlib.sha256(b"abc").hexdigest())
     engine.dispose()
     with Session(engine) as session:
         assert session.get(Job, old.id).state == "queued"
         assert session.get(ResourceJobState, "file/a").current_job_id == old.id
         assert session.exec(select(StorageFileItem)).first() is None
+        assert session.exec(select(UploadManifest)).first() is None
         assert len(session.exec(select(Job)).all()) == 1
 
 
@@ -156,3 +159,32 @@ def test_invalid_schedule_rolls_back_before_queue_mutation(engine, value):
     with Session(engine) as session:
         assert session.exec(select(Job)).all() == []
         assert session.exec(select(ResourceJobState)).all() == []
+
+
+def test_manifest_admission_and_recovery(engine):
+    digest = hashlib.sha256(b"abc").hexdigest()
+    _, job = prepare(engine, sha256=digest)
+    engine.dispose()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: file_uploads.begin_upload("file/a", job["id"], engine=engine), range(2)))
+    assert sorted(results) == [False, True]
+    file_uploads.record_unknown("file/a", job["id"], engine=engine)
+    for data in (None, b"ab", b"xyz"):
+        assert not file_uploads.verify_upload("file/a", job["id"], data, engine=engine)
+        with pytest.raises(jobs.Conflict):
+            file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)
+    assert file_uploads.verify_upload("file/a", job["id"], b"abc", engine=engine)
+    file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)
+    claimed = jobs.claim(engine=engine)
+    file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)
+    assert jobs.status(job["id"], engine=engine).lease_token == claimed.lease_token
+
+
+def test_cancelled_manifest_cannot_restart(engine):
+    _, job = prepare(engine, sha256=hashlib.sha256(b"abc").hexdigest())
+    assert file_uploads.begin_upload("file/a", job["id"], engine=engine)
+    jobs.cancel(job["id"], engine=engine)
+    assert file_uploads.verify_upload("file/a", job["id"], b"abc", engine=engine)
+    with pytest.raises(jobs.Conflict):
+        file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)
+    assert not file_uploads.begin_upload("file/a", job["id"], engine=engine)

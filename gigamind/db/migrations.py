@@ -11,8 +11,9 @@ from sqlalchemy.schema import CreateIndex
 from sqlmodel import SQLModel
 
 from gigamind.db import trust_models  # register trust tables
+from gigamind.db.jobs import UploadManifest
 
-VERSION = 2
+VERSION = 3
 LEGACY_COLUMNS = {
     "memories": {
         "media_type": "TEXT DEFAULT 'text'",
@@ -260,6 +261,8 @@ def migrate(engine):
                         conn.exec_driver_sql(
                             f'ALTER TABLE client_credentials ADD COLUMN "{name}" {ddl}'
                         )
+            if version < 3:
+                UploadManifest.__table__.create(conn, checkfirst=True)
             if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),

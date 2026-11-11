@@ -1,13 +1,16 @@
 """Atomic preparation of immutable file uploads; remote transfer is separate."""
 
 from datetime import datetime, timezone
+import hashlib
+import re
 
 from fastapi import HTTPException
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from gigamind.db.database import StorageFileItem
-from gigamind.db.jobs import Job
+from gigamind.db.jobs import Job, UploadManifest
 from gigamind.services import jobs
 from gigamind.services.file_lifecycle import validate_key
 
@@ -27,11 +30,17 @@ def _prepare_upload(
     source_agent,
     idempotency_key,
     *,
+    sha256=None,
     engine=None,
     clock=jobs.utcnow,
 ):
     """Register validated metadata and a deferred job, returning committed snapshots."""
     validate_key(key)
+    if sha256 is not None:
+        if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+            raise ValueError("sha256 must be a lowercase SHA256 hex digest")
+        if type(size_bytes) is not int or size_bytes < 0:
+            raise ValueError("size_bytes must be a nonnegative integer")
     if not idempotency_key:
         raise ValueError("An idempotency key is required")
     values = dict(
@@ -51,6 +60,7 @@ def _prepare_upload(
             select(StorageFileItem).where(StorageFileItem.key == key)
         ).first()
         if existing:
+            manifest = session.get(UploadManifest, key)
             old = session.exec(
                 select(Job).where(Job.idempotency_key == idempotency_key)
             ).first()
@@ -62,6 +72,7 @@ def _prepare_upload(
                 or any(
                     getattr(existing, name) != value for name, value in values.items()
                 )
+                or (manifest.sha256 if manifest else None) != sha256
             ):
                 raise jobs.Conflict("File key already registered")
             session.commit()
@@ -90,6 +101,8 @@ def _prepare_upload(
             **values,
         )
         session.add(file)
+        if sha256 is not None:
+            session.add(UploadManifest(key=key, job_id=job.id, sha256=sha256, size_bytes=size_bytes))
         session.commit()
         return _snapshot(file, job)
 
@@ -103,6 +116,7 @@ def prepare_upload(
     source_agent,
     idempotency_key,
     *,
+    sha256=None,
     engine=None,
     clock=jobs.utcnow,
 ):
@@ -115,6 +129,7 @@ def prepare_upload(
             size_bytes,
             source_agent,
             idempotency_key,
+            sha256=sha256,
             engine=engine,
             clock=clock,
         )
@@ -131,6 +146,7 @@ def acknowledge_upload(key, job_id, *, engine=None, clock=jobs.utcnow):
     with Session(jobs.resolve_engine(engine), expire_on_commit=False) as session:
         owner = jobs.lock_resource(session, key, now)
         job = session.get(Job, job_id)
+        manifest = session.get(UploadManifest, key)
         if owner.deleted:
             raise HTTPException(409, "File has been deleted")
         if (
@@ -138,6 +154,7 @@ def acknowledge_upload(key, job_id, *, engine=None, clock=jobs.utcnow):
             or not job
             or job.kind != "index_file"
             or job.resource_key != key
+            or (manifest is not None and (manifest.job_id != job_id or manifest.state != "verified"))
             or job.state not in {"queued", "running", "retrying", "completed", "failed"}
             or session.exec(
                 select(StorageFileItem.id).where(StorageFileItem.key == key)
@@ -150,3 +167,56 @@ def acknowledge_upload(key, job_id, *, engine=None, clock=jobs.utcnow):
             job.updated_at = now
         session.commit()
         return job.model_dump(exclude={"lease_token"})
+
+
+def begin_upload(key, job_id, *, engine=None, clock=jobs.utcnow):
+    """Admit one PUT. True grants ownership; False means no PUT is allowed."""
+    validate_key(key)
+    with Session(jobs.resolve_engine(engine)) as session:
+        owner = jobs.lock_resource(session, key, jobs.stamp(clock()))
+        manifest = session.get(UploadManifest, key)
+        job = session.get(Job, job_id)
+        if (owner.deleted or owner.current_job_id != job_id or not manifest
+            or manifest.job_id != job_id or manifest.state != "prepared"
+            or not job or job.state != "queued"):
+            session.commit()
+            return False
+        result = session.execute(update(UploadManifest).where(
+            UploadManifest.key == key, UploadManifest.job_id == job_id,
+            UploadManifest.state == "prepared",
+        ).values(state="inflight"))
+        session.commit()
+        return result.rowcount == 1
+
+
+def record_unknown(key, job_id, *, engine=None, clock=jobs.utcnow):
+    """Record an uncertain PUT outcome without granting another PUT."""
+    validate_key(key)
+    with Session(jobs.resolve_engine(engine)) as session:
+        jobs.lock_resource(session, key, jobs.stamp(clock()))
+        manifest = session.get(UploadManifest, key)
+        if not manifest or manifest.job_id != job_id or manifest.state not in {"inflight", "unknown"}:
+            raise jobs.Conflict("Upload is not in flight")
+        manifest.state = "unknown"
+        session.commit()
+
+
+def verify_upload(key, job_id, remote_bytes, *, engine=None, clock=jobs.utcnow):
+    """Verify fetched remote bytes; a missing or mismatched object remains unresolved."""
+    validate_key(key)
+    if remote_bytes is not None and not isinstance(remote_bytes, bytes):
+        raise ValueError("remote_bytes must be bytes or None")
+    digest = hashlib.sha256(remote_bytes).hexdigest() if remote_bytes is not None else None
+    with Session(jobs.resolve_engine(engine)) as session:
+        jobs.lock_resource(session, key, jobs.stamp(clock()))
+        manifest = session.get(UploadManifest, key)
+        if not manifest or manifest.job_id != job_id or manifest.state not in {"inflight", "unknown", "verified"}:
+            raise jobs.Conflict("Upload was not admitted")
+        if remote_bytes is None or len(remote_bytes) != manifest.size_bytes or digest != manifest.sha256:
+            if manifest.state != "verified":
+                manifest.state = "unknown"
+            session.commit()
+            return False
+        manifest.state = "verified"
+        session.commit()
+        return True

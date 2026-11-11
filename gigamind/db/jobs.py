@@ -28,3 +28,12 @@ class ResourceJobState(SQLModel, table=True):
     deleted: bool = False
     created_at: str
     updated_at: str
+
+
+class UploadManifest(SQLModel, table=True):
+    __tablename__ = "upload_manifests"
+    key: str = Field(primary_key=True)
+    job_id: str = Field(index=True, unique=True)
+    sha256: str
+    size_bytes: int
+    state: str = "prepared"

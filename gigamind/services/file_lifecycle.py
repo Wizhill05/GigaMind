@@ -10,7 +10,7 @@ from sqlalchemy import delete, update
 from sqlmodel import Session, select
 
 from gigamind.db.database import MemoryItem, StorageChunkItem, StorageFileItem
-from gigamind.db.jobs import Job, ResourceJobState
+from gigamind.db.jobs import Job, ResourceJobState, UploadManifest
 from gigamind.security import Actor
 from gigamind.services import jobs
 
@@ -100,6 +100,9 @@ def request_delete(actor, key, engine=None):
     now = jobs.stamp(jobs.utcnow())
     with Session(jobs.resolve_engine(engine), expire_on_commit=False) as session:
         owner = jobs.lock_resource(session, key, now)
+        manifest = session.get(UploadManifest, key)
+        if manifest and manifest.state in {"inflight", "unknown"}:
+            raise HTTPException(409, "Upload outcome is unresolved")
         if referenced(session, key):
             raise HTTPException(
                 409, "File is referenced or attachment metadata cannot be verified"

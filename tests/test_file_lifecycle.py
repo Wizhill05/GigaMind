@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 from threading import Event
 
 import pytest
@@ -7,7 +8,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 from gigamind.db.database import StorageFileItem
 from gigamind.security import Actor
-from gigamind.services import file_lifecycle, jobs, memory
+from gigamind.services import file_lifecycle, file_uploads, jobs, memory
 from gigamind.services.storage import storage_service
 
 
@@ -33,6 +34,26 @@ def setup(tmp_path, monkeypatch):
 
 
 admin = Actor("admin", set(), None, True)
+
+
+def test_unresolved_upload_blocks_delete_after_cancel(setup):
+    engine = setup
+    _, job = file_uploads.prepare_upload("file", "a", "text/plain", "text", 3, "user", "idem", sha256=hashlib.sha256(b"abc").hexdigest(), engine=engine)
+    assert file_uploads.begin_upload("file", job["id"], engine=engine)
+    jobs.cancel(job["id"], engine=engine)
+    with pytest.raises(HTTPException) as exc:
+        file_lifecycle.request_delete(admin, "file", engine)
+    assert exc.value.status_code == 409
+    assert file_uploads.verify_upload("file", job["id"], b"abc", engine=engine)
+    file_lifecycle.request_delete(admin, "file", engine)
+    with pytest.raises((HTTPException, jobs.Conflict)):
+        file_uploads.acknowledge_upload("file", job["id"], engine=engine)
+
+
+def test_delete_unstarted_upload_prevents_admission(setup):
+    _, job = file_uploads.prepare_upload("file", "a", "text/plain", "text", 3, "user", "idem", sha256=hashlib.sha256(b"abc").hexdigest(), engine=setup)
+    file_lifecycle.request_delete(admin, "file", setup)
+    assert not file_uploads.begin_upload("file", job["id"], engine=setup)
 
 
 def test_shared_references_and_worker(setup, monkeypatch):
