@@ -7,7 +7,7 @@ python -m pip install -r requirements.txt pytest httpx
 python -m pytest
 ```
 
-The pytest configuration disables dotenv, discards inherited database and provider credentials, creates a temporary SQLite database, and blocks non-loopback socket connections in the pytest process. Tests that launch subprocesses must provide their own isolated environment and stub external boundaries. The database is removed when pytest exits. Do not run `tests/cleanup_test_data.py` against a configured database.
+The pytest configuration disables dotenv, discards inherited database and provider credentials, creates a temporary SQLite database, and blocks external DNS resolution and non-loopback socket connections in the pytest process. Inherited OAuth and proxy settings are also removed. Tests that launch subprocesses must provide their own isolated environment and stub external boundaries. The database is removed when pytest exits. Do not run `tests/cleanup_test_data.py` against a configured database.
 
 The native PostgreSQL migration tests are optional. Start a disposable **local** PostgreSQL service with pgvector installed and a dedicated empty database, then run:
 

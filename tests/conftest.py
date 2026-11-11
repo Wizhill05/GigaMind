@@ -1,6 +1,7 @@
 """Safe defaults established before test modules import application code."""
 
 import os
+import ipaddress
 import socket
 import tempfile
 from pathlib import Path
@@ -15,22 +16,45 @@ os.environ.pop("RENDER", None)
 os.environ["ENVIRONMENT"] = "test"
 for _name in list(os.environ):
     if _name.startswith(
-        ("R2_", "GEMINI_", "GOOGLE_API_", "VOYAGE_", "COHERE_", "AWS_")
+        ("R2_", "GEMINI_", "GOOGLE_API_", "VOYAGE_", "COHERE_", "AWS_", "OAUTH_")
     ):
+        os.environ.pop(_name, None)
+
+os.environ.pop("GIGAMIND_PUBLIC_URL", None)
+for _name in list(os.environ):
+    if _name.lower() in {"http_proxy", "https_proxy", "all_proxy", "no_proxy"}:
         os.environ.pop(_name, None)
 
 # Native PostgreSQL is opt-in and limited to loopback by its fixture.
 if os.environ.get("GIGAMIND_RUN_LOCAL_POSTGRES") != "1":
     os.environ.pop("GIGAMIND_TEST_POSTGRES_URL", None)
 
+_original_getaddrinfo = socket.getaddrinfo
 _original_connect = socket.socket.connect
 _original_connect_ex = socket.socket.connect_ex
 
 
+def _loopback_host(host):
+    if host is None or host in ("localhost", b"localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(
+            host.decode("ascii") if isinstance(host, bytes) else host
+        ).is_loopback
+    except (ValueError, UnicodeError):
+        return False
+
+
 def _local_address(address):
     return isinstance(address, str) or (
-        isinstance(address, tuple) and address[0] in ("127.0.0.1", "::1", "localhost")
+        isinstance(address, tuple) and _loopback_host(address[0])
     )
+
+
+def _getaddrinfo(host, *args, **kwargs):
+    if not _loopback_host(host):
+        raise RuntimeError("External DNS resolution is disabled in offline tests")
+    return _original_getaddrinfo(host, *args, **kwargs)
 
 
 def _connect(self, address):
@@ -45,5 +69,6 @@ def _connect_ex(self, address):
     return _original_connect_ex(self, address)
 
 
+socket.getaddrinfo = _getaddrinfo
 socket.socket.connect = _connect
 socket.socket.connect_ex = _connect_ex
