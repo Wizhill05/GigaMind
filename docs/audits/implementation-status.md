@@ -30,7 +30,7 @@ Additional reviewed features:
 - Global-body limits and local CI verification are implemented. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
 
 Additional reviewed units:
-- Scoped immutable handoffs and memory issues, REST/MCP tools and context integration are reviewed and accepted. Scope/revocation, zero-scope SDK denial, rollback and native idempotency/migration checks pass; coordination UI remains unfinished.
+- Scoped immutable handoffs and memory issues, REST/MCP tools and context integration are reviewed and accepted. Scope/revocation, zero-scope SDK denial, rollback and native idempotency/migration checks pass; the Coordination console is also reviewed.
 - Conversation reliability is reviewed and accepted: checked API responses, source-role/evidence retention, list/search abort/retry, filtered deletion/last-page recovery, shared App/tab/drawer mutation locks, credential/unmount guards, import retry/pending state, stats refresh and bounded exact-source drawer refresh. Frontend86 tests and production build pass; the new exact REST source lookup is admin-only.
 - Local SQLite backup/new-path restore is reviewed and accepted, including input digest/WAL checks, observed concurrent write, actual credential/upload services and trust-history recovery. Parent59 focused checks pass. PostgreSQL and object recovery remain unfinished.
 
@@ -46,7 +46,7 @@ Still required:
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Automatic import indexing jobs, live-provider multimodal/token acceptance and complete source state presentation. Upload indexing, file reindex/deletion, Jobs progress/retries and reference-safe shared-attachment GC are implemented.
 - Legacy Overview/Lab/Spotlight search UI is reviewed: checked schemas, request cancellation, credential/close guards, explicit drafts, raw scores and actual /mcp setup. The unused swallowing multimodal helper is removed. Provider-free source retrieval remains unfinished.
-- Legacy file-search tombstone filtering and guarded presigned URL admission remain unresolved. Remaining UI API errors/cancellation/invalidation and component scenarios; handoff/retrieval inspector screens; review activity is implemented.
-- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:296 backend tests pass with25 optional native checks skipped; all25 native checks passed separately. The frontend suite has155 passing tests and a successful production build. Hosted CI has not been run.
+- Legacy file-search tombstone filtering and guarded presigned URL admission are reviewed, including pre-limit SQLite/native PostgreSQL checks, a real deletion/admission race and missing-schema failure. Remaining UI API errors/cancellation/invalidation and component scenarios; retrieval inspector screens; review activity is implemented.
+- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:300 backend tests pass with26 optional native checks skipped; all26 native checks passed separately. The frontend suite has155 passing tests and a successful production build. Hosted CI has not been run.
 
 Every agent change requires parent full-diff review and relevant local tests before acceptance. See implementation-review-log.md for findings and verification limits.
