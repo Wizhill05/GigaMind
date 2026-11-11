@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Memory, MemoryAttachment, ProfileRule, Conversation, SearchResult, Stats } from './types';
+import { Memory, MemoryAttachment, ProfileRule, Conversation, Stats } from './types';
 
 const API_KEY_KEY = 'gigamind_master_key';
 
@@ -213,34 +213,74 @@ export async function searchConversations(query: string, platform?: string, sour
   return conversationSearchSchema.parse(await res.json()).results;
 }
 
+const legacySearchResultSchema = z
+  .object({
+    id: z.string().min(1),
+    source: z.string(),
+    content: z.string(),
+    score: z.number(),
+    category: z.string().optional(),
+    source_agent: z.string().optional(),
+    vector_score: z.number().optional(),
+    rerank_score: z.number().optional(),
+    parent_id: z.string().nullable().optional(),
+    tags: z.array(z.string()).optional(),
+    attachments: z
+      .array(
+        z.object({
+          key: z.string(),
+          filename: z.string(),
+          mime_type: z.string().optional(),
+          size_bytes: z.number().nonnegative().optional(),
+          url: z.string().optional(),
+          created_at: z.string().optional(),
+        }),
+      )
+      .optional(),
+    filename: z.string().optional(),
+    file_key: z.string().optional(),
+    file_id: z.string().optional(),
+    multimodal_type: z.string().optional(),
+    page_number: z.number().nullable().optional(),
+    chunk_index: z.number().int().nullable().optional(),
+    total_chunks: z.number().int().nullable().optional(),
+    chunk_info: z
+      .object({ index: z.number().int(), total: z.number().int() })
+      .optional(),
+    is_visual_anchor: z.boolean().optional(),
+    matching_pages: z.array(z.number()).optional(),
+    citation: z.string().optional(),
+    url: z.string().optional(),
+    retrieval_method: z.string().optional(),
+  })
+  .passthrough();
+export type LegacySearchResult = z.infer<typeof legacySearchResultSchema>;
+
 export async function searchMemory(
   query?: string,
   category?: string,
   sourceAgent?: string,
   limit: number = 5,
-  scope: string = 'all',
-  imageBase64?: string
-): Promise<SearchResult[] | null> {
-  try {
-    const res = await fetch('/api/v1/search_memory', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({
-        query: query || null,
-        image_base64: imageBase64 || null,
-        category,
-        source_agent: sourceAgent,
-        limit,
-        scope
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.results || [];
-  } catch (err) {
-    console.error('searchMemory error:', err);
-    return null;
-  }
+  scope: string = "all",
+  imageBase64?: string,
+  signal?: AbortSignal,
+): Promise<LegacySearchResult[]> {
+  const res = await checkedFetch("/api/v1/search_memory", {
+    method: "POST",
+    headers: getHeaders(),
+    signal,
+    body: JSON.stringify({
+      query: query || null,
+      image_base64: imageBase64 || null,
+      category,
+      source_agent: sourceAgent,
+      limit,
+      scope,
+    }),
+  });
+  return z
+    .object({ results: z.array(legacySearchResultSchema) })
+    .parse(await res.json()).results;
 }
 
 const fileSearchResultSchema = z.object({
@@ -259,32 +299,6 @@ export async function searchFiles(query?: string, limit: number = 5, imageBase64
     body: JSON.stringify({ query: query || null, image_base64: imageBase64 || null, limit }),
   });
   return z.object({ results: z.array(fileSearchResultSchema) }).parse(await res.json()).results;
-}
-
-export async function searchMultimodal(
-  query?: string,
-  imageBase64?: string,
-  scope: string = 'all',
-  limit: number = 5
-): Promise<SearchResult[] | null> {
-  try {
-    const res = await fetch('/api/v1/search_multimodal', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({
-        query: query || null,
-        image_base64: imageBase64 || null,
-        scope,
-        limit
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.results || [];
-  } catch (err) {
-    console.error('searchMultimodal error:', err);
-    return null;
-  }
 }
 
 export async function uploadFile(

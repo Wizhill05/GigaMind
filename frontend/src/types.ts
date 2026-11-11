@@ -77,30 +77,6 @@ export interface StorageChunk {
   created_at: string;
 }
 
-export interface SearchResult {
-  id: string;
-  source: 'memory' | 'profile' | 'file' | string;
-  content: string;
-  category?: string;
-  source_agent?: SourceAgent;
-  score: number;
-  vector_score?: number;
-  rerank_score?: number;
-  tags?: string[];
-  attachments?: MemoryAttachment[];
-  filename?: string;
-  file_key?: string;
-  file_id?: string;
-  multimodal_type?: string;
-  page_number?: number;
-  chunk_index?: number;
-  total_chunks?: number;
-  is_visual_anchor?: boolean;
-  matching_pages?: number[];
-  citation?: string;
-  url?: string;
-}
-
 export interface Stats {
   total_memories: number;
   total_profile_rules: number;

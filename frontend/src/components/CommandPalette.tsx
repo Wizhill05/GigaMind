@@ -1,20 +1,45 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, CornerDownLeft, Copy, Check } from 'lucide-react';
-import { PixelBrain, PixelSparkles } from './ui/PixelIcons';
-import { SearchResult } from '../types';
-import { searchMemory } from '../api';
-import { CategoryBadge, AgentBadge } from './ui/Badge';
-import { useToast } from './ui/Toast';
+import React, { useState, useEffect, useRef } from "react";
+import { X, CornerDownLeft, Copy, Check } from "lucide-react";
+import { PixelBrain, PixelSparkles } from "./ui/PixelIcons";
+import type { LegacySearchResult } from "../api";
+import { useLegacySearch } from "../useLegacySearch";
+import { getApiKey } from "../api";
+import { CategoryBadge, AgentBadge } from "./ui/Badge";
+import { useToast } from "./ui/Toast";
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+export const CommandPalette: React.FC<CommandPaletteProps> = ({
+  isOpen,
+  onClose,
+}) => {
+  const [query, setQuery] = useState("");
+  const {
+    results: found,
+    pending: isSearching,
+    error,
+    run,
+    clear,
+  } = useLegacySearch();
+  const results = found ?? [];
+  const [retry, setRetry] = useState(0);
+  const active = useRef(isOpen);
+  active.current = isOpen;
+  const closing = useRef(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
+  }, []);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isExiting, setIsExiting] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -25,62 +50,58 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   // Listen for Cmd+K / Ctrl+K and ESC key globally
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (isOpen) {
           handleAnimatedClose();
         } else {
-          setQuery('');
-          setResults([]);
+          setQuery("");
+          clear();
           setSelectedIndex(0);
         }
-      } else if (e.key === 'Escape' && isOpen && !isExiting) {
+      } else if (e.key === "Escape" && isOpen && !isExiting) {
         handleAnimatedClose();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isExiting]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isExiting, onClose]);
 
-  // Focus input when opened
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+    closing.current = false;
+    setIsExiting(false);
+    setCopiedId(null);
+    if (!isOpen) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 50);
+    return () => clearTimeout(timer);
   }, [isOpen]);
 
-  // Live vector search debounced on query change
   useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      setIsSearching(false);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setIsSearching(true);
-      const res = await searchMemory(query.trim(), undefined, undefined, 6);
-      if (res) {
-        setResults(res);
-        setSelectedIndex(0);
-      }
-      setIsSearching(false);
+    clear();
+    setSelectedIndex(0);
+    if (!isOpen || isExiting || closing.current || !query.trim()) return;
+    const timer = setTimeout(() => {
+      void run({ query: query.trim(), limit: 6 });
     }, 150);
-
-    return () => clearTimeout(timer);
-  }, [query]);
+    return () => {
+      clearTimeout(timer);
+      clear();
+    };
+  }, [query, isOpen, isExiting, retry, run, clear]);
 
   // Keyboard Arrow Navigation in List
   const handleInputKeyDown = (e: React.KeyboardEvent) => {
     if (results.length === 0) return;
 
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       setSelectedIndex((prev) => (prev + 1) % results.length);
-    } else if (e.key === 'ArrowUp') {
+    } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSelectedIndex((prev) => (prev - 1 + results.length) % results.length);
-    } else if (e.key === 'Enter') {
+    } else if (e.key === "Enter") {
       e.preventDefault();
       const selected = results[selectedIndex];
       if (selected) {
@@ -90,18 +111,40 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   };
 
   const handleAnimatedClose = () => {
+    if (closing.current) return;
+    closing.current = true;
+    clear();
     setIsExiting(true);
-    setTimeout(() => {
-      setIsExiting(false);
+    closeTimer.current = setTimeout(() => {
+      if (!alive.current) return;
       onClose();
     }, 180);
   };
 
-  const handleCopy = (item: SearchResult) => {
-    navigator.clipboard.writeText(item.content);
-    setCopiedId(item.id);
-    toast(`Copied memory to clipboard`, 'success');
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleCopy = async (item: LegacySearchResult) => {
+    const key = getApiKey();
+    try {
+      await navigator.clipboard.writeText(item.content);
+      if (
+        !alive.current ||
+        !active.current ||
+        closing.current ||
+        getApiKey() !== key
+      )
+        return;
+      setCopiedId(item.id);
+      toast("Copied source to clipboard", "success");
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      if (
+        alive.current &&
+        active.current &&
+        !closing.current &&
+        getApiKey() === key
+      )
+        toast("Could not copy source. Copy it manually.", "error");
+    }
   };
 
   if (!isOpen) return null;
@@ -110,13 +153,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     <div
       onClick={handleAnimatedClose}
       className={`fixed inset-0 bg-[#0f0f0f]/85 backdrop-blur-md z-50 flex items-start justify-center pt-20 px-4 font-sans select-none transition-all duration-200 ${
-        isExiting ? 'animate-fade-out' : 'animate-fade-in'
+        isExiting ? "animate-fade-out" : "animate-fade-in"
       }`}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         className={`bg-[#181818] border border-[#262626] max-w-2xl w-full rounded-none shadow-2xl overflow-hidden text-xs ${
-          isExiting ? 'animate-scale-out' : 'animate-scale-in'
+          isExiting ? "animate-scale-out" : "animate-scale-in"
         }`}
       >
         {/* INPUT HEADER WITH 8-BIT PIXEL BRAIN ICON */}
@@ -126,13 +169,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              clear();
+              setQuery(e.target.value);
+            }}
             onKeyDown={handleInputKeyDown}
             placeholder="Type a command or query memory database..."
             className="w-full bg-transparent text-white font-sans text-xs outline-none placeholder-[#8a8f9e]"
           />
           {query && (
-            <button onClick={() => setQuery('')} className="text-[#8a8f9e] hover:text-white">
+            <button
+              onClick={() => {
+                clear();
+                setQuery("");
+              }}
+              className="text-[#8a8f9e] hover:text-white"
+            >
               <X className="w-4 h-4" />
             </button>
           )}
@@ -146,7 +198,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
           {!query.trim() ? (
             <div className="p-8 text-center text-[#8a8f9e] space-y-2">
               <PixelSparkles className="w-6 h-6 text-[#ff6b00] mx-auto opacity-70" />
-              <p>Type anything to run instant semantic vector search across all memories</p>
+              <p>
+                Type anything to run instant semantic vector search across all
+                memories
+              </p>
               <div className="flex justify-center items-center gap-2 text-[11px] font-mono text-[#8a8f9e]">
                 <span>Use ↑ ↓ to navigate</span>
                 <span>•</span>
@@ -155,11 +210,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
             </div>
           ) : isSearching ? (
             <div className="p-8 text-center text-[#8a8f9e]">
-              Searching vector database...
+              Searching legacy sources...
             </div>
+          ) : error ? (
+            <div role="alert">
+              {error}{" "}
+              <button onClick={() => setRetry((v) => v + 1)}>
+                Retry search
+              </button>
+            </div>
+          ) : found === null ? (
+            <p>Waiting to search legacy sources...</p>
           ) : results.length === 0 ? (
             <div className="p-8 text-center text-[#8a8f9e]">
-              No semantic memory records found matching query
+              No source matches found
             </div>
           ) : (
             results.map((res, idx) => {
@@ -171,8 +235,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
                   onMouseEnter={() => setSelectedIndex(idx)}
                   className={`p-3 rounded-none flex items-center justify-between gap-3 cursor-pointer transition-all ${
                     isSelected
-                      ? 'bg-gradient-to-r from-[#ff6b00]/20 to-[#f59e0b]/20 border border-[#ff6b00]/40 text-white'
-                      : 'bg-[#0f0f0f] border border-[#262626] text-[#c1c5d0] hover:border-[#333333]'
+                      ? "bg-gradient-to-r from-[#ff6b00]/20 to-[#f59e0b]/20 border border-[#ff6b00]/40 text-white"
+                      : "bg-[#0f0f0f] border border-[#262626] text-[#c1c5d0] hover:border-[#333333]"
                   }`}
                 >
                   <div className="space-y-1 flex-1 min-w-0">
@@ -180,12 +244,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
                       <CategoryBadge category={res.category} />
                       <AgentBadge agent={res.source_agent} />
                     </div>
-                    <p className="text-white text-xs leading-relaxed break-words break-all">{res.content}</p>
+                    <p className="text-white text-xs leading-relaxed break-words break-all">
+                      {res.content}
+                    </p>
+                    {res.citation && (
+                      <p className="text-[#8a8f9e]">{res.citation}</p>
+                    )}
+                    {res.retrieval_method && (
+                      <p className="text-[#8a8f9e]">
+                        Retrieval: {res.retrieval_method}
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span className="text-[#ff6b00] font-semibold text-[11px]">
-                      {(res.score * 100).toFixed(0)}% match
+                      Raw score: {res.score.toFixed(4)}
                     </span>
                     <button
                       onClick={(e) => {
@@ -195,7 +269,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
                       className="p-1.5 bg-[#161616] border border-[#333333] hover:border-[#ff6b00] text-[#8a8f9e] hover:text-white rounded-none transition-colors"
                       title="Copy memory"
                     >
-                      {copiedId === res.id ? <Check className="w-3.5 h-3.5 text-amber-400" /> : <CornerDownLeft className="w-3.5 h-3.5 text-[#ff6b00]" />}
+                      {copiedId === res.id ? (
+                        <Check className="w-3.5 h-3.5 text-amber-400" />
+                      ) : (
+                        <CornerDownLeft className="w-3.5 h-3.5 text-[#ff6b00]" />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -206,7 +284,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
 
         {/* FOOTER */}
         <div className="px-4 py-2 border-t border-[#262626] bg-[#0f0f0f] flex justify-between items-center text-[11px] text-[#8a8f9e]">
-          <span>GigaMind Spotlight Quick Search</span>
+          <span>GigaMind legacy source search</span>
           <div className="flex items-center gap-3">
             <span>↑↓ Navigate</span>
             <span>↵ Select/Copy</span>
