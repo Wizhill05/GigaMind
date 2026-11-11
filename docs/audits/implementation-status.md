@@ -5,6 +5,7 @@ The original audit is the full scope. This file records completion gaps, not a r
 Reviewed and integrated foundations:
 - Memory deletion/reset commits, logical-parent listing/statistics and category/source predicates.
 - Credential hashing/revocation and REST admin isolation. External RS256 OAuth resource authorization with persistent local bindings, scope intersection, discovery and signed-token SDK checks; external issuer configuration is documented. Local token issuance stays disabled.
+- Reviewed README/setup/agent guidance and an opt-in SDK smoke command describe actual scopes, projects, proposals, handoffs, validity, data flows and Tailscale reachability. Loopback SDK checks cover positive/empty retrieval, project denial and revocation without printing source content or tokens. Host-specific interoperability remains unfinished.
 - Working authenticated stateless MCP SDK /mcp transport with real-client checks, scoped accepted-memory search/context, exact retrieval and evidence-backed proposal tools. Legacy profile tool remains admin-only.
 - Proposal/evidence/revision core, explicit conflict supersession, SQL project isolation, DB uniqueness, concurrency tests, mountable and mounted review API.
 - Versioned SQLite/PostgreSQL migration runner and readiness, verified with native isolated PostgreSQL/pgvector tests and local production-mode startup.

@@ -500,18 +500,62 @@ def test_authenticated_delete(server):
 
 
 def test_smoke_example(server):
-    created = httpx.post(
-        server + '/api/v1/admin/clients',
-        headers={'Authorization': 'Bearer test-master-key'},
-        trust_env=False,
-        json={'name': 'smoke', 'scopes': ['memory:read'], 'project_ids': ['p']},
-    ).json()
-    env = {'PATH': os.environ['PATH'], 'GIGAMIND_CLIENT_TOKEN': created['token']}
-    result = subprocess.run(
-        [sys.executable, 'examples/mcp_smoke.py', '--url', server + '/mcp',
-         '--project', 'p', '--query', 'absent'],
-        env=env, capture_output=True, text=True, timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-    assert 'Accepted matches: 0' in result.stdout
-    assert created['token'] not in result.stdout + result.stderr
+    admin = {"Authorization": "Bearer test-master-key"}
+    with httpx.Client(base_url=server, headers=admin, trust_env=False) as client:
+        created = client.post(
+            "/api/v1/admin/clients",
+            json={"name": "smoke", "scopes": ["memory:read"], "project_ids": ["p"]},
+        ).json()
+        secret_content = "cobalt bicycle source content kept private"
+        proposal = client.post(
+            "/api/v1/review/proposals",
+            json={
+                "content": secret_content,
+                "project_id": "p",
+                "evidence": [],
+                "idempotency_key": "smoke-fixture",
+            },
+        )
+        assert proposal.status_code == 200, proposal.text
+        approved = client.post(
+            "/api/v1/review/proposals/"
+            + proposal.json()["proposal"]["id"]
+            + "/resolve",
+            json={"action": "approve", "expected_revision": 1},
+        )
+        assert approved.status_code == 200, approved.text
+
+        def smoke(project, query, token=created["token"]):
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "examples/mcp_smoke.py",
+                    "--url",
+                    server + "/mcp",
+                    "--project",
+                    project,
+                    "--query",
+                    query,
+                ],
+                env={"PATH": os.environ["PATH"], "GIGAMIND_CLIENT_TOKEN": token},
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert token not in result.stdout + result.stderr
+            assert secret_content not in result.stdout + result.stderr
+            return result
+
+        found = smoke("p", "bicycle")
+        assert found.returncode == 0, found.stderr
+        assert "Accepted matches: 1" in found.stdout
+        assert "is_admin': False" in found.stdout
+        empty = smoke("p", "absent")
+        assert empty.returncode == 0, empty.stderr
+        assert "Accepted matches: 0" in empty.stdout
+        assert smoke("other", "bicycle").returncode != 0
+        revoked = client.post(
+            "/api/v1/admin/clients/" + created["client"]["id"] + "/revoke"
+        )
+        assert revoked.status_code == 200
+        assert smoke("p", "bicycle").returncode != 0

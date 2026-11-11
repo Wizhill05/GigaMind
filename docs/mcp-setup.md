@@ -6,18 +6,21 @@ An administrator can create a client using `POST /api/v1/admin/clients` with a B
 
 Install `requirements.txt` and `httpx` in a virtual environment. The following is an explicit live, read-only check against an endpoint you control. Set the token through your secret manager or a private environment; replace the placeholders without recording the credential in shell history or logs. The script prints identity metadata and a count, not retrieved content.
 
-```sh
-export GIGAMIND_CLIENT_TOKEN='<scoped-client-token>'
+```bash
+read -r -s -p 'Scoped client token: ' GIGAMIND_CLIENT_TOKEN
+printf '\n'
+export GIGAMIND_CLIENT_TOKEN
 python examples/mcp_smoke.py --url 'http://<tailscale-host>:8000/mcp' --project 'example-project' --query 'example terms'
+unset GIGAMIND_CLIENT_TOKEN
 ```
 
-The client must have network access to the endpoint. Tailscale addresses are private and are not automatically reachable by cloud AI services. Use verified host-specific documentation for configuring other clients; this example does not assert support for a particular host. Offline pytest blocks external sockets and does not run this live check.
+The client must have network access to the endpoint. Tailscale addresses are private and are not automatically reachable by cloud AI services. Use verified host-specific documentation for configuring other clients; this example does not assert support for a particular host. Offline pytest blocks external sockets. Its smoke-example test starts a disposable loopback server and never contacts the endpoint from your environment.
 
 ## Tools
 
 - `get_identity` returns actor ID, effective scopes, projects and administrator status.
-- `search_memory` takes `query`, `project_id`, and optional `limit`; `get_context` takes those query and project fields plus optional `token_budget`. They retrieve accepted, currently valid knowledge lexically, with context citations and a latest handoff if it fits. An empty result is a no-match, not evidence of absence. `get_memory` takes `memory_id` for an exact authorized record.
-- `propose_memory` takes content, project, evidence and an idempotency key, with optional category, tags, kind and subject. Each evidence item has `source_type`, `source_id`, `quote` and optional `source_role`; the role describes the source's relationship to the claim, not authority to approve it. Non-admin proposals require evidence. They await administrator review.
+- `search_memory` takes `query`, `project_id`, and optional `limit`; `get_context` takes `query`, `project_id`, and optional `token_budget`. They retrieve accepted, currently valid knowledge lexically, with context citations and a latest handoff if it fits. An empty result is a no-match, not evidence of absence. `get_memory` takes `memory_id` for an exact authorized record.
+- `propose_memory` takes content, project, evidence and an idempotency key, with optional category, tags, kind and subject. Each evidence item has `source_type`, `source_id`, `quote` and optional `source_role`; use the original message role when known, such as `user` or `assistant`. This metadata grants no authority to approve the claim. Non-admin proposals require evidence. They await administrator review.
 - `save_handoff` takes `task_name`, `summary`, `status`, `project_id`, `verified_outcomes`, `unresolved`, `next_actions`, and `idempotency_key`. It saves an authenticated agent report. `report_memory_issue` takes `memory_id`, `reason`, `project_id` and `idempotency_key`; it does not alter approved knowledge. See [coordination](coordination.md).
 - `get_user_profile` and `get_server_status` are administrator-only. Legacy profile rules and raw sources are separate from accepted knowledge.
 
