@@ -11,6 +11,7 @@ import { ConversationsTab } from './components/tabs/ConversationsTab';
 import { VectorSearchLabTab } from './components/tabs/VectorSearchLabTab';
 import { ActivityTab } from './components/tabs/ActivityTab';
 import { ReviewTab } from './components/tabs/ReviewTab';
+import { ClientsTab } from './components/tabs/ClientsTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
 import { MemoryModal } from './components/modals/MemoryModal';
 import { RuleModal } from './components/modals/RuleModal';
@@ -212,6 +213,8 @@ export const AppContent: React.FC = () => {
             )}
 
             {activeTab === 'vector-lab' && <VectorSearchLabTab />}
+
+            {activeTab === 'clients' && <ClientsTab refreshVersion={refreshVersion} />}
 
             {activeTab === 'settings' && <SettingsTab />}
           </div>

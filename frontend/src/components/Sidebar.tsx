@@ -39,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
     { id: 'rules', label: 'Profile Rules', icon: PixelShield, group: 'KNOWLEDGE BASE', badge: counts.rules },
     { id: 'transcripts', label: 'Chat Transcripts', icon: PixelTerminal, group: 'MONITOR & LAB', badge: counts.transcripts },
     { id: 'vector-lab', label: 'Vector Search Lab', icon: PixelSparkles, group: 'MONITOR & LAB' },
+    { id: 'clients', label: 'Clients', icon: PixelShield, group: 'SETTINGS & SPECS' },
     { id: 'settings', label: 'Settings & MCP Specs', icon: PixelSettings, group: 'SETTINGS & SPECS' },
   ];
 
