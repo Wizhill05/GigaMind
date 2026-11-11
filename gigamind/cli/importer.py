@@ -1,116 +1,40 @@
-import os
-import sys
-import json
+"""Import exported conversations as unindexed sources."""
 import argparse
+import sys
+from pathlib import Path
+
 from gigamind.db.database import init_db
-from gigamind.services.memory import add_conversation_log, add_memory
+from gigamind.services.conversation_import import MAX_BYTES
+from gigamind.services.memory import import_conversations_data
 
-def extract_chatgpt_messages(mapping: dict) -> list:
-    messages = []
-    if not mapping:
-        return messages
-
-    for node in mapping.values():
-        msg = node.get("message")
-        if msg and msg.get("author") and msg.get("content") and msg["content"].get("parts"):
-            role = "user" if msg["author"]["role"] == "user" else "assistant"
-            parts = [p for p in msg["content"]["parts"] if isinstance(p, str) and p.strip()]
-            if parts:
-                messages.append({
-                    "role": role,
-                    "content": "\n".join(parts)
-                })
-
-    return messages
-
-def import_chatgpt(file_path: str):
-    print(f"📥 Importing ChatGPT conversations from: {file_path}...")
-    with open(file_path, "r", encoding="utf-8") as f:
-        conversations = json.load(f)
-
-    count = 0
-    facts_extracted = 0
-
-    for conv in conversations:
-        title = conv.get("title") or "Untitled ChatGPT Conversation"
-        messages = extract_chatgpt_messages(conv.get("mapping", {}))
-        if not messages:
-            continue
-
-        first_user = next((m["content"][:200] for m in messages if m["role"] == "user"), "")
-        summary = f"Topic: {title}. User prompt preview: {first_user}"
-
-        add_conversation_log("chatgpt", title, summary, messages, source_agent="gpt")
-        count += 1
-
-        for m in messages:
-            if m["role"] == "user" and any(k in m["content"].lower() for k in ["prefer", "project", "my name", "rule"]):
-                add_memory(m["content"], category="chatgpt_import", source_agent="gpt", tags=["chatgpt", "history"])
-                facts_extracted += 1
-
-    print(f"✅ Ingested {count} ChatGPT chats ({facts_extracted} key memory facts extracted).")
-
-def import_claude(file_path: str):
-    print(f"📥 Importing Claude conversations from: {file_path}...")
-    with open(file_path, "r", encoding="utf-8") as f:
-        conversations = json.load(f)
-
-    count = 0
-    facts_extracted = 0
-
-    for conv in conversations:
-        title = conv.get("name") or conv.get("summary") or "Untitled Claude Conversation"
-        chat_messages = conv.get("chat_messages", [])
-
-        messages = []
-        for m in chat_messages:
-            sender = "user" if m.get("sender") == "human" else "assistant"
-            text = m.get("text") or ""
-            if isinstance(m.get("content"), list):
-                text = "\n".join(c.get("text", "") for c in m["content"] if isinstance(c, dict))
-            if text.strip():
-                messages.append({"role": sender, "content": text})
-
-        if not messages:
-            continue
-
-        first_user = next((m["content"][:200] for m in messages if m["role"] == "user"), "")
-        summary = f"Topic: {title}. User prompt preview: {first_user}"
-
-        add_conversation_log("claude", title, summary, messages, source_agent="claude")
-        count += 1
-
-        for m in messages:
-            if m["role"] == "user" and any(k in m["content"].lower() for k in ["prefer", "project", "my name", "rule"]):
-                add_memory(m["content"], category="claude_import", source_agent="claude", tags=["claude", "history"])
-                facts_extracted += 1
-
-    print(f"✅ Ingested {count} Claude chats ({facts_extracted} key memory facts extracted).")
 
 def main():
-    parser = argparse.ArgumentParser(description="GigaMind Bulk Chat History Importer")
-    parser.add_argument("--chatgpt", help="Path to ChatGPT conversations.json")
-    parser.add_argument("--claude", help="Path to Claude conversations.json")
-
+    parser = argparse.ArgumentParser(description="Import conversation exports")
+    parser.add_argument('--chatgpt')
+    parser.add_argument('--claude')
     args = parser.parse_args()
-
     if not args.chatgpt and not args.claude:
-        parser.print_help()
-        sys.exit(0)
+        parser.error('provide --chatgpt or --claude')
+    try:
+        # Validate all inputs before initializing or writing the database.
+        from gigamind.services.conversation_import import normalize_conversations
+        inputs = []
+        for platform in ('chatgpt', 'claude'):
+            path = getattr(args, platform)
+            if path:
+                with Path(path).open('rb') as file:
+                    data = file.read(MAX_BYTES + 1)
+                normalize_conversations(data, platform)
+                inputs.append((platform, data))
+        init_db()
+        for platform, data in inputs:
+            result = import_conversations_data(data, platform)
+            print(f"{platform}: {result['message']}")
+    except (OSError, ValueError) as exc:
+        print(f'Import failed: {str(exc)[:300]}', file=sys.stderr)
+        return 1
+    return 0
 
-    init_db()
 
-    if args.chatgpt:
-        if os.path.exists(args.chatgpt):
-            import_chatgpt(args.chatgpt)
-        else:
-            print(f"❌ File not found: {args.chatgpt}")
-
-    if args.claude:
-        if os.path.exists(args.claude):
-            import_claude(args.claude)
-        else:
-            print(f"❌ File not found: {args.claude}")
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    sys.exit(main())
