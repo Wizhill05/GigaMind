@@ -77,10 +77,11 @@ def cancel_active(session, key, now):
 
 
 class JobLease:
-    def __init__(self, job_id, token, clock=utcnow):
+    def __init__(self, job_id, token, clock=utcnow, engine=None):
         self.job_id = job_id
         self.token = token
         self.clock = clock
+        self.engine = engine
 
     def publication_guard(self, session):
         key = session.execute(
@@ -131,7 +132,13 @@ def index_file(payload, lease):
     return result
 
 
-HANDLERS = {"index_file": index_file}
+def delete_file(payload, lease):
+    from gigamind.services.file_lifecycle import cleanup_file
+
+    return cleanup_file(payload["key"], lease)
+
+
+HANDLERS = {"index_file": index_file, "delete_file": delete_file}
 
 
 def validate_resource_key(key):
@@ -142,7 +149,7 @@ def validate_resource_key(key):
 def enqueue(
     kind, payload, idempotency_key=None, max_attempts=3, *, engine=None, clock=utcnow
 ):
-    if not isinstance(kind, str) or kind not in HANDLERS:
+    if kind != "index_file":
         raise ValueError("Unknown job kind")
     if kind == "index_file" and (
         not isinstance(payload, dict) or set(payload) != {"key"}
@@ -370,7 +377,7 @@ def run_once(*, engine=None, clock=utcnow, lease_seconds=60):
     thread.start()
     try:
         result = HANDLERS[job.kind](
-            json.loads(job.payload_json), JobLease(job.id, job.lease_token, clock)
+            json.loads(job.payload_json), JobLease(job.id, job.lease_token, clock, engine)
         )
         values = {
             "state": "completed",

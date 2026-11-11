@@ -8,6 +8,7 @@ from sqlalchemy import func, update, delete
 from gigamind.db.database import engine, is_postgres, ProfileItem, MemoryItem, ConversationItem, TaskSessionItem, StorageFileItem, StorageChunkItem
 from gigamind.services.embedding import generate_embedding, cosine_similarity
 from gigamind.services import embedding as embedding_config
+from gigamind.db.jobs import ResourceJobState  # Register job models before metadata initialization.
 from gigamind.db.memory_index import MemoryIndexState
 from fastapi import HTTPException
 from gigamind.services.chunking import chunk_text
@@ -520,9 +521,16 @@ def _index_memory(memory_id, revision, content):
 
 
 def _register_attachment_metadata(session, attachments, source_agent, timestamp):
+    from gigamind.services.jobs import lock_resource, stamp, utcnow
+    from gigamind.services.file_lifecycle import owned_key
+
+    keys = sorted({a.get("key") for a in attachments if isinstance(a, dict) and owned_key(a.get("key"))})
+    for key in keys:
+        if lock_resource(session, key, stamp(utcnow())).deleted:
+            raise HTTPException(409, "Resource has been forgotten")
     for attachment in attachments:
         key = attachment.get("key")
-        if not isinstance(key, str) or not key:
+        if not owned_key(key):
             continue
         session.exec(
             text("""INSERT INTO storage_files
