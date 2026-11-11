@@ -56,7 +56,9 @@ test("creates a scoped client and keeps the one-time token through a failed refr
     scopes: ["memory:read", "memory:propose"],
   });
   expect(localStorage.getItem("gigamind_master_key")).toBe("master");
-  expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain("secret-token");
+  expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain(
+    "secret-token",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Dismiss token" }));
   expect(screen.queryByText("secret-token")).not.toBeInTheDocument();
 });
@@ -115,7 +117,10 @@ test("ignores an older list response after refresh", async () => {
   const view = render(<ClientsTab refreshVersion={0} />);
   view.rerender(<ClientsTab refreshVersion={1} />);
   expect(await screen.findByText("Agent")).toBeInTheDocument();
-  await act(async () => { resolveOld(json({ clients: [] })); await old; });
+  await act(async () => {
+    resolveOld(json({ clients: [] }));
+    await old;
+  });
   await waitFor(() =>
     expect(
       screen.queryByText("No clients on this page."),
@@ -125,18 +130,38 @@ test("ignores an older list response after refresh", async () => {
 
 test("rejects duplicate and token-present submissions and offers manual copy", async () => {
   let resolveCreate: (response: Response) => void = () => {};
-  const pending = new Promise<Response>((resolve) => { resolveCreate = resolve; });
-  const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ clients: [] })).mockReturnValueOnce(pending).mockResolvedValue(json({ clients: [] }));
-  Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+  const pending = new Promise<Response>((resolve) => {
+    resolveCreate = resolve;
+  });
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(json({ clients: [] }))
+    .mockReturnValueOnce(pending)
+    .mockResolvedValue(json({ clients: [] }));
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: undefined,
+  });
   render(<ClientsTab refreshVersion={0} />);
   await screen.findByText("No clients on this page.");
-  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Agent" } });
-  fireEvent.change(screen.getByLabelText("Project IDs (comma separated)"), { target: { value: "p" } });
-  const form = screen.getByRole("button", { name: "Create client" }).closest("form")!;
-  fireEvent.submit(form); fireEvent.submit(form);
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Agent" },
+  });
+  fireEvent.change(screen.getByLabelText("Project IDs (comma separated)"), {
+    target: { value: "p" },
+  });
+  const form = screen
+    .getByRole("button", { name: "Create client" })
+    .closest("form");
+  if (!form) throw new Error("Create client form is missing");
+  fireEvent.submit(form);
+  fireEvent.submit(form);
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(screen.getByLabelText("Name")).toBeDisabled();
-  await act(async () => { resolveCreate(json({ client, token: "secret-token" })); await pending; });
+  await act(async () => {
+    resolveCreate(json({ client, token: "secret-token" }));
+    await pending;
+  });
   await screen.findByText("secret-token");
   fireEvent.submit(form);
   expect(fetcher).toHaveBeenCalledTimes(3);
@@ -145,7 +170,13 @@ test("rejects duplicate and token-present submissions and offers manual copy", a
 });
 
 test("reload after conflict clears stale confirmation and permits the new revision", async () => {
-  const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ clients: [client] })).mockResolvedValueOnce(json({ detail: "stale" }, 409)).mockResolvedValueOnce(json({ clients: [{ ...client, revision: 3 }] })).mockResolvedValueOnce(json({ client, token: "new-token" })).mockResolvedValue(json({ clients: [] }));
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(json({ clients: [client] }))
+    .mockResolvedValueOnce(json({ detail: "stale" }, 409))
+    .mockResolvedValueOnce(json({ clients: [{ ...client, revision: 3 }] }))
+    .mockResolvedValueOnce(json({ client, token: "new-token" }))
+    .mockResolvedValue(json({ clients: [] }));
   render(<ClientsTab refreshVersion={0} />);
   fireEvent.click(await screen.findByRole("button", { name: "Rotate Agent" }));
   fireEvent.click(screen.getByRole("button", { name: "Confirm rotate" }));
@@ -154,15 +185,26 @@ test("reload after conflict clears stale confirmation and permits the new revisi
   fireEvent.click(await screen.findByRole("button", { name: "Rotate Agent" }));
   fireEvent.click(screen.getByRole("button", { name: "Confirm rotate" }));
   await screen.findByText("new-token");
-  expect(JSON.parse(String(fetcher.mock.calls[3][1]?.body))).toEqual({ expected_revision: 3 });
+  expect(JSON.parse(String(fetcher.mock.calls[3][1]?.body))).toEqual({
+    expected_revision: 3,
+  });
 });
 
 test("failed create and revoke preserve draft and confirmation for retry", async () => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ clients: [client] })).mockResolvedValueOnce(json({ detail: "create failed" }, 503)).mockResolvedValueOnce(json({ detail: "revoke failed" }, 503)).mockResolvedValueOnce(json({ client: { ...client, revoked: true } })).mockResolvedValue(json({ clients: [] }));
+  vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(json({ clients: [client] }))
+    .mockResolvedValueOnce(json({ detail: "create failed" }, 503))
+    .mockResolvedValueOnce(json({ detail: "revoke failed" }, 503))
+    .mockResolvedValueOnce(json({ client: { ...client, revoked: true } }))
+    .mockResolvedValue(json({ clients: [] }));
   render(<ClientsTab refreshVersion={0} />);
   await screen.findByText("Agent");
-  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft" } });
-  fireEvent.change(screen.getByLabelText("Project IDs (comma separated)"), { target: { value: "p" } });
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Draft" },
+  });
+  fireEvent.change(screen.getByLabelText("Project IDs (comma separated)"), {
+    target: { value: "p" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Create client" }));
   await screen.findByText(/create failed/);
   expect(screen.getByLabelText("Name")).toHaveValue("Draft");
@@ -176,15 +218,36 @@ test("failed create and revoke preserve draft and confirmation for retry", async
 
 test("App gates clients until authenticated and header refresh reloads them", async () => {
   const { App } = await import("../App");
-  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => String(url).startsWith("/api/v1/admin/clients") ? json({ clients: [client] }) : json({ total_memories: 0, total_storage_files: 0, total_profile_rules: 0, total_chat_logs: 0 }));
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (url) =>
+      String(url).startsWith("/api/v1/admin/clients")
+        ? json({ clients: [client] })
+        : json({
+            total_memories: 0,
+            total_storage_files: 0,
+            total_profile_rules: 0,
+            total_chat_logs: 0,
+          }),
+    );
   render(<App />);
   expect(fetcher).not.toHaveBeenCalled();
-  expect(screen.queryByRole("button", { name: "Clients" })).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Master API Key"), { target: { value: "master" } });
+  expect(
+    screen.queryByRole("button", { name: "Clients" }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Master API Key"), {
+    target: { value: "master" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Authorize Connection" }));
   const sidebar = within(await screen.findByRole("complementary"));
   fireEvent.click(sidebar.getByRole("button", { name: "Clients" }));
   await screen.findByText("Agent");
   fireEvent.click(screen.getByTitle("Refresh telemetry"));
-  await waitFor(() => expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/v1/admin/clients"))).toHaveLength(2));
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.filter(([url]) =>
+        String(url).startsWith("/api/v1/admin/clients"),
+      ),
+    ).toHaveLength(2),
+  );
 }, 15000);

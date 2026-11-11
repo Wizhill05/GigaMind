@@ -23,15 +23,15 @@ Additional reviewed integration:
 - MIME-safe text/image embedding requests, all-page PDF anchors, stored-metadata reindex and strict provider-vector validation. Offline payload and native publication checks pass; live-provider OCR/token/relevance acceptance remains unfinished.
 
 In flight:
-- Durable upload registration, decoded-file validation, file job progress, credential console and remaining memory-engine features. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
+- Durable upload registration, decoded-file validation, file job progress and remaining memory-engine features. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.
 - Handoffs, issue reporting, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD.
-- External-provider interoperability acceptance and decoded-file upload bounds. Global encoded-body limits including MCP are implemented. Credential expiry/last-use/rotation are implemented; operator UI remains required. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
+- External-provider interoperability acceptance and decoded-file upload bounds. Global encoded-body limits including MCP are implemented. Credential expiry/last-use/rotation are implemented; credential console is implemented. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Automatic upload/import indexing jobs and UI progress/retries; live-provider multimodal/token acceptance and truthful source state. Durable file reindex/deletion and reference-safe shared-attachment GC are implemented.
-- Remaining UI API errors/cancellation/invalidation and component scenarios; credentials/handoff/retrieval inspector screens; review activity is implemented.
+- Remaining UI API errors/cancellation/invalidation and component scenarios; handoff/retrieval inspector screens; review activity is implemented.
 - Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, reproducible CI/deployment/docs and real multi-client acceptance/recovery checks.
 
 Every agent change requires parent full-diff review and relevant local tests before acceptance. See implementation-review-log.md for findings and verification limits.

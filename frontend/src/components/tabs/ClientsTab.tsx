@@ -144,13 +144,21 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
                   await navigator.clipboard.writeText(token);
                   setCopyStatus("Token copied.");
                 } catch {
-                  setCopyStatus("Unable to copy token. Select it and copy manually.");
+                  setCopyStatus(
+                    "Unable to copy token. Select it and copy manually.",
+                  );
                 }
               }}
             >
               Copy token
             </button>
-            <button className={button} onClick={() => { setToken(null); setCopyStatus(""); }}>
+            <button
+              className={button}
+              onClick={() => {
+                setToken(null);
+                setCopyStatus("");
+              }}
+            >
               Dismiss token
             </button>
           </div>
@@ -160,71 +168,84 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
       {error && (
         <div role="alert" className="text-red-400">
           {error}{" "}
-          <button className="underline" disabled={busy} onClick={() => { setConfirmation(null); refresh(); }}>
+          <button
+            className="underline"
+            disabled={busy}
+            onClick={() => {
+              setConfirmation(null);
+              refresh();
+            }}
+          >
             Reload clients
           </button>
         </div>
       )}
       <form onSubmit={create} className="border border-[#333] p-4 space-y-4">
-        <fieldset disabled={busy || confirmation !== null} className="space-y-4">
-        <h2 className="font-semibold">Create client</h2>
-        <label className="block text-sm">
-          Name
-          <input
-            className={input}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={200}
-            required
-          />
-        </label>
-        <label className="block text-sm">
-          Project IDs (comma separated)
-          <input
-            className={input}
-            value={projects}
-            onChange={(e) => setProjects(e.target.value)}
-            required
-          />
-        </label>
-        <fieldset>
-          <legend className="text-sm">Scopes</legend>
-          <div className="flex flex-wrap gap-4 mt-2">
-            {scopes.map((scope) => (
-              <label key={scope} className="text-sm">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(scope)}
-                  onChange={(e) =>
-                    setSelected(
-                      e.target.checked
-                        ? [...selected, scope]
-                        : selected.filter((s) => s !== scope),
-                    )
-                  }
-                />{" "}
-                {scope}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <label className="block text-sm">
-          Expiry (optional)
-          <input
-            className={input}
-            type="datetime-local"
-            value={expiry}
-            onChange={(e) => setExpiry(e.target.value)}
-          />
-        </label>
-        <button className={button} disabled={busy || token !== null || confirmation !== null}>
-          Create client
-        </button>
-        {token && (
-          <p className="text-sm text-[#aaa]">
-            Dismiss the current token before issuing another.
-          </p>
-        )}
+        <fieldset
+          disabled={busy || confirmation !== null}
+          className="space-y-4"
+        >
+          <h2 className="font-semibold">Create client</h2>
+          <label className="block text-sm">
+            Name
+            <input
+              className={input}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={200}
+              required
+            />
+          </label>
+          <label className="block text-sm">
+            Project IDs (comma separated)
+            <input
+              className={input}
+              value={projects}
+              onChange={(e) => setProjects(e.target.value)}
+              required
+            />
+          </label>
+          <fieldset>
+            <legend className="text-sm">Scopes</legend>
+            <div className="flex flex-wrap gap-4 mt-2">
+              {scopes.map((scope) => (
+                <label key={scope} className="text-sm">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(scope)}
+                    onChange={(e) =>
+                      setSelected(
+                        e.target.checked
+                          ? [...selected, scope]
+                          : selected.filter((s) => s !== scope),
+                      )
+                    }
+                  />{" "}
+                  {scope}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <label className="block text-sm">
+            Expiry (optional)
+            <input
+              className={input}
+              type="datetime-local"
+              value={expiry}
+              onChange={(e) => setExpiry(e.target.value)}
+            />
+          </label>
+          <button
+            className={button}
+            disabled={busy || token !== null || confirmation !== null}
+          >
+            Create client
+          </button>
+          {token && (
+            <p className="text-sm text-[#aaa]">
+              Dismiss the current token before issuing another.
+            </p>
+          )}
         </fieldset>
       </form>
       {confirmation && (
@@ -242,9 +263,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
           <div className="flex gap-2">
             <button
               className={button}
-              disabled={
-                busy || token !== null
-              }
+              disabled={busy || token !== null}
               onClick={() => void confirmAction()}
             >
               Confirm {confirmation.action}
@@ -295,7 +314,12 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
                 <div className="flex gap-2">
                   <button
                     className={button}
-                    disabled={busy || client.revoked || token !== null || confirmation !== null}
+                    disabled={
+                      busy ||
+                      client.revoked ||
+                      token !== null ||
+                      confirmation !== null
+                    }
                     onClick={() =>
                       setConfirmation({ action: "rotate", client })
                     }
@@ -304,7 +328,12 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
                   </button>
                   <button
                     className={button}
-                    disabled={busy || client.revoked || confirmation !== null}
+                    disabled={
+                      busy ||
+                      client.revoked ||
+                      confirmation !== null ||
+                      token !== null
+                    }
                     onClick={() =>
                       setConfirmation({ action: "revoke", client })
                     }
@@ -326,7 +355,9 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
             <span>Page {page + 1}</span>
             <button
               className={button}
-              disabled={busy || confirmation !== null || list.clients.length < 20}
+              disabled={
+                busy || confirmation !== null || list.clients.length < 20
+              }
               onClick={() => setPage((p) => p + 1)}
             >
               Next
