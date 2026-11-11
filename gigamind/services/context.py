@@ -19,6 +19,12 @@ def _knowledge_query(actor, project_id):
 
 
 def search_accepted(actor, query, project_id=None, limit=5):
+    return _search_accepted(
+        actor, query, project_id, limit, knowledge_validity.current_time()
+    )
+
+
+def _search_accepted(actor, query, project_id, limit, as_of):
     trust.scope(actor, "memory:read")
     if not actor.is_admin and project_id is None:
         trust.fail(403, "Project required")
@@ -76,7 +82,7 @@ def search_accepted(actor, query, project_id=None, limit=5):
             _knowledge_query(actor, project_id)
             .where(
                 AcceptedKnowledge.status == "accepted",
-                knowledge_validity.active_clause(),
+                knowledge_validity.active_clause(as_of),
                 or_(*clauses),
             )
             .order_by(
@@ -105,7 +111,8 @@ def get_context(actor, query, project_id=None, token_budget=4096):
     # UTF-8 JSON byte count is a conservative upper bound for byte-based tokenizers.
     if not isinstance(token_budget, int) or not 64 <= token_budget <= 100000:
         raise HTTPException(422, "token_budget must be between 64 and 100000")
-    rows = search_accepted(actor, query, project_id, 100)
+    as_of = knowledge_validity.current_time()
+    rows = _search_accepted(actor, query, project_id, 100, as_of)
     preference_filter = (
         "CAST(data_json AS JSONB)->>'kind' = 'preference'"
         if trust.engine.dialect.name == "postgresql"
@@ -116,7 +123,7 @@ def get_context(actor, query, project_id=None, token_budget=4096):
             _knowledge_query(actor, project_id)
             .where(
                 AcceptedKnowledge.status == "accepted",
-                knowledge_validity.active_clause(),
+                knowledge_validity.active_clause(as_of),
                 text(preference_filter),
             )
             .order_by(AcceptedKnowledge.updated_at.desc(), AcceptedKnowledge.id)

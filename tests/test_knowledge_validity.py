@@ -231,3 +231,105 @@ def test_inactive_preference_excluded_before_limit(records, monkeypatch):
     )
     result = context.get_context(agent, "apple", "a", 4096)
     assert not result["rules"] and not result["memories"]
+
+
+@pytest.mark.parametrize("failure", ["snapshot", "event"])
+def test_validity_write_rolls_back_on_persistence_failure(
+    records, monkeypatch, failure
+):
+    admin, _, memory = records
+    before = trust.get_memory(admin, memory["id"])["memory"]
+    history = trust.get_history(admin, memory["id"])
+    activity = trust.list_activity(admin)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected persistence failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(trust, failure, fail)
+        with pytest.raises(RuntimeError, match="injected"):
+            validity.set_validity(
+                admin,
+                memory["id"],
+                expected_revision=1,
+                valid_from=None,
+                valid_until="2020-01-01T00:00:00Z",
+            )
+    assert trust.get_memory(admin, memory["id"])["memory"] == before
+    assert trust.get_history(admin, memory["id"]) == history
+    assert trust.list_activity(admin) == activity
+
+
+def test_context_uses_one_instant(records, monkeypatch):
+    admin, agent, memory = records
+    proposal = trust.create_proposal(
+        agent,
+        content="apple rule",
+        project_id="a",
+        kind="preference",
+        evidence=[{"source_type": "doc", "source_id": "1", "quote": "x"}],
+        idempotency_key="clock-rule",
+    )["proposal"]
+    rule = trust.resolve_proposal(
+        admin, proposal["id"], action="approve", expected_revision=1
+    )["memory"]
+    for item in (memory, rule):
+        validity.set_validity(
+            admin,
+            item["id"],
+            expected_revision=1,
+            valid_from=None,
+            valid_until="2025-01-02T00:00:00Z",
+        )
+    times = iter(
+        ["2025-01-01T00:00:00.000000+00:00", "2025-01-02T00:00:00.000000+00:00"]
+    )
+    monkeypatch.setattr(validity, "current_time", lambda: next(times))
+    result = context.get_context(agent, "apple", "a")
+    assert [x["id"] for x in result["rules"]] == [rule["id"]]
+    assert [x["id"] for x in result["memories"]] == [memory["id"]]
+
+
+def test_restore_legacy_missing_bounds_and_explicit_null(records):
+    import json
+    from sqlmodel import Session, select
+    from gigamind.db.trust_models import KnowledgeRevision
+
+    admin, _, memory = records
+    mid = memory["id"]
+    validity.set_validity(
+        admin,
+        mid,
+        expected_revision=1,
+        valid_from=None,
+        valid_until="2020-01-01T00:00:00Z",
+    )
+    with Session(trust.engine) as session:
+        old = session.exec(
+            select(KnowledgeRevision).where(
+                KnowledgeRevision.memory_id == mid, KnowledgeRevision.revision == 1
+            )
+        ).one()
+        data = json.loads(old.snapshot_json)
+        del data["valid_from"], data["valid_until"]
+        old.snapshot_json = json.dumps(data)
+        session.add(old)
+        session.commit()
+    restored = trust.restore_memory(admin, mid, revision=1, expected_revision=2)[
+        "memory"
+    ]
+    assert restored["valid_until"] == "2020-01-01T00:00:00.000000+00:00"
+    validity.set_validity(
+        admin, mid, expected_revision=3, valid_from=None, valid_until=None
+    )
+    validity.set_validity(
+        admin,
+        mid,
+        expected_revision=4,
+        valid_from=None,
+        valid_until="2020-01-01T00:00:00Z",
+    )
+    restored = trust.restore_memory(admin, mid, revision=4, expected_revision=5)[
+        "memory"
+    ]
+    assert restored["valid_until"] is None

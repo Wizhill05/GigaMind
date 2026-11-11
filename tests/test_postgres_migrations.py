@@ -1419,3 +1419,58 @@ def test_native_coordination_idempotency_race(postgres_engine, monkeypatch, kind
             select(ActivityEvent).where(ActivityEvent.action == action)
         ).all()
         assert len(events) == 1
+
+
+def test_native_v4_validity_upgrade_and_queries(postgres_engine, monkeypatch):
+    from fastapi import HTTPException
+    from gigamind.security import Actor
+    from gigamind.services import trust, context, knowledge_validity
+
+    monkeypatch.setattr(trust, "engine", postgres_engine)
+    migrations.migrate(postgres_engine)
+    admin = Actor("admin", set(), None, True)
+    reader = Actor("reader", {"memory:read"}, {"p"})
+    proposal = trust.create_proposal(
+        admin, content="apple fact", project_id="p", evidence=[], idempotency_key="v4"
+    )["proposal"]
+    memory = trust.resolve_proposal(
+        admin, proposal["id"], action="approve", expected_revision=1
+    )["memory"]
+    with postgres_engine.begin() as conn:
+        conn.execute(text("ALTER TABLE trust_knowledge DROP COLUMN valid_from"))
+        conn.execute(text("ALTER TABLE trust_knowledge DROP COLUMN valid_until"))
+        conn.execute(text("DELETE FROM schema_migrations"))
+        conn.execute(text("INSERT INTO schema_migrations (version) VALUES (4)"))
+    from sqlalchemy import event, inspect
+
+    def fail_second_column(
+        conn, cursor, statement, parameters, execution_context, executemany
+    ):
+        if 'ADD COLUMN "valid_until"' in statement:
+            raise RuntimeError("injected v5 failure")
+
+    event.listen(postgres_engine, "before_cursor_execute", fail_second_column)
+    try:
+        with pytest.raises(RuntimeError, match="injected v5 failure"):
+            migrations.migrate(postgres_engine)
+    finally:
+        event.remove(postgres_engine, "before_cursor_execute", fail_second_column)
+    assert migrations.schema_version(postgres_engine) == 4
+    assert "valid_from" not in {
+        c["name"] for c in inspect(postgres_engine).get_columns("trust_knowledge")
+    }
+    migrations.migrate(postgres_engine)
+    assert migrations.schema_ready(postgres_engine)
+    assert trust.get_history(admin, memory["id"])["revisions"][0]["revision"] == 1
+    knowledge_validity.set_validity(
+        admin,
+        memory["id"],
+        expected_revision=1,
+        valid_from=None,
+        valid_until="2020-01-01T00:00:00Z",
+    )
+    assert context.search_accepted(reader, "apple", "p", 1) == []
+    assert context.get_context(reader, "apple", "p")["memories"] == []
+    with pytest.raises(HTTPException) as exc:
+        context.get_memory(reader, memory["id"])
+    assert exc.value.status_code == 404
