@@ -185,3 +185,9 @@ Terra resumed after its usage reset and committed the core. Parent read queue ex
 2026-11-11, parent full-diff review of conditional storage helper a4c1c4e
 
 The upload-route assignment returned only a supporting storage method and one fake-store collision check. No route safety contract was accepted. Parent read the entire diff, removed test configuration lookup using a manually constructed isolated service, and added an installed botocore Stubber contract check for successful IfNoneMatch creation and412 collision, disabled-storage refusal and lost-acknowledgement propagation. No network requests occur. Focused conditional-storage/upload-core/lifecycle run: 25 passed. Helper accepted as a supporting method only; durable remote-outcome manifest, deletion protection, recovery and actual routes still require implementation.
+
+2026-11-11, parent full-diff review of credential console b548306
+
+Read all515 added UI/API/test/navigation lines. Parent frontend suite:40 passed; production build passed with known dependency annotation warnings. Generated dist restored. Unit not accepted yet: create/confirmation handlers lack guards against programmatic duplicate submits or overwriting an undismissed key; clipboard access can throw synchronously when unavailable;409 confirmation retains its stale revision after list reload. Missing HTTP-boundary/App gating/header-refresh and failed-create/revoke/copy scenarios require correction. New correction task will retain one-time token secrecy, add busy-state guards and prove the revised behavior.
+
+Manifest assignment returned without a diff. Inspected completed activity rather than repeating its premise: the attempted edit used unavailable unqualified python, then removed its partial file. Parent verified the provided absolute interpreter works. Retry must use apply_patch and the explicit interpreter, recover from routine command failures and preserve useful progress. No manifest implementation accepted.
