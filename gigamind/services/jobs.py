@@ -8,7 +8,7 @@ from sqlalchemy import and_, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from gigamind.db.jobs import Job
+from gigamind.db.jobs import Job, ResourceJobState
 
 
 def resolve_engine(engine):
@@ -45,6 +45,23 @@ class PermanentFailure(Exception):
     pass
 
 
+def lock_resource(session, key, now):
+    dialect = session.get_bind().dialect.name
+    if dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert
+    elif dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    else:
+        raise RuntimeError("Unsupported database dialect")
+    session.execute(insert(ResourceJobState).values(key=key, deleted=False, created_at=now, updated_at=now).on_conflict_do_nothing(index_elements=["key"]))
+    session.execute(update(ResourceJobState).where(ResourceJobState.key == key).values(key=key))
+    return session.get(ResourceJobState, key)
+
+
+def cancel_active(session, key, now):
+    return session.execute(update(Job).where(Job.resource_key == key, Job.state.in_(["queued", "retrying", "running"])).values(state="cancelled", lease_token=None, lease_deadline=None, updated_at=now)).rowcount
+
+
 class JobLease:
     def __init__(self, job_id, token, clock=utcnow):
         self.job_id = job_id
@@ -52,7 +69,12 @@ class JobLease:
         self.clock = clock
 
     def publication_guard(self, session):
-        # An update takes a write lock on SQLite and a row lock on PostgreSQL.
+        key = session.execute(select(Job.resource_key).where(Job.id == self.job_id)).scalar_one_or_none()
+        if key is None:
+            raise PermanentFailure("Job resource is no longer current")
+        owner = session.execute(update(ResourceJobState).where(ResourceJobState.key == key, ResourceJobState.deleted.is_(False), ResourceJobState.current_job_id == self.job_id).values(key=key))
+        if not owner.rowcount:
+            raise PermanentFailure("Job resource is no longer current")
         result = session.execute(
             update(Job)
             .where(
@@ -133,29 +155,33 @@ def enqueue(
         created_at=now,
         updated_at=now,
     )
-    with Session(resolve_engine(engine)) as session:
-        session.add(job)
+    with Session(resolve_engine(engine), expire_on_commit=False) as session:
         try:
+            owner = lock_resource(session, payload["key"], now)
+            if idempotency_key is not None:
+                old = session.exec(select(Job).where(Job.idempotency_key == idempotency_key)).first()
+                if old is not None:
+                    if old.kind != kind or old.payload_json != encoded or old.max_attempts != max_attempts:
+                        raise Conflict("Idempotency key already used with different job parameters")
+                    session.commit()
+                    return old
+            if owner.deleted:
+                raise Conflict("Resource has been forgotten")
+            cancel_active(session, payload["key"], now)
+            session.add(job)
+            owner.current_job_id = job.id
+            owner.updated_at = now
             session.commit()
-            session.refresh(job)
             return job
         except IntegrityError:
             session.rollback()
             if idempotency_key is None:
                 raise
-            old = session.exec(
-                select(Job).where(Job.idempotency_key == idempotency_key)
-            ).first()
+            old = session.exec(select(Job).where(Job.idempotency_key == idempotency_key)).first()
             if old is None:
                 raise
-            if (
-                old.kind != kind
-                or old.payload_json != encoded
-                or old.max_attempts != max_attempts
-            ):
-                raise Conflict(
-                    "Idempotency key already used with different job parameters"
-                )
+            if old.kind != kind or old.payload_json != encoded or old.max_attempts != max_attempts:
+                raise Conflict("Idempotency key already used with different job parameters")
             return old
 
 
@@ -263,21 +289,24 @@ def cancel(job_id, *, engine=None, clock=utcnow):
 def cancel_resource(key, *, engine=None, clock=utcnow):
     validate_resource_key(key)
     with Session(resolve_engine(engine)) as session:
-        result = session.execute(
-            update(Job)
-            .where(
-                Job.resource_key == key,
-                Job.state.in_(["queued", "retrying", "running"]),
-            )
-            .values(
-                state="cancelled",
-                lease_token=None,
-                lease_deadline=None,
-                updated_at=stamp(clock()),
-            )
-        )
+        now = stamp(clock())
+        lock_resource(session, key, now)
+        count = cancel_active(session, key, now)
         session.commit()
-        return result.rowcount
+        return count
+
+
+def forget_resource(key, *, engine=None, clock=utcnow):
+    validate_resource_key(key)
+    with Session(resolve_engine(engine)) as session:
+        now = stamp(clock())
+        owner = lock_resource(session, key, now)
+        owner.deleted = True
+        owner.current_job_id = None
+        owner.updated_at = now
+        count = cancel_active(session, key, now)
+        session.commit()
+        return count
 
 
 def run_once(*, engine=None, clock=utcnow, lease_seconds=60):

@@ -19,3 +19,12 @@ class Job(SQLModel, table=True):
     lease_deadline: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class ResourceJobState(SQLModel, table=True):
+    __tablename__ = "resource_job_state"
+    key: str = Field(primary_key=True)
+    current_job_id: Optional[str] = None
+    deleted: bool = False
+    created_at: str
+    updated_at: str

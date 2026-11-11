@@ -57,12 +57,15 @@ def test_cancel_then_delete_cannot_be_resurrected(pipeline, monkeypatch):
         future = executor.submit(jobs.run_once, engine=pipeline)
         try:
             assert entered.wait(5), "handler did not reach provider"
-            assert jobs.cancel_resource(key, engine=pipeline) == 1
+            assert jobs.forget_resource(key, engine=pipeline) == 1
             assert indexing.delete_storage_file_index(key)
         finally:
             release.set()
         assert future.result(timeout=5).state == "cancelled"
     assert jobs.status(job.id, engine=pipeline).state == "cancelled"
+    pipeline.dispose()
+    with pytest.raises(jobs.Conflict):
+        jobs.enqueue("index_file", {"key": key}, engine=pipeline)
     with Session(pipeline) as session:
         assert session.exec(select(StorageFileItem)).all() == []
         assert session.exec(select(StorageChunkItem)).all() == []
@@ -110,3 +113,30 @@ def test_reclaimed_lease_cannot_publish_or_complete_new_owner(pipeline, monkeypa
         engine=pipeline,
         clock=clock,
     )
+
+
+def test_new_owner_publishes_before_paused_old_job(pipeline, monkeypatch):
+    entered, release = Event(), Event()
+    def embedding(**kwargs):
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(5)
+        return [1.0, 2.0, 3.0]
+
+    monkeypatch.setattr(indexing, "generate_embedding", embedding)
+    key = "files/source.txt"
+    old = jobs.enqueue("index_file", {"key": key}, engine=pipeline)
+    with ThreadPoolExecutor(1) as executor:
+        future = executor.submit(jobs.run_once, engine=pipeline)
+        try:
+            assert entered.wait(5)
+            monkeypatch.setattr(indexing.storage_service, "download_file", lambda key: b"newer source")
+            new = jobs.enqueue("index_file", {"key": key}, engine=pipeline)
+            assert jobs.run_once(engine=pipeline).state == "completed"
+        finally:
+            release.set()
+        assert future.result(timeout=5).state == "cancelled"
+    with Session(pipeline) as session:
+        assert session.exec(select(StorageChunkItem)).one().content == "newer source"
+    assert jobs.status(old.id, engine=pipeline).state == "cancelled"
+    assert jobs.status(new.id, engine=pipeline).state == "completed"
