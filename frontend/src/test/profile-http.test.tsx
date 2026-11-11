@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -7,6 +8,8 @@ import {
   render,
   screen,
   waitFor,
+  act,
+  within,
 } from "@testing-library/react";
 import { ProfileRulesTab } from "../components/tabs/ProfileRulesTab";
 
@@ -160,6 +163,159 @@ it("ignores a deletion completed after credentials change", async () => {
   setApiKey("new");
   resolveDelete(json({ success: true, id: "a/b", message: "deleted" }));
   expect(await screen.findByText(/Credentials changed/)).toBeTruthy();
-  await waitFor(() => expect(screen.getByText("Add Rule").closest("button")?.disabled).toBe(false));
+  await waitFor(() =>
+    expect(screen.getByText("Add Rule").closest("button")?.disabled).toBe(
+      false,
+    ),
+  );
   expect(onMutation).not.toHaveBeenCalled();
+});
+
+it("ignores a late filter response even when fetch ignores abort", async () => {
+  let finish: (response: Response) => void = () => {};
+  const old = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  const fetcher = vi.fn((url: string) =>
+    url.includes("category=coding")
+      ? Promise.resolve(
+          json({ profile: [{ ...rule, value: "Current filter" }] }),
+        )
+      : old,
+  );
+  vi.stubGlobal("fetch", fetcher);
+  render(<ProfileRulesTab refreshVersion={0} onOpenNewRuleModal={() => {}} />);
+  fireEvent.change(screen.getByDisplayValue("All Categories"), {
+    target: { value: "coding" },
+  });
+  await screen.findByText("Current filter");
+  await act(async () => {
+    finish(json({ profile: [{ ...rule, value: "Old filter" }] }));
+    await old;
+  });
+  expect(screen.queryByText("Old filter")).not.toBeInTheDocument();
+  expect(screen.getByText("Current filter")).toBeInTheDocument();
+});
+
+it("suppresses deletion side effects after unmount", async () => {
+  let finish: (response: Response) => void = () => {};
+  const pending = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  const changed = vi.fn();
+  const fetcher = vi.fn((url: string, init?: RequestInit) =>
+    init?.method === "DELETE"
+      ? pending
+      : Promise.resolve(json({ profile: [rule] })),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const view = render(
+    <ProfileRulesTab
+      refreshVersion={0}
+      onOpenNewRuleModal={() => {}}
+      onMutation={changed}
+    />,
+  );
+  fireEvent.click(await screen.findByText("Delete"));
+  view.unmount();
+  await act(async () => {
+    finish(json({ success: true, id: rule.id, message: "Deleted" }));
+    await pending;
+  });
+  expect(changed).not.toHaveBeenCalled();
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it("preserves category, source and text filters after successful deletion", async () => {
+  let deleted = false;
+  const fetcher = vi.fn((url: string, init?: RequestInit) => {
+    if (init?.method === "DELETE") {
+      deleted = true;
+      return Promise.resolve(
+        json({ success: true, id: rule.id, message: "Deleted" }),
+      );
+    }
+    return Promise.resolve(json({ profile: deleted ? [] : [rule] }));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<ProfileRulesTab refreshVersion={0} onOpenNewRuleModal={() => {}} />);
+  await screen.findByText("editor");
+  fireEvent.change(screen.getByDisplayValue("All Categories"), {
+    target: { value: "coding" },
+  });
+  await screen.findByText("editor");
+  fireEvent.change(screen.getByDisplayValue("All Source Agents"), {
+    target: { value: "user" },
+  });
+  await screen.findByText("editor");
+  fireEvent.change(
+    screen.getByPlaceholderText("Search rule keys or values..."),
+    { target: { value: "editor" } },
+  );
+  fireEvent.click(screen.getByText("Delete"));
+  await screen.findByText("No profile rules match search criteria");
+  expect(screen.getByDisplayValue("coding")).toBeInTheDocument();
+  expect(screen.getByDisplayValue("User")).toHaveValue("user");
+  expect(screen.getByDisplayValue("editor")).toBeInTheDocument();
+  const last = fetcher.mock.calls[fetcher.mock.calls.length - 1]?.[0];
+  expect(last).toContain("category=coding");
+  expect(last).toContain("source_agent=user");
+});
+
+it("gates profile reads and refreshes App statistics and filtered rows after deletion and header refresh", async () => {
+  const { App } = await import("../App");
+  let deleted = false;
+  const fetcher = vi.fn((url: string, init?: RequestInit) => {
+    if (init?.method === "DELETE") {
+      deleted = true;
+      return Promise.resolve(
+        json({ success: true, id: rule.id, message: "Deleted" }),
+      );
+    }
+    if (url.includes("/get_profile?"))
+      return Promise.resolve(json({ profile: deleted ? [] : [rule] }));
+    return Promise.resolve(
+      json({
+        total_memories: 0,
+        total_storage_files: 0,
+        total_profile_rules: deleted ? 0 : 1,
+        total_chat_logs: 0,
+      }),
+    );
+  });
+  vi.stubGlobal("fetch", fetcher);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<App />);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Master API Key"), {
+    target: { value: "master" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Authorize Connection" }));
+  const sidebar = within(await screen.findByRole("complementary"));
+  fireEvent.click(sidebar.getByRole("button", { name: /Profile Rules/ }));
+  await screen.findByText("editor");
+  fireEvent.change(screen.getByDisplayValue("All Categories"), {
+    target: { value: "coding" },
+  });
+  await screen.findByText("editor");
+  fireEvent.click(screen.getByText("Delete"));
+  await screen.findByText("No profile rules match search criteria");
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.filter(([url]) => url.endsWith("/stats")),
+    ).toHaveLength(2),
+  );
+  deleted = false;
+  fireEvent.click(screen.getByTitle("Refresh telemetry"));
+  await screen.findByText("editor");
+  expect(screen.getByDisplayValue("coding")).toBeInTheDocument();
+  const profileCalls = fetcher.mock.calls.filter(([url]) =>
+    url.includes("/get_profile?"),
+  );
+  expect(profileCalls[profileCalls.length - 1]?.[0]).toContain(
+    "category=coding",
+  );
 });
