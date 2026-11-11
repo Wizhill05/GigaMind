@@ -596,3 +596,114 @@ def test_native_worker_bootstrap_registers_all_models(postgres_engine, monkeypat
     )
     assert run.returncode == 0, run.stdout + run.stderr
     assert "Worker ready" in run.stdout and migrations.schema_ready(postgres_engine)
+
+
+def test_native_latest_resource_owner_and_conflict_rollback(postgres_engine):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from sqlmodel import Session
+    from gigamind.services import jobs
+
+    migrations.migrate(postgres_engine)
+    barrier = Barrier(2)
+
+    def enqueue(key):
+        barrier.wait(timeout=5)
+        return jobs.enqueue(
+            "index_file", {"key": "native/source.txt"}, key, engine=postgres_engine
+        )
+
+    with ThreadPoolExecutor(2) as executor:
+        requests = list(executor.map(enqueue, ("one", "two")))
+    current = next(
+        job
+        for job in requests
+        if jobs.status(job.id, engine=postgres_engine).state == "queued"
+    )
+    old = next(job for job in requests if job.id != current.id)
+    assert jobs.status(old.id, engine=postgres_engine).state == "cancelled"
+    assert (
+        jobs.enqueue(
+            "index_file",
+            {"key": "native/source.txt"},
+            old.idempotency_key,
+            engine=postgres_engine,
+        ).id
+        == old.id
+    )
+    with pytest.raises(jobs.Conflict):
+        jobs.enqueue(
+            "index_file",
+            {"key": "other.txt"},
+            current.idempotency_key,
+            engine=postgres_engine,
+        )
+    with Session(postgres_engine) as session:
+        assert (
+            session.get(jobs.ResourceJobState, "native/source.txt").current_job_id
+            == current.id
+        )
+        assert session.get(jobs.ResourceJobState, "other.txt") is None
+    assert jobs.status(current.id, engine=postgres_engine).state == "queued"
+
+
+def test_native_stale_resource_publisher_cannot_resurrect_after_forgetting(
+    postgres_engine, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from sqlmodel import Session, select
+    from gigamind.db.database import StorageChunkItem, StorageFileItem
+    from gigamind.services import jobs, indexing
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    monkeypatch.setattr(indexing, "engine", postgres_engine)
+    monkeypatch.setattr(indexing, "is_postgres", True)
+    monkeypatch.setattr(indexing.embedding, "DEFAULT_DIM", 3)
+    monkeypatch.setattr(indexing.storage_service, "is_enabled", lambda: True)
+    contents = [b"old source"]
+    monkeypatch.setattr(
+        indexing.storage_service, "download_file", lambda key: contents[0]
+    )
+    entered, release = Event(), Event()
+
+    def embedding(**kwargs):
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(10)
+        return [1.0, 2.0, 3.0]
+
+    monkeypatch.setattr(indexing, "generate_embedding", embedding)
+    migrations.migrate(postgres_engine)
+    key = "native/source.txt"
+    old = jobs.enqueue("index_file", {"key": key}, engine=postgres_engine)
+    with ThreadPoolExecutor(1) as executor:
+        future = executor.submit(jobs.run_once, engine=postgres_engine)
+        try:
+            assert entered.wait(10)
+            contents[0] = b"new source"
+            current = jobs.enqueue("index_file", {"key": key}, engine=postgres_engine)
+            assert jobs.run_once(engine=postgres_engine).state == "completed"
+        finally:
+            release.set()
+        assert future.result(timeout=10).state == "cancelled"
+    with Session(postgres_engine) as session:
+        assert session.exec(select(StorageChunkItem)).one().content == "new source"
+        assert session.get(jobs.ResourceJobState, key).current_job_id == current.id
+    with postgres_engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("SELECT embedding_vector::text FROM storage_files")
+            ).scalar_one()
+            == "[1,2,3]"
+        )
+    assert jobs.status(old.id, engine=postgres_engine).state == "cancelled"
+    jobs.forget_resource(key, engine=postgres_engine)
+    indexing.delete_storage_file_index(key)
+    postgres_engine.dispose()
+    with pytest.raises(jobs.Conflict):
+        jobs.enqueue("index_file", {"key": key}, engine=postgres_engine)
+    with Session(postgres_engine) as session:
+        assert session.exec(select(StorageFileItem)).all() == []
+        assert session.exec(select(StorageChunkItem)).all() == []
+        assert session.get(jobs.ResourceJobState, key).deleted

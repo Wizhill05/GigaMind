@@ -53,13 +53,27 @@ def lock_resource(session, key, now):
         from sqlalchemy.dialects.postgresql import insert
     else:
         raise RuntimeError("Unsupported database dialect")
-    session.execute(insert(ResourceJobState).values(key=key, deleted=False, created_at=now, updated_at=now).on_conflict_do_nothing(index_elements=["key"]))
-    session.execute(update(ResourceJobState).where(ResourceJobState.key == key).values(key=key))
+    session.execute(
+        insert(ResourceJobState)
+        .values(key=key, deleted=False, created_at=now, updated_at=now)
+        .on_conflict_do_nothing(index_elements=["key"])
+    )
+    session.execute(
+        update(ResourceJobState).where(ResourceJobState.key == key).values(key=key)
+    )
     return session.get(ResourceJobState, key)
 
 
 def cancel_active(session, key, now):
-    return session.execute(update(Job).where(Job.resource_key == key, Job.state.in_(["queued", "retrying", "running"])).values(state="cancelled", lease_token=None, lease_deadline=None, updated_at=now)).rowcount
+    return session.execute(
+        update(Job)
+        .where(
+            Job.resource_key == key, Job.state.in_(["queued", "retrying", "running"])
+        )
+        .values(
+            state="cancelled", lease_token=None, lease_deadline=None, updated_at=now
+        )
+    ).rowcount
 
 
 class JobLease:
@@ -69,10 +83,20 @@ class JobLease:
         self.clock = clock
 
     def publication_guard(self, session):
-        key = session.execute(select(Job.resource_key).where(Job.id == self.job_id)).scalar_one_or_none()
+        key = session.execute(
+            select(Job.resource_key).where(Job.id == self.job_id)
+        ).scalar_one_or_none()
         if key is None:
             raise PermanentFailure("Job resource is no longer current")
-        owner = session.execute(update(ResourceJobState).where(ResourceJobState.key == key, ResourceJobState.deleted.is_(False), ResourceJobState.current_job_id == self.job_id).values(key=key))
+        owner = session.execute(
+            update(ResourceJobState)
+            .where(
+                ResourceJobState.key == key,
+                ResourceJobState.deleted.is_(False),
+                ResourceJobState.current_job_id == self.job_id,
+            )
+            .values(key=key)
+        )
         if not owner.rowcount:
             raise PermanentFailure("Job resource is no longer current")
         result = session.execute(
@@ -159,10 +183,18 @@ def enqueue(
         try:
             owner = lock_resource(session, payload["key"], now)
             if idempotency_key is not None:
-                old = session.exec(select(Job).where(Job.idempotency_key == idempotency_key)).first()
+                old = session.exec(
+                    select(Job).where(Job.idempotency_key == idempotency_key)
+                ).first()
                 if old is not None:
-                    if old.kind != kind or old.payload_json != encoded or old.max_attempts != max_attempts:
-                        raise Conflict("Idempotency key already used with different job parameters")
+                    if (
+                        old.kind != kind
+                        or old.payload_json != encoded
+                        or old.max_attempts != max_attempts
+                    ):
+                        raise Conflict(
+                            "Idempotency key already used with different job parameters"
+                        )
                     session.commit()
                     return old
             if owner.deleted:
@@ -177,11 +209,19 @@ def enqueue(
             session.rollback()
             if idempotency_key is None:
                 raise
-            old = session.exec(select(Job).where(Job.idempotency_key == idempotency_key)).first()
+            old = session.exec(
+                select(Job).where(Job.idempotency_key == idempotency_key)
+            ).first()
             if old is None:
                 raise
-            if old.kind != kind or old.payload_json != encoded or old.max_attempts != max_attempts:
-                raise Conflict("Idempotency key already used with different job parameters")
+            if (
+                old.kind != kind
+                or old.payload_json != encoded
+                or old.max_attempts != max_attempts
+            ):
+                raise Conflict(
+                    "Idempotency key already used with different job parameters"
+                )
             return old
 
 

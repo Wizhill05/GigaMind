@@ -17,12 +17,12 @@ Additional reviewed foundations:
 - Canonical branch-aware CLI/REST source imports, atomic deduplication, complete text/role retention and no automatic promotion to facts or provider requirement. Segmentation/indexing and full provenance ledger remain unfinished.
 
 Additional reviewed integration:
-- Admin jobs API and standalone worker, controlled graceful shutdown/renewal and native clean startup. Automatic source pipelines and latest-resource ownership remain unfinished.
+- Admin jobs API and standalone worker, controlled graceful shutdown/renewal and native clean startup. Automatic source pipelines remain unfinished. Current-resource ownership and durable tombstones now fence stale publishers and block re-enqueue after forgetting, with native concurrency checks.
 - Auth/list race and deletion behavior verified in 32 frontend tests; production build passes.
 - Full decoded transcript lexical search without a provider, optional existing vector candidates with SQL prefilters, source snippets and native search checks.
 
 In flight:
-- Current resource ownership/tombstones for indexing, credential lifecycle and review activity console.
+- Reference-safe file cleanup core, credential lifecycle and review activity console; file route/job progress integration remains pending.
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.

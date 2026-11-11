@@ -117,6 +117,7 @@ def test_reclaimed_lease_cannot_publish_or_complete_new_owner(pipeline, monkeypa
 
 def test_new_owner_publishes_before_paused_old_job(pipeline, monkeypatch):
     entered, release = Event(), Event()
+
     def embedding(**kwargs):
         if not entered.is_set():
             entered.set()
@@ -130,7 +131,9 @@ def test_new_owner_publishes_before_paused_old_job(pipeline, monkeypatch):
         future = executor.submit(jobs.run_once, engine=pipeline)
         try:
             assert entered.wait(5)
-            monkeypatch.setattr(indexing.storage_service, "download_file", lambda key: b"newer source")
+            monkeypatch.setattr(
+                indexing.storage_service, "download_file", lambda key: b"newer source"
+            )
             new = jobs.enqueue("index_file", {"key": key}, engine=pipeline)
             assert jobs.run_once(engine=pipeline).state == "completed"
         finally:
@@ -140,3 +143,31 @@ def test_new_owner_publishes_before_paused_old_job(pipeline, monkeypatch):
         assert session.exec(select(StorageChunkItem)).one().content == "newer source"
     assert jobs.status(old.id, engine=pipeline).state == "cancelled"
     assert jobs.status(new.id, engine=pipeline).state == "completed"
+
+
+def test_idempotency_conflict_preserves_published_index_and_current_owner(pipeline):
+    key = "files/source.txt"
+    indexing.index_file_content(key, "source.txt", b"published source")
+    jobs.enqueue("index_file", {"key": key}, "older", engine=pipeline)
+    current = jobs.enqueue("index_file", {"key": key}, "current", engine=pipeline)
+
+    def snapshot():
+        with Session(pipeline) as session:
+            return (
+                session.exec(select(StorageFileItem)).one().model_dump(),
+                [
+                    row.model_dump()
+                    for row in session.exec(select(StorageChunkItem)).all()
+                ],
+                session.get(jobs.ResourceJobState, key).model_dump(),
+            )
+
+    before = snapshot()
+    with pytest.raises(jobs.Conflict):
+        jobs.enqueue(
+            "index_file", {"key": "different-resource.txt"}, "current", engine=pipeline
+        )
+    assert snapshot() == before
+    assert jobs.status(current.id, engine=pipeline).state == "queued"
+    with Session(pipeline) as session:
+        assert session.get(jobs.ResourceJobState, "different-resource.txt") is None
