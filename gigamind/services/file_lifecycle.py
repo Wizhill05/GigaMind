@@ -23,6 +23,31 @@ def owned_key(key):
         return False
 
 
+def validate_key(key):
+    try:
+        jobs.validate_resource_key(key)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    if not owned_key(key):
+        raise HTTPException(422, "Invalid file key")
+
+
+def tombstoned_keys(keys, engine=None):
+    keys = list(set(keys))
+    if not keys:
+        return set()
+    with Session(jobs.resolve_engine(engine)) as session:
+        return set(session.exec(select(ResourceJobState.key).where(
+            ResourceJobState.key.in_(keys), ResourceJobState.deleted.is_(True)
+        )).all())
+
+
+def require_active(key, engine=None):
+    validate_key(key)
+    if key in tombstoned_keys([key], engine):
+        raise HTTPException(409, "File has been deleted")
+
+
 def referenced(session, key):
     query = select(MemoryItem.media_url, MemoryItem.attachments_json).execution_options(
         yield_per=20
@@ -47,12 +72,7 @@ def referenced(session, key):
 def request_delete(actor, key, engine=None):
     if not isinstance(actor, Actor) or actor.is_admin is not True:
         raise HTTPException(403, "Admin required")
-    try:
-        jobs.validate_resource_key(key)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
-    if not owned_key(key):
-        raise HTTPException(422, "Invalid file key")
+    validate_key(key)
     now = jobs.stamp(jobs.utcnow())
     with Session(jobs.resolve_engine(engine), expire_on_commit=False) as session:
         owner = jobs.lock_resource(session, key, now)

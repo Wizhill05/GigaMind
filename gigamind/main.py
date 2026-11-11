@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict, StrictInt
 from gigamind.db.database import init_db
 from gigamind.services.storage import storage_service
-from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files, get_file_chunks, register_storage_file, delete_storage_file_index
+from gigamind.services.indexing import index_file_content, list_indexed_storage_files, get_file_chunks, register_storage_file
 from gigamind.services.memory import (
     search_memory,
     add_memory,
@@ -46,6 +46,7 @@ from gigamind.routers.oauth import router as oauth_router
 from gigamind.routers.jobs import router as jobs_router
 from gigamind.db import memory_index  # register before migration
 from gigamind.services.oauth import resource_config
+from gigamind.services import file_lifecycle, jobs
 
 # Initialize DB
 resource_config()
@@ -692,29 +693,34 @@ def api_upload_file_base64(req: FileUploadBase64Request, background_tasks: Backg
 
     return {"success": True, "file": file_meta, "indexing": "queued"}
 
-@app.post("/api/v1/files/reindex", dependencies=[Depends(verify_auth)])
-def api_reindex_file(req: ReindexFileRequest, background_tasks: BackgroundTasks):
-    """Triggers asynchronous re-indexing and vectorization of an existing R2 file."""
-    if not storage_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
-    background_tasks.add_task(reindex_storage_file_by_key, key=req.key)
-    return {"success": True, "key": req.key, "indexing": "queued"}
+@app.post("/api/v1/files/reindex", status_code=202, dependencies=[Depends(verify_auth)])
+def api_reindex_file(req: ReindexFileRequest):
+    file_lifecycle.validate_key(req.key)
+    try:
+        job = jobs.enqueue("index_file", {"key": req.key})
+    except jobs.Conflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"key": req.key, "job_id": job.id, "state": job.state}
 
 @app.get("/api/v1/files/indexed", dependencies=[Depends(verify_auth)])
 def api_list_indexed_files(limit: int = Query(100, ge=1, le=100)):
     """Returns indexed files with chunk counts and vector status from Neon PostgreSQL."""
     files = list_indexed_storage_files(limit=limit)
+    deleted = file_lifecycle.tombstoned_keys([f["key"] for f in files])
+    files = [f for f in files if f["key"] not in deleted]
     return {"files": files, "count": len(files)}
 
 @app.get("/api/v1/files/chunks", dependencies=[Depends(verify_auth)])
 def api_get_file_chunks(key: str):
     """Returns all semantic vector chunks and page numbers for an indexed file key."""
+    file_lifecycle.require_active(key)
     chunks = get_file_chunks(key)
     return {"key": key, "chunks": chunks, "count": len(chunks)}
 
 @app.post("/api/v1/files/url", dependencies=[Depends(verify_auth)])
 def api_get_file_url(req: PresignedUrlRequest):
     """Generates a fresh time-limited presigned download URL."""
+    file_lifecycle.require_active(req.key)
     if not storage_service.is_enabled():
         raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
     url = storage_service.get_presigned_download_url(
@@ -729,47 +735,31 @@ def api_get_file_url(req: PresignedUrlRequest):
 
 @app.post("/api/v1/files/upload_url", dependencies=[Depends(verify_auth)])
 def api_get_file_upload_url(req: PresignedUploadUrlRequest):
-    """Generates a presigned PUT URL for client-side direct streaming upload."""
-    if not storage_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
-    upload_data = storage_service.get_presigned_upload_url(
-        filename=req.filename,
-        content_type=req.content_type,
-        expires_in=req.expires_in
-    )
-    if not upload_data:
-        raise HTTPException(status_code=500, detail="Failed to generate presigned upload URL.")
-    return {"success": True, **upload_data}
+    raise HTTPException(410, "Direct upload URLs are unavailable until an upload completion protocol is supported. Use the file upload endpoint.")
 
 @app.get("/api/v1/files", dependencies=[Depends(verify_auth)])
-def api_list_files(prefix: str = "", limit: int = Query(100, ge=1, le=100)):
+def api_list_files(prefix: str = Query("", max_length=1024), limit: int = Query(100, ge=1, le=100)):
     """Lists files currently indexed in the Cloudflare R2 bucket."""
+    if len(prefix.encode("utf-8")) > 1024:
+        raise HTTPException(422, "Prefix must be at most 1024 UTF-8 bytes")
     if not storage_service.is_enabled():
         return {"enabled": False, "files": [], "message": "Cloudflare R2 storage is not configured."}
     files = storage_service.list_files(prefix=prefix, limit=limit)
+    deleted = file_lifecycle.tombstoned_keys([f["key"] for f in files])
+    files = [f for f in files if f["key"] not in deleted]
     return {"enabled": True, "files": files, "count": len(files)}
 
-@app.post("/api/v1/files/delete", dependencies=[Depends(verify_auth)])
-def api_post_delete_file(req: DeleteFileRequest):
-    """Deletes an object from Cloudflare R2 and removes all vector index metadata from Neon PostgreSQL."""
-    if storage_service.is_enabled():
-        try:
-            storage_service.delete_file(req.key)
-        except Exception as r2_err:
-            print(f"R2 delete note for {req.key}: {r2_err}")
+def delete_file_response(key: str, actor: Actor):
+    job = file_lifecycle.request_delete(actor, key)
+    return {"key": key, "job_id": job.id, "state": job.state,
+            "cleanup": "completed" if job.state == "completed" else "pending"}
 
-    delete_storage_file_index(req.key)
-    return {"success": True, "key": req.key, "message": f"File {req.key} deleted successfully."}
 
-@app.delete("/api/v1/files/{key:path}", dependencies=[Depends(verify_auth)])
-def api_delete_file(key: str):
-    """Deletes an object directly from Cloudflare R2 and Neon PostgreSQL."""
-    if storage_service.is_enabled():
-        try:
-            storage_service.delete_file(key)
-        except Exception as r2_err:
-            print(f"R2 delete note for {key}: {r2_err}")
+@app.post("/api/v1/files/delete", status_code=202)
+def api_post_delete_file(req: DeleteFileRequest, actor: Actor = Depends(require_scope("admin"))):
+    return delete_file_response(req.key, actor)
 
-    delete_storage_file_index(key)
-    return {"success": True, "key": key, "message": f"File {key} deleted successfully."}
-# Endpoints completed
+
+@app.delete("/api/v1/files/{key:path}", status_code=202)
+def api_delete_file(key: str, actor: Actor = Depends(require_scope("admin"))):
+    return delete_file_response(key, actor)
