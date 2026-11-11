@@ -34,15 +34,15 @@ Additional reviewed units:
 
 In review:
 - Temporal validity schema5, revision-checked edits and retrieval filters are provisionally integrated; parent42 focused checks pass. Native window/migration, actual SDK, rollback and complete scope checks remain.
-- Profile reliability is reviewed and accepted with shared mutation locking, credential/unmount guards, filtered deletion, visible retry and real App auth/stats/header-refresh checks. Current frontend96 tests/build pass. The Coordination console remains provisional pending its conflict/lifecycle/App corrections.
+- Profile reliability is reviewed and accepted with shared mutation locking, credential/unmount guards, filtered deletion, visible retry and real App auth/stats/header-refresh checks. Current frontend96 tests/build pass. The Coordination console is now reviewed and accepted with stale-scope/credential protection, explicit409 reload, shared mutation locks and real App authentication/header refresh.
 
 Still required:
 - Approved records are available through scoped context/MCP tools and a dedicated Knowledge console. They remain separate from legacy MemoryItem storage; richer retrieval and clear source presentation remain required.
-- Handoff/issue console, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD. Approved-record deletion, read redaction and admin audit/restore are implemented with stale-supersession protection.
+- Temporal validity/expiry and complete authenticated provenance through legacy admin CRUD. The handoff/issue console is implemented and reviewed. Approved-record deletion, read redaction and admin audit/restore are implemented with stale-supersession protection.
 - External-provider interoperability acceptance. Decoded-file upload bounds and global encoded-body limits including MCP are implemented. Credential expiry/last-use/rotation and credential console are implemented. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Automatic import indexing jobs, live-provider multimodal/token acceptance and complete source state presentation. Upload indexing, file reindex/deletion, Jobs progress/retries and reference-safe shared-attachment GC are implemented.
 - Remaining UI API errors/cancellation/invalidation and component scenarios; handoff/retrieval inspector screens; review activity is implemented.
-- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:278 backend tests pass with24 optional native checks skipped; all24 native checks passed separately. The frontend suite has96 passing tests and a successful production build. Hosted CI has not been run.
+- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:278 backend tests pass with24 optional native checks skipped; all24 native checks passed separately. The frontend suite has104 passing tests and a successful production build. Hosted CI has not been run.
 
 Every agent change requires parent full-diff review and relevant local tests before acceptance. See implementation-review-log.md for findings and verification limits.

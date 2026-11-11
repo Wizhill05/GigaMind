@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ApiError, getApiKey } from "../../api";
-import { useConversationMutation, ConversationMutation } from "../../useConversationMutation";
+import {
+  useConversationMutation,
+  ConversationMutation,
+} from "../../useConversationMutation";
 import {
   Handoff,
   Issue,
@@ -9,10 +12,10 @@ import {
   resolveIssue,
 } from "../../coordinationApi";
 
-export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: ConversationMutation }> = ({
-  refreshVersion,
-  mutation: sharedMutation,
-}) => {
+export const CoordinationTab: React.FC<{
+  refreshVersion: number;
+  mutation?: ConversationMutation;
+}> = ({ refreshVersion, mutation: sharedMutation }) => {
   const localMutation = useConversationMutation();
   const mutation = sharedMutation ?? localMutation;
   const [project, setProject] = useState("");
@@ -25,11 +28,22 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
   const [error, setError] = useState("");
   const [target, setTarget] = useState<Issue | null>(null);
   const [conflict, setConflict] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const busy = localBusy || mutation.busy;
   const lock = useRef(false);
   const generation = useRef(0);
   const mounted = useRef(true);
   const reloadController = useRef<AbortController | null>(null);
+  const forgetCredentialView = () => {
+    generation.current++;
+    setHandoffs([]);
+    setIssues([]);
+    setTarget(null);
+    setConflict(false);
+    setTotals({ handoffs: 0, issues: 0 });
+    setLoading(false);
+    setError("API key changed. Reload coordination records.");
+  };
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -56,12 +70,17 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
         if (
           controller.signal.aborted ||
           current !== generation.current ||
-          lock.current || getApiKey() !== key
+          lock.current ||
+          getApiKey() !== key
         )
           return;
         setHandoffs(h.handoffs);
         setIssues(i.issues);
-        setTarget((previous) => previous && !conflict ? i.issues.find((item) => item.id === previous.id) ?? null : previous);
+        setTarget((previous) =>
+          previous && !conflict
+            ? (i.issues.find((item) => item.id === previous.id) ?? null)
+            : previous,
+        );
         setTotals({ handoffs: h.total, issues: i.total });
         setLoading(false);
       })
@@ -69,7 +88,8 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
         if (
           controller.signal.aborted ||
           current !== generation.current ||
-          lock.current || getApiKey() !== key
+          lock.current ||
+          getApiKey() !== key
         )
           return;
         setError(
@@ -78,6 +98,16 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
             : "Unable to load coordination records",
         );
         setLoading(false);
+      })
+      .finally(() => {
+        if (
+          !controller.signal.aborted &&
+          current === generation.current &&
+          !lock.current
+        ) {
+          if (getApiKey() !== key) forgetCredentialView();
+          else setLoading(false);
+        }
       });
     return () => controller.abort();
   }, [project, offset, reload, refreshVersion]);
@@ -91,35 +121,51 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
     setOffset(0);
   };
   const act = async (status: "resolved" | "dismissed") => {
-    if (lock.current || mutation.locked.current || loading || error || !target || conflict ||
-        !window.confirm(`${status === "resolved" ? "Resolve" : "Dismiss"} issue ${target.id}?`)) return;
+    if (
+      lock.current ||
+      mutation.locked.current ||
+      loading ||
+      error ||
+      !target ||
+      conflict ||
+      !window.confirm(
+        `${status === "resolved" ? "Resolve" : "Dismiss"} issue ${target.id}?`,
+      )
+    )
+      return;
     lock.current = true;
     generation.current++;
     setBusy(true);
     const key = getApiKey();
-    void mutation.run(async (valid) => {
-      await resolveIssue(target, status);
-      if (!valid() || !mounted.current) return;
-      setTarget(null);
-      setReload((v) => v + 1);
-    }, (e) => {
-      if (!mounted.current) return;
-      setLoading(false);
-      setError(e instanceof Error ? e.message : "Resolution failed");
-      if (e instanceof ApiError && e.status === 409) setConflict(true);
-    }).finally(() => {
-      lock.current = false;
-      if (mounted.current) {
-        setBusy(false);
-        if (getApiKey() !== key) {
+    let succeeded = false;
+    void mutation
+      .run(
+        async (valid) => {
+          await resolveIssue(target, status);
+          if (!valid() || !mounted.current) return;
+          succeeded = true;
+        },
+        (e) => {
+          if (!mounted.current) return;
           setLoading(false);
-          setError("API key changed. Reload coordination records.");
+          setError(e instanceof Error ? e.message : "Resolution failed");
+          if (e instanceof ApiError && e.status === 409) setConflict(true);
+        },
+      )
+      .finally(() => {
+        lock.current = false;
+        if (mounted.current) {
+          setBusy(false);
+          if (getApiKey() !== key) forgetCredentialView();
+          else if (succeeded) {
+            setTarget(null);
+            setReload((v) => v + 1);
+          }
         }
-      }
-    });
+      });
   };
   const reloadConflict = () => {
-    if (lock.current || !target) return;
+    if (lock.current || mutation.locked.current || !target) return;
     lock.current = true;
     setBusy(true);
     setError("");
@@ -129,7 +175,13 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
     const key = getApiKey();
     listIssues(project, offset, controller.signal)
       .then((result) => {
-        if (!mounted.current || controller.signal.aborted || generation.current !== currentGeneration || getApiKey() !== key) return;
+        if (
+          !mounted.current ||
+          controller.signal.aborted ||
+          generation.current !== currentGeneration ||
+          getApiKey() !== key
+        )
+          return;
         setIssues(result.issues);
         setTotals((t) => ({ ...t, issues: result.total }));
         const current = result.issues.find((i) => i.id === target.id);
@@ -142,12 +194,25 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
           );
       })
       .catch((e: unknown) => {
-        if (mounted.current && !controller.signal.aborted && generation.current === currentGeneration && getApiKey() === key)
+        if (
+          mounted.current &&
+          !controller.signal.aborted &&
+          generation.current === currentGeneration &&
+          getApiKey() === key
+        )
           setError(e instanceof Error ? e.message : "Reload failed");
       })
       .finally(() => {
         lock.current = false;
-        if (mounted.current) setBusy(false);
+        if (mounted.current) {
+          setBusy(false);
+          if (
+            !controller.signal.aborted &&
+            generation.current === currentGeneration &&
+            getApiKey() !== key
+          )
+            forgetCredentialView();
+        }
       });
   };
   const button =
@@ -175,7 +240,15 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
         <div role="alert" className="text-red-400">
           {error}{" "}
           {!conflict && (
-            <button className={button} onClick={() => { setError(""); setReload((v) => v + 1); }}>
+            <button
+              className={button}
+              disabled={busy}
+              onClick={() => {
+                if (lock.current || mutation.locked.current) return;
+                setError("");
+                setReload((v) => v + 1);
+              }}
+            >
               Retry
             </button>
           )}
@@ -186,68 +259,78 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
         <h2 className="text-lg">
           Authenticated agent handoff reports ({totals.handoffs})
         </h2>
-        {handoffs.map((h) => (
-          <article
-            key={h.id}
-            className="border border-[#333] bg-[#141414] p-4 space-y-2"
-          >
-            <h3 className="font-semibold">{h.task_name}</h3>
-            <p>{h.summary}</p>
-            <p className="text-[#8a8f9e]">
-              Writer: {h.writer_id} · Project: {h.project_id ?? "Global"} ·{" "}
-              {h.created_at} · Status: {h.status}
-            </p>
-            {(
-              [
-                ["Reported outcomes", h.verified_outcomes],
-                ["Unresolved", h.unresolved],
-                ["Next actions", h.next_actions],
-              ] as const
-            ).map(([label, items]) => (
-              <div key={label}>
-                <strong>{label}</strong>
-                <ul className="list-disc ml-5">
-                  {items.map((item, index) => (
-                    <li key={index}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </article>
-        ))}
+        {!loading &&
+          handoffs.map((h) => (
+            <article
+              key={h.id}
+              className="border border-[#333] bg-[#141414] p-4 space-y-2"
+            >
+              <h3 className="font-semibold">{h.task_name}</h3>
+              <p>{h.summary}</p>
+              <p className="text-[#8a8f9e]">
+                Writer: {h.writer_id} · Project: {h.project_id ?? "Global"} ·{" "}
+                {h.created_at} · Status: {h.status}
+              </p>
+              {(
+                [
+                  ["Reported outcomes", h.verified_outcomes],
+                  ["Unresolved", h.unresolved],
+                  ["Next actions", h.next_actions],
+                ] as const
+              ).map(([label, items]) => (
+                <div key={label}>
+                  <strong>{label}</strong>
+                  <ul className="list-disc ml-5">
+                    {items.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </article>
+          ))}
       </div>
       <div className="space-y-3">
         <h2 className="text-lg">Memory issues ({totals.issues})</h2>
-        {issues.map((i) => (
-          <article
-            key={i.id}
-            className="border border-[#333] bg-[#141414] p-4 space-y-2"
-          >
-            <p>
-              Memory ID: {i.memory_id} · Authenticated reporter: {i.writer_id}
-            </p>
-            <p>{i.reason}</p>
-            <p>
-              Status: {i.status} · Revision: {i.revision} · Project:{" "}
-              {i.project_id ?? "Global"}
-            </p>
-            <button
-              className={button}
-              disabled={busy || loading || !!error || conflict || i.status !== "open"}
-              onClick={() => {
-                if (!lock.current && !mutation.locked.current && !loading && !error && !conflict) {
-                  setTarget(i);
-                  setConflict(false);
-                  setError("");
-                }
-              }}
+        {!loading &&
+          issues.map((i) => (
+            <article
+              key={i.id}
+              className="border border-[#333] bg-[#141414] p-4 space-y-2"
             >
-              Select issue {i.id}
-            </button>
-          </article>
-        ))}
+              <p>
+                Memory ID: {i.memory_id} · Authenticated reporter: {i.writer_id}
+              </p>
+              <p>{i.reason}</p>
+              <p>
+                Status: {i.status} · Revision: {i.revision} · Project:{" "}
+                {i.project_id ?? "Global"}
+              </p>
+              <button
+                className={button}
+                disabled={
+                  busy || loading || !!error || conflict || i.status !== "open"
+                }
+                onClick={() => {
+                  if (
+                    !lock.current &&
+                    !mutation.locked.current &&
+                    !loading &&
+                    !error &&
+                    !conflict
+                  ) {
+                    setTarget(i);
+                    setConflict(false);
+                    setError("");
+                  }
+                }}
+              >
+                Select issue {i.id}
+              </button>
+            </article>
+          ))}
       </div>
-      {target && (
+      {!loading && target && (
         <div className="border border-[#ff6b00] p-4 space-y-2">
           <p>
             Selected issue: {target.id} · Revision: {target.revision} ·{" "}
@@ -262,14 +345,26 @@ export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: Conv
           <div className="flex gap-2">
             <button
               className={button}
-              disabled={busy || loading || !!error || conflict || target.status !== "open"}
+              disabled={
+                busy ||
+                loading ||
+                !!error ||
+                conflict ||
+                target.status !== "open"
+              }
               onClick={() => void act("resolved")}
             >
               Resolve
             </button>
             <button
               className={button}
-              disabled={busy || loading || !!error || conflict || target.status !== "open"}
+              disabled={
+                busy ||
+                loading ||
+                !!error ||
+                conflict ||
+                target.status !== "open"
+              }
               onClick={() => void act("dismissed")}
             >
               Dismiss
