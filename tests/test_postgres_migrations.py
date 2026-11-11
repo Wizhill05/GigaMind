@@ -850,3 +850,133 @@ def test_native_activity_total_excludes_other_projects(postgres_engine, monkeypa
     second = trust.list_activity(reader, limit=1, offset=1)
     assert first["total"] == second["total"] == 2
     assert [first["events"][0]["id"], second["events"][0]["id"]] == ["b", "a"]
+
+
+def test_native_cleanup_and_attachment_races(postgres_engine, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from fastapi import HTTPException
+    from sqlmodel import Session, select
+    from gigamind.db.database import MemoryItem
+    from gigamind.security import Actor
+    from gigamind.services import memory, file_lifecycle, jobs
+    from gigamind.services.storage import storage_service
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    monkeypatch.setattr(memory, "engine", postgres_engine)
+    monkeypatch.setattr(memory, "is_postgres", True)
+    monkeypatch.setattr(memory.embedding_config, "DEFAULT_DIM", 3)
+    monkeypatch.setattr(memory, "generate_embedding", lambda *args: [1.0, 2.0, 3.0])
+    monkeypatch.setattr(storage_service, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        storage_service, "get_presigned_download_url", lambda *a, **k: None
+    )
+    migrations.migrate(postgres_engine)
+    actor = Actor("native-cleanup-admin", set(), None, True)
+    objects = {"shared": b"bytes"}
+    renewed = Event()
+    heartbeat = jobs.heartbeat
+
+    def observe_renewal(*args, **kwargs):
+        result = heartbeat(*args, **kwargs)
+        if result:
+            renewed.set()
+        return result
+
+    monkeypatch.setattr(jobs, "heartbeat", observe_renewal)
+
+    def remove(key):
+        assert renewed.wait(5), "cleanup I/O blocked renewal"
+        objects.pop(key, None)
+        return True
+
+    monkeypatch.setattr(storage_service, "delete_file", remove)
+    first = memory.add_memory("first source", file_keys=["shared"])
+    second = memory.add_memory("second source", file_keys=["shared"])
+    with pytest.raises(HTTPException) as blocked:
+        file_lifecycle.request_delete(actor, "shared", postgres_engine)
+    assert blocked.value.status_code == 409 and objects["shared"] == b"bytes"
+    memory.delete_memory(first["id"])
+    with pytest.raises(HTTPException):
+        file_lifecycle.request_delete(actor, "shared", postgres_engine)
+    memory.delete_memory(second["id"])
+    cleanup = file_lifecycle.request_delete(actor, "shared", postgres_engine)
+    assert objects["shared"] == b"bytes"
+    assert jobs.run_once(engine=postgres_engine, lease_seconds=1).state == "completed"
+    assert (
+        not objects
+        and file_lifecycle.request_delete(actor, "shared", postgres_engine).id
+        == cleanup.id
+    )
+
+    registered, release, delete_attempted = Event(), Event(), Event()
+    register = memory._register_attachment_metadata
+    lock = jobs.lock_resource
+
+    def hold_registration(*args, **kwargs):
+        register(*args, **kwargs)
+        registered.set()
+        assert release.wait(5)
+
+    def observe_lock(*args, **kwargs):
+        if registered.is_set() and not release.is_set():
+            delete_attempted.set()
+        return lock(*args, **kwargs)
+
+    monkeypatch.setattr(memory, "_register_attachment_metadata", hold_registration)
+    monkeypatch.setattr(jobs, "lock_resource", observe_lock)
+    with ThreadPoolExecutor(2) as executor:
+        attached = executor.submit(
+            memory.add_memory, "attachment wins", file_keys=["attachment-first"]
+        )
+        assert registered.wait(5)
+        deleting = executor.submit(
+            file_lifecycle.request_delete, actor, "attachment-first", postgres_engine
+        )
+        try:
+            assert delete_attempted.wait(5)
+        finally:
+            release.set()
+        assert attached.result(timeout=10)["index_status"] == "completed"
+        with pytest.raises(HTTPException) as rejected:
+            deleting.result(timeout=10)
+        assert rejected.value.status_code == 409
+    monkeypatch.setattr(memory, "_register_attachment_metadata", register)
+    monkeypatch.setattr(jobs, "lock_resource", lock)
+
+    locked, release_cleanup, attachment_attempted = Event(), Event(), Event()
+    references = file_lifecycle.referenced
+
+    def hold_cleanup(session, key):
+        if key == "cleanup-first":
+            locked.set()
+            assert release_cleanup.wait(5)
+        return references(session, key)
+
+    def observe_registration(*args, **kwargs):
+        attachment_attempted.set()
+        return register(*args, **kwargs)
+
+    monkeypatch.setattr(file_lifecycle, "referenced", hold_cleanup)
+    monkeypatch.setattr(memory, "_register_attachment_metadata", observe_registration)
+    with ThreadPoolExecutor(2) as executor:
+        deleting = executor.submit(
+            file_lifecycle.request_delete, actor, "cleanup-first", postgres_engine
+        )
+        assert locked.wait(5)
+        attached = executor.submit(
+            memory.add_memory, "must roll back", file_keys=["cleanup-first"]
+        )
+        try:
+            assert attachment_attempted.wait(5)
+        finally:
+            release_cleanup.set()
+        assert deleting.result(timeout=10).state == "queued"
+        with pytest.raises(HTTPException) as rejected:
+            attached.result(timeout=10)
+        assert rejected.value.status_code == 409
+    with Session(postgres_engine) as session:
+        rows = session.exec(
+            select(MemoryItem).where(MemoryItem.parent_id.is_(None))
+        ).all()
+        assert [row.content for row in rows] == ["attachment wins"]

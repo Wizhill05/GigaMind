@@ -521,11 +521,26 @@ def _index_memory(memory_id, revision, content):
 
 
 def _register_attachment_metadata(session, attachments, source_agent, timestamp):
-    from gigamind.services.jobs import lock_resource, stamp, utcnow
+    from gigamind.services.jobs import (
+        lock_resource,
+        stamp,
+        utcnow,
+        validate_resource_key,
+    )
     from gigamind.services.file_lifecycle import owned_key
 
-    keys = sorted({a.get("key") for a in attachments if isinstance(a, dict) and owned_key(a.get("key"))})
+    keys = sorted(
+        {
+            a.get("key")
+            for a in attachments
+            if isinstance(a, dict) and owned_key(a.get("key"))
+        }
+    )
     for key in keys:
+        try:
+            validate_resource_key(key)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
         if lock_resource(session, key, stamp(utcnow())).deleted:
             raise HTTPException(409, "Resource has been forgotten")
     for attachment in attachments:

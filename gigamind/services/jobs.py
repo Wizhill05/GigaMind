@@ -377,7 +377,8 @@ def run_once(*, engine=None, clock=utcnow, lease_seconds=60):
     thread.start()
     try:
         result = HANDLERS[job.kind](
-            json.loads(job.payload_json), JobLease(job.id, job.lease_token, clock, engine)
+            json.loads(job.payload_json),
+            JobLease(job.id, job.lease_token, clock, engine),
         )
         values = {
             "state": "completed",

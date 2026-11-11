@@ -22,7 +22,7 @@ Additional reviewed integration:
 - Full decoded transcript lexical search without a provider, optional existing vector candidates with SQL prefilters, source snippets and native search checks.
 
 In flight:
-- Reference-safe file cleanup core, file lifecycle route/job progress integration, credential console and remaining memory-engine features. Credential lifecycle and review activity console are reviewed and integrated.
+- File lifecycle route/job progress integration, credential console and remaining memory-engine features. Reference-safe durable cleanup core, credential lifecycle and review activity console are reviewed and integrated.
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.
