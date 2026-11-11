@@ -14,6 +14,7 @@ os.environ["DB_PATH"] = str(Path(_test_dir.name) / "test.db")
 os.environ["GIGAMIND_API_KEY"] = "offline-test-master-key"
 os.environ.pop("RENDER", None)
 os.environ["ENVIRONMENT"] = "test"
+os.environ["EMBEDDING_DIM"] = "768"
 for _name in list(os.environ):
     if _name.startswith(
         ("R2_", "GEMINI_", "GOOGLE_API_", "VOYAGE_", "COHERE_", "AWS_", "OAUTH_")

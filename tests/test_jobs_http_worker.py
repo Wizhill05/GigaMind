@@ -126,24 +126,33 @@ enqueue('index_file', {'key': 'controlled.txt'})
 """
     subprocess.run([sys.executable, "-c", prepare], env=env, check=True)
     script = """
-import sys, signal
+import sys, signal, threading
 from gigamind.services import jobs
 from gigamind.cli.worker import main
 original_signal = signal.signal
+stop_observed = threading.Event()
+output_lock = threading.Lock()
+def announce(line):
+    with output_lock:
+        print(line, flush=True)
+def observe_stop():
+    stop_observed.wait()
+    announce('STOP_ACK')
+threading.Thread(target=observe_stop, daemon=True).start()
 def register(sig, handler):
     def observed(*args):
         handler(*args)
-        print('STOP_ACK', flush=True)
+        stop_observed.set()
     return original_signal(sig, observed)
 signal.signal = register
 original_heartbeat = jobs.heartbeat
 def heartbeat(*args, **kwargs):
     renewed = original_heartbeat(*args, **kwargs)
-    if renewed: print('RENEWED', flush=True)
+    if renewed: announce('RENEWED')
     return renewed
 jobs.heartbeat = heartbeat
 def handler(payload, lease):
-    print('HANDLER_STARTED', flush=True)
+    announce('HANDLER_STARTED')
     assert sys.stdin.readline().strip() == 'release'
     return {'status': 'completed'}
 jobs.HANDLERS['index_file'] = handler

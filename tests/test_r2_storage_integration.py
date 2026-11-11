@@ -18,7 +18,7 @@ from gigamind.services.memory import (
     delete_memory,
     reset_all_memories,
     export_all_memories,
-    _hydrate_attachments
+    _hydrate_attachments,
 )
 from fastapi.testclient import TestClient
 from gigamind.main import app, API_KEY
@@ -38,7 +38,9 @@ class TestR2StorageIntegration(unittest.TestCase):
         cleanup_all_test_data(verbose=False)
 
     def setUp(self):
-        p = patch("gigamind.services.memory.generate_embedding", return_value=[1.0] * 768)
+        p = patch(
+            "gigamind.services.memory.generate_embedding", return_value=[1.0] * 768
+        )
         p.start()
         self.addCleanup(p.stop)
         self.created_mem_ids = []
@@ -54,7 +56,9 @@ class TestR2StorageIntegration(unittest.TestCase):
     def test_01_sanitize_filename(self):
         self.assertEqual(sanitize_filename("test document.pdf"), "test_document.pdf")
         self.assertEqual(sanitize_filename("../../../secret/plan.txt"), "plan.txt")
-        self.assertEqual(sanitize_filename("special@#&*()chars.png"), "special_chars.png")
+        self.assertEqual(
+            sanitize_filename("special@#&*()chars.png"), "special_chars.png"
+        )
         self.assertEqual(sanitize_filename(""), "unnamed_file")
 
     def test_02_storage_service_key_generation(self):
@@ -74,9 +78,16 @@ class TestR2StorageIntegration(unittest.TestCase):
 
         # 1. Upload file
         mock_s3.put_object.return_value = {}
-        mock_s3.generate_presigned_url.return_value = "https://mock-r2.com/files/test.pdf?token=123"
+        mock_s3.generate_presigned_url.return_value = (
+            "https://mock-r2.com/files/test.pdf?token=123"
+        )
 
-        res = storage.upload_file(b"dummy pdf bytes", "test.pdf", mime_type="application/pdf", prefix="files/test")
+        res = storage.upload_file(
+            b"dummy pdf bytes",
+            "test.pdf",
+            mime_type="application/pdf",
+            prefix="files/test",
+        )
         self.assertIsNotNone(res)
         self.assertEqual(res["filename"], "test.pdf")
         self.assertEqual(res["mime_type"], "application/pdf")
@@ -85,17 +96,25 @@ class TestR2StorageIntegration(unittest.TestCase):
         mock_s3.put_object.assert_called_once()
 
         # 2. Presigned download URL
-        url = storage.get_presigned_download_url("files/test/2026/08/test.pdf", filename="test.pdf")
+        url = storage.get_presigned_download_url(
+            "files/test/2026/08/test.pdf", filename="test.pdf"
+        )
         self.assertEqual(url, "https://mock-r2.com/files/test.pdf?token=123")
 
         # 3. Presigned upload URL
-        mock_s3.generate_presigned_url.return_value = "https://mock-r2.com/put?token=abc"
-        upload_meta = storage.get_presigned_upload_url("large_dataset.csv", content_type="text/csv", prefix="files/test")
+        mock_s3.generate_presigned_url.return_value = (
+            "https://mock-r2.com/put?token=abc"
+        )
+        upload_meta = storage.get_presigned_upload_url(
+            "large_dataset.csv", content_type="text/csv", prefix="files/test"
+        )
         self.assertIsNotNone(upload_meta)
         self.assertEqual(upload_meta["upload_url"], "https://mock-r2.com/put?token=abc")
 
         # 4. Batch delete
-        mock_s3.delete_objects.return_value = {"Deleted": [{"Key": "files/test/k1"}, {"Key": "files/test/k2"}]}
+        mock_s3.delete_objects.return_value = {
+            "Deleted": [{"Key": "files/test/k1"}, {"Key": "files/test/k2"}]
+        }
         count = storage.delete_files(["files/test/k1", "files/test/k2"])
         self.assertEqual(count, 2)
         mock_s3.delete_objects.assert_called_once()
@@ -108,7 +127,7 @@ class TestR2StorageIntegration(unittest.TestCase):
                 "mime_type": "application/pdf",
                 "size_bytes": 1024,
                 "url": "https://example.com/spec1.pdf",
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ]
         mem = add_memory(
@@ -116,7 +135,7 @@ class TestR2StorageIntegration(unittest.TestCase):
             category="test_suite",
             source_agent="test_runner",
             tags=["test_runner", "test_suite"],
-            attachments=attachments
+            attachments=attachments,
         )
         self.created_mem_ids.append(mem["id"])
 
@@ -127,7 +146,9 @@ class TestR2StorageIntegration(unittest.TestCase):
 
         # Verify DB row
         with Session(engine) as session:
-            item = session.exec(select(MemoryItem).where(MemoryItem.id == mem["id"])).first()
+            item = session.exec(
+                select(MemoryItem).where(MemoryItem.id == mem["id"])
+            ).first()
             self.assertIsNotNone(item)
             self.assertIn("spec1.pdf", item.attachments_json)
 
@@ -143,7 +164,7 @@ class TestR2StorageIntegration(unittest.TestCase):
                 "filename": "research_paper.pdf",
                 "mime_type": "application/pdf",
                 "size_bytes": 204800,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ]
 
@@ -152,7 +173,7 @@ class TestR2StorageIntegration(unittest.TestCase):
             category="test_suite",
             source_agent="test_runner",
             tags=["test_runner", "test_suite"],
-            attachments=attachments
+            attachments=attachments,
         )
         self.created_mem_ids.append(mem["id"])
         self.assertGreater(mem["chunks_created"], 1)
@@ -160,19 +181,29 @@ class TestR2StorageIntegration(unittest.TestCase):
 
         # Check DB to verify child chunks have attachments_json denormalized
         with Session(engine) as session:
-            parent = session.exec(select(MemoryItem).where(MemoryItem.id == parent_id)).first()
+            parent = session.exec(
+                select(MemoryItem).where(MemoryItem.id == parent_id)
+            ).first()
             self.assertIsNotNone(parent)
             self.assertIn("research_paper.pdf", parent.attachments_json)
 
-            children = session.exec(select(MemoryItem).where(MemoryItem.parent_id == parent_id)).all()
+            children = session.exec(
+                select(MemoryItem).where(MemoryItem.parent_id == parent_id)
+            ).all()
             self.assertGreater(len(children), 0)
             for chk in children:
                 self.assertIn("research_paper.pdf", chk.attachments_json)
 
         # Vector search should retrieve the chunk and include attachments
-        search_res = search_memory(query="Cloudflare R2 and Neon Architecture Specification", limit=5, scope="memories")
+        search_res = search_memory(
+            query="Cloudflare R2 and Neon Architecture Specification",
+            limit=5,
+            scope="memories",
+        )
         self.assertTrue(len(search_res) > 0)
-        found = any("research_paper.pdf" in str(r.get("attachments", [])) for r in search_res)
+        found = any(
+            "research_paper.pdf" in str(r.get("attachments", [])) for r in search_res
+        )
         self.assertTrue(found)
 
     def test_06_cascading_r2_deletion(self):
@@ -185,8 +216,16 @@ class TestR2StorageIntegration(unittest.TestCase):
         first = add_memory("first", file_keys=[key])
         second = add_memory("second", file_keys=[key])
         self.created_mem_ids.extend([first["id"], second["id"]])
-        with patch("gigamind.services.storage.storage_service.is_enabled", return_value=True), \
-             patch("gigamind.services.storage.storage_service.delete_file", return_value=True) as delete:
+        with (
+            patch(
+                "gigamind.services.storage.storage_service.is_enabled",
+                return_value=True,
+            ),
+            patch(
+                "gigamind.services.storage.storage_service.delete_file",
+                return_value=True,
+            ) as delete,
+        ):
             self.assertTrue(delete_memory(first["id"]))
             with Session(engine) as session:
                 self.assertIsNone(session.get(MemoryItem, first["id"]))
@@ -211,11 +250,13 @@ class TestR2StorageIntegration(unittest.TestCase):
                     "key": "files/test/2026/08/api_doc.pdf",
                     "filename": "api_doc.pdf",
                     "mime_type": "application/pdf",
-                    "size_bytes": 4096
+                    "size_bytes": 4096,
                 }
-            ]
+            ],
         }
-        res = self.client.post("/api/v1/add_memory", json=payload, headers=self.auth_headers)
+        res = self.client.post(
+            "/api/v1/add_memory", json=payload, headers=self.auth_headers
+        )
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertTrue(data["success"])
@@ -223,8 +264,14 @@ class TestR2StorageIntegration(unittest.TestCase):
         self.created_mem_ids.append(mem_id)
 
         # Search Memory
-        search_req = {"query": "API Test Fact whitepaper", "limit": 3, "scope": "memories"}
-        search_res = self.client.post("/api/v1/search_memory", json=search_req, headers=self.auth_headers)
+        search_req = {
+            "query": "API Test Fact whitepaper",
+            "limit": 3,
+            "scope": "memories",
+        }
+        search_res = self.client.post(
+            "/api/v1/search_memory", json=search_req, headers=self.auth_headers
+        )
         self.assertEqual(search_res.status_code, 200)
         s_data = search_res.json()
         self.assertIn("results", s_data)
@@ -237,26 +284,31 @@ class TestR2StorageIntegration(unittest.TestCase):
             "source_agent": "test_runner",
             "tags": ["test_runner", "test_suite"],
             "attachments": [
-                {
-                    "key": "files/test/2026/08/api_doc.pdf",
-                    "filename": "api_doc.pdf"
-                },
-                {
-                    "key": "files/test/2026/08/extra.png",
-                    "filename": "extra.png"
-                }
-            ]
+                {"key": "files/test/2026/08/api_doc.pdf", "filename": "api_doc.pdf"},
+                {"key": "files/test/2026/08/extra.png", "filename": "extra.png"},
+            ],
         }
-        up_res = self.client.put(f"/api/v1/memories/{mem_id}", json=update_payload, headers=self.auth_headers)
+        up_res = self.client.put(
+            f"/api/v1/memories/{mem_id}", json=update_payload, headers=self.auth_headers
+        )
         self.assertEqual(up_res.status_code, 200)
         up_data = up_res.json()
         self.assertEqual(len(up_data["memory"]["attachments"]), 2)
 
     def test_08_fastmcp_sse_tools(self):
-        self.assertIn(self.client.post("/messages", json={}).status_code, (401, 404, 410))
+        self.assertIn(
+            self.client.post("/messages", json={}).status_code, (401, 404, 410)
+        )
         self.assertIn(self.client.get("/sse").status_code, (401, 404, 410))
-        self.assertEqual(self.client.post("/messages", json={}, headers=self.auth_headers).status_code, 503)
-        self.assertEqual(self.client.get("/sse", headers=self.auth_headers).status_code, 503)
+        self.assertEqual(
+            self.client.post(
+                "/messages", json={}, headers=self.auth_headers
+            ).status_code,
+            503,
+        )
+        self.assertEqual(
+            self.client.get("/sse", headers=self.auth_headers).status_code, 503
+        )
         return
 
 

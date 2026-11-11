@@ -15,9 +15,16 @@ from gigamind.services.indexing import (
     index_file_content,
     delete_storage_file_index,
     list_indexed_storage_files,
-    get_file_chunks
+    get_file_chunks,
 )
-from gigamind.db.database import init_db, Session, engine, StorageFileItem, StorageChunkItem, select
+from gigamind.db.database import (
+    init_db,
+    Session,
+    engine,
+    StorageFileItem,
+    StorageChunkItem,
+    select,
+)
 from gigamind.services.memory import add_memory, search_memory, delete_memory
 from fastapi.testclient import TestClient
 from gigamind.main import app, API_KEY
@@ -37,7 +44,15 @@ class TestGemini2MultimodalIngestion(unittest.TestCase):
         cleanup_all_test_data(verbose=False)
 
     def setUp(self):
-        self.embedding_patches = [patch("gigamind.services.indexing.generate_embedding", return_value=[1.0] * 768), patch("gigamind.services.memory.generate_embedding", return_value=[1.0] * 768)]
+        self.embedding_patches = [
+            patch(
+                "gigamind.services.indexing.generate_embedding",
+                return_value=[1.0] * 768,
+            ),
+            patch(
+                "gigamind.services.memory.generate_embedding", return_value=[1.0] * 768
+            ),
+        ]
         for p in self.embedding_patches:
             p.start()
             self.addCleanup(p.stop)
@@ -73,14 +88,16 @@ class TestGemini2MultimodalIngestion(unittest.TestCase):
             filename="quantum_teleportation.pdf",
             data=minimal_pdf,
             mime_type="application/pdf",
-            source_agent="test_runner"
+            source_agent="test_runner",
         )
         self.assertEqual(res["status"], "completed")
         self.assertEqual(res["multimodal_type"], "pdf")
 
         # Verify whole-document embedding saved in Neon
         with Session(engine) as session:
-            f_item = session.exec(select(StorageFileItem).where(StorageFileItem.key == pdf_key)).first()
+            f_item = session.exec(
+                select(StorageFileItem).where(StorageFileItem.key == pdf_key)
+            ).first()
             self.assertIsNotNone(f_item)
             self.assertEqual(f_item.multimodal_type, "pdf")
             self.assertTrue(len(json.loads(f_item.embedding_json)) > 0)
@@ -97,16 +114,20 @@ class TestGemini2MultimodalIngestion(unittest.TestCase):
             filename="transmon_circuit_schematic.png",
             data=tiny_png_bytes,
             mime_type="image/png",
-            source_agent="test_runner"
+            source_agent="test_runner",
         )
         self.assertEqual(res["status"], "completed")
         self.assertEqual(res["multimodal_type"], "image")
 
         # Search specifically for visual diagram
-        search_res = search_memory("transmon circuit schematic diagram", limit=5, scope="files")
+        search_res = search_memory(
+            "transmon circuit schematic diagram", limit=5, scope="files"
+        )
         filenames = [r["filename"] for r in search_res]
         self.assertIn("transmon_circuit_schematic.png", filenames)
-        top_match = next(r for r in search_res if r["filename"] == "transmon_circuit_schematic.png")
+        top_match = next(
+            r for r in search_res if r["filename"] == "transmon_circuit_schematic.png"
+        )
         self.assertEqual(top_match["source"], "file")
 
     def test_03_hierarchical_dual_level_search_fusion(self):
@@ -123,19 +144,21 @@ class TestGemini2MultimodalIngestion(unittest.TestCase):
             filename="surface_code_architecture.md",
             data=content.encode("utf-8"),
             mime_type="text/markdown",
-            source_agent="test_runner"
+            source_agent="test_runner",
         )
 
         mem = add_memory(
             content="User prefers rotated surface code topologies over heavy-hex layouts for cryo-CMOS scaling.",
             category="test_suite",
             source_agent="test_runner",
-            tags=["test_runner"]
+            tags=["test_runner"],
         )
         self.created_mem_ids.append(mem["id"])
 
         # Unified search across all knowledge
-        res = search_memory("surface code error correction physical qubits", limit=5, scope="all")
+        res = search_memory(
+            "surface code error correction physical qubits", limit=5, scope="all"
+        )
         sources = {r.get("source") for r in res}
         self.assertIn("file", sources)
         self.assertIn("memory", sources)
@@ -144,9 +167,11 @@ class TestGemini2MultimodalIngestion(unittest.TestCase):
         payload = {
             "query": "quantum teleportation and circuit schematic",
             "scope": "files",
-            "limit": 3
+            "limit": 3,
         }
-        res = self.client.post("/api/v1/search_multimodal", json=payload, headers=self.auth_headers)
+        res = self.client.post(
+            "/api/v1/search_multimodal", json=payload, headers=self.auth_headers
+        )
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["scope"], "files")
@@ -162,9 +187,9 @@ class TestGemini2MultimodalIngestion(unittest.TestCase):
                 "arguments": {
                     "query": "quantum fault tolerance",
                     "scope": "all",
-                    "limit": 3
-                }
-            }
+                    "limit": 3,
+                },
+            },
         }
         res = self.client.post("/messages", json=req)
         self.assertIn(res.status_code, (401, 404, 410))
