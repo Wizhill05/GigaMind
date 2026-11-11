@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, RefreshCw, Search, ExternalLink, Upload } from 'lucide-react';
 import { PixelKey } from './ui/PixelIcons';
 import { getApiKey, setApiKey, uploadFile } from '../api';
@@ -25,23 +25,42 @@ export const Header: React.FC<HeaderProps> = ({
   const { toast } = useToast();
   const [isHeaderUploading, setIsHeaderUploading] = useState(false);
 
+  const uploadPending = useRef(false);
+  const mounted = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
   const handleHeaderFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
+    const input = e.currentTarget;
+    const files = Array.from(input.files || []);
+    input.value = '';
+    if (!files.length || uploadPending.current) return;
+    uploadPending.current = true;
+    const credential = getApiKey();
+    const active = () => mounted.current && getApiKey() === credential;
     setIsHeaderUploading(true);
-    for (let i = 0; i < fileList.length; i++) {
-      const f = fileList[i];
-      toast(`Uploading ${f.name}...`, 'info');
-      const res = await uploadFile(f, 'files');
-      if (res.success) {
-        toast(`Uploaded ${f.name} & queued vector indexing`, 'success');
-      } else {
-        toast(`Failed to upload ${f.name}: ${res.error || 'Unknown error'}`, 'error');
+    let succeeded = false;
+    try {
+      for (const file of files) {
+        if (!active()) break;
+        toast(`Uploading ${file.name}...`, 'info');
+        const res = await uploadFile(file, 'files');
+        if (!active()) break;
+        if (res.success) {
+          succeeded = true;
+          toast(`Uploaded ${file.name} & queued vector indexing`, 'success');
+        } else {
+          toast(`Failed to upload ${file.name}: ${res.error || 'Unknown error'}`, 'error');
+        }
       }
+      if (succeeded && active()) onRefresh();
+    } finally {
+      uploadPending.current = false;
+      if (mounted.current) setIsHeaderUploading(false);
     }
-    setIsHeaderUploading(false);
-    e.target.value = '';
-    onRefresh();
   };
 
   // Handle ESC key press
