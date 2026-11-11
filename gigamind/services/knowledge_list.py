@@ -2,7 +2,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from gigamind.db.trust_models import AcceptedKnowledge
-from gigamind.services import context, trust
+from gigamind.services import context, trust, knowledge_validity
 
 
 def list_knowledge(
@@ -29,6 +29,8 @@ def list_knowledge(
     query = context._knowledge_query(actor, project_id).where(
         AcceptedKnowledge.status == status
     )
+    if not actor.is_admin:
+        query = query.where(knowledge_validity.active_clause())
     if q:
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         query = query.where(

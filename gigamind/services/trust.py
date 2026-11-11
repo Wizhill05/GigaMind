@@ -409,7 +409,11 @@ def get_memory(actor, memory_id):
         if not m:
             fail(404, "Memory not found")
         access(actor, m.project_id)
-        if m.status == "deleted" and not actor.is_admin:
+        from gigamind.services import knowledge_validity
+
+        if not actor.is_admin and (
+            m.status == "deleted" or not knowledge_validity.active(m)
+        ):
             fail(404, "Memory not found")
         return {"memory": memory_dict(m)}
 
@@ -421,7 +425,11 @@ def get_history(actor, memory_id):
         if not m:
             fail(404, "Memory not found")
         access(actor, m.project_id)
-        if m.status == "deleted" and not actor.is_admin:
+        from gigamind.services import knowledge_validity
+
+        if not actor.is_admin and (
+            m.status == "deleted" or not knowledge_validity.active(m)
+        ):
             fail(404, "Memory not found")
         rows = s.exec(
             select(KnowledgeRevision)
@@ -514,6 +522,8 @@ def restore_memory(actor, memory_id, *, revision, expected_revision):
             )
             .values(
                 content=data["content"],
+                valid_from=data.get("valid_from"),
+                valid_until=data.get("valid_until"),
                 status=data["status"],
                 data_json=json.dumps(
                     {k: data[k] for k in ("category", "tags", "evidence", "kind")}
@@ -552,5 +562,5 @@ def list_activity(actor, project_id=None, *, limit=100, offset=0):
             "total": total,
             "events": [
                 x.model_dump() if hasattr(x, "model_dump") else x.dict() for x in rows
-            ]
+            ],
         }

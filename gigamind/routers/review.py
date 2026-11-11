@@ -2,7 +2,7 @@ from typing import Optional, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, StrictInt, ConfigDict
 from gigamind.security import Actor, get_actor
-from gigamind.services import trust, context
+from gigamind.services import trust, context, knowledge_validity
 from gigamind.services import knowledge_list
 
 router = APIRouter(prefix="/api/v1/review", tags=["review"])
@@ -76,6 +76,18 @@ def memory(memory_id: str, actor: Actor = Depends(get_actor)):
 @router.post("/memories/{memory_id}/restore")
 def restore(memory_id: str, body: Restore, actor: Actor = Depends(get_actor)):
     return trust.restore_memory(actor, memory_id, **dump(body))
+
+
+class Validity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: StrictInt = Field(ge=1)
+    valid_from: Optional[str]
+    valid_until: Optional[str]
+
+
+@router.post("/memories/{memory_id}/validity")
+def validity(memory_id: str, body: Validity, actor: Actor = Depends(get_actor)):
+    return knowledge_validity.set_validity(actor, memory_id, **dump(body))
 
 
 @router.post("/memories/{memory_id}/delete")

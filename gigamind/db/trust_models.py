@@ -29,6 +29,8 @@ class AcceptedKnowledge(SQLModel, table=True):
     project_id: Optional[str] = Field(default=None, index=True)
     subject: Optional[str] = Field(default=None, index=True)
     content: str
+    valid_from: Optional[str] = None
+    valid_until: Optional[str] = None
     data_json: str
     writer_id: str
     revision: int = 1

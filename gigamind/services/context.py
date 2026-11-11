@@ -8,7 +8,7 @@ from sqlalchemy import or_, case, text
 from sqlmodel import Session
 
 from gigamind.db.trust_models import AcceptedKnowledge
-from gigamind.services import trust
+from gigamind.services import trust, knowledge_validity
 
 
 def _knowledge_query(actor, project_id):
@@ -74,7 +74,11 @@ def search_accepted(actor, query, project_id=None, limit=5):
     with Session(trust.engine) as session:
         stmt = (
             _knowledge_query(actor, project_id)
-            .where(AcceptedKnowledge.status == "accepted", or_(*clauses))
+            .where(
+                AcceptedKnowledge.status == "accepted",
+                knowledge_validity.active_clause(),
+                or_(*clauses),
+            )
             .order_by(
                 score.desc(), AcceptedKnowledge.updated_at.desc(), AcceptedKnowledge.id
             )
@@ -88,7 +92,12 @@ def search_accepted(actor, query, project_id=None, limit=5):
 
 def get_memory(actor, memory_id):
     result = trust.get_memory(actor, memory_id)
-    if result["memory"]["status"] == "deleted":
+    memory = result["memory"]
+    from types import SimpleNamespace
+
+    if memory["status"] == "deleted" or not knowledge_validity.active(
+        SimpleNamespace(**memory)
+    ):
         raise HTTPException(404, "Memory not found")
     result["memory"]["source"] = "accepted_knowledge"
     return result
@@ -107,7 +116,11 @@ def get_context(actor, query, project_id=None, token_budget=4096):
     with Session(trust.engine) as session:
         rules = session.exec(
             _knowledge_query(actor, project_id)
-            .where(AcceptedKnowledge.status == "accepted", text(preference_filter))
+            .where(
+                AcceptedKnowledge.status == "accepted",
+                knowledge_validity.active_clause(),
+                text(preference_filter),
+            )
             .order_by(AcceptedKnowledge.updated_at.desc(), AcceptedKnowledge.id)
             .limit(100)
         ).all()

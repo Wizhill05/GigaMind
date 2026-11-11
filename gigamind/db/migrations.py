@@ -14,7 +14,7 @@ from gigamind.db import trust_models  # register trust tables
 from gigamind.db.jobs import UploadManifest
 from gigamind.db.coordination import Handoff, MemoryIssue
 
-VERSION = 4
+VERSION = 5
 LEGACY_COLUMNS = {
     "memories": {
         "media_type": "TEXT DEFAULT 'text'",
@@ -162,8 +162,10 @@ def _backfill(conn):
                     raise ValueError(f"Invalid attachment key for memory {last}")
                 now = datetime.now(timezone.utc).isoformat()
                 conn.execute(
-                    text("""INSERT INTO storage_files (id, key, filename, mime_type, multimodal_type, size_bytes, source_agent, extracted_text_length, total_chunks, indexing_status, embedding_json, created_at, updated_at)
-                    VALUES (:id, :key, :filename, :mime, 'text', :size, :source, 0, 0, 'pending', '[]', :created, :updated) ON CONFLICT (key) DO NOTHING"""),
+                    text(
+                        """INSERT INTO storage_files (id, key, filename, mime_type, multimodal_type, size_bytes, source_agent, extracted_text_length, total_chunks, indexing_status, embedding_json, created_at, updated_at)
+                    VALUES (:id, :key, :filename, :mime, 'text', :size, :source, 0, 0, 'pending', '[]', :created, :updated) ON CONFLICT (key) DO NOTHING"""
+                    ),
                     {
                         "id": "file_" + uuid.uuid4().hex,
                         "key": key,
@@ -267,6 +269,16 @@ def migrate(engine):
             if version < 4:
                 Handoff.__table__.create(conn, checkfirst=True)
                 MemoryIssue.__table__.create(conn, checkfirst=True)
+            if version < 5:
+                columns = {
+                    c["name"]
+                    for c in inspect(conn).get_columns("trust_knowledge", schema=schema)
+                }
+                for name in ("valid_from", "valid_until"):
+                    if name not in columns:
+                        conn.exec_driver_sql(
+                            f'ALTER TABLE trust_knowledge ADD COLUMN "{name}" TEXT'
+                        )
             if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),
