@@ -85,15 +85,22 @@ def search_memory(
     query_vector = None
     try:
         vector = generate_embedding(text=query if query else None, image_base64=query_image_base64)
-        query_vector = embedding_config._response_vector({"embedding": {"values": vector}})
+        query_vector = embedding_config.validate_embedding_vector(vector)
     except embedding_config.EmbeddingUnavailable:
         if query_image_base64:
-            raise
-    except ValueError as exc:
-        if query_image_base64 or str(exc) != "Invalid embedding response":
-            raise
+            raise HTTPException(503, "Image search requires an available embedding provider") from None
+    except embedding_config.EmbeddingInputError:
+        raise HTTPException(422, "Search input is empty, oversized or unsupported") from None
 
     query_keywords = list(dict.fromkeys(re.findall(r"\w+", (query or "").casefold())))
+
+    def lexical_hits(content):
+        folded = content.casefold()
+        return sum(
+            bool(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", folded))
+            if len(term) <= 2 and term.isascii() else term in folded
+            for term in query_keywords
+        )
 
     candidates: List[Dict[str, Any]] = []
 
@@ -104,37 +111,34 @@ def search_memory(
         if scope_clean in ("all", "memories"):
             raw_mem_candidates: List[Dict[str, Any]] = []
             if is_postgres and query_vector is not None:
-                try:
-                    vector_str = f"[{','.join(str(x) for x in query_vector)}]"
-                    sql = """
-                    SELECT id, content, category, source_agent, parent_id, chunk_index, total_chunks, tags_json, attachments_json,
-                           1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
-                    FROM memories
-                    WHERE embedding_vector IS NOT NULL
-                      AND (:category IS NULL OR category = :category)
-                      AND (:source_agent IS NULL OR source_agent = :source_agent)
-                    ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                    LIMIT 40;
-                    """
-                    rows = session.exec(text(sql), params={"vec": vector_str, "category": category, "source_agent": source_agent}).all()
-                    for r in rows:
-                        raw_mem_candidates.append({
-                            "id": r.id,
-                            "source": "memory",
-                            "content": r.content,
-                            "category": r.category,
-                            "source_agent": r.source_agent or "user",
-                            "parent_id": r.parent_id,
-                            "chunk_index": r.chunk_index,
-                            "total_chunks": r.total_chunks,
-                            "tags": json.loads(r.tags_json or "[]"),
-                            "attachments": _hydrate_attachments(r.attachments_json),
-                            "score": float(r.vector_score or 0.0),
-                            "vector_score": float(r.vector_score or 0.0),
-                            "retrieval_method": "vector"
-                        })
-                except Exception:
-                    raise
+                vector_str = f"[{','.join(str(x) for x in query_vector)}]"
+                sql = """
+                SELECT id, content, category, source_agent, parent_id, chunk_index, total_chunks, tags_json, attachments_json,
+                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
+                FROM memories
+                WHERE embedding_vector IS NOT NULL
+                  AND (:category IS NULL OR category = :category)
+                  AND (:source_agent IS NULL OR source_agent = :source_agent)
+                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
+                LIMIT 40;
+                """
+                rows = session.exec(text(sql), params={"vec": vector_str, "category": category, "source_agent": source_agent}).all()
+                for r in rows:
+                    raw_mem_candidates.append({
+                        "id": r.id,
+                        "source": "memory",
+                        "content": r.content,
+                        "category": r.category,
+                        "source_agent": r.source_agent or "user",
+                        "parent_id": r.parent_id,
+                        "chunk_index": r.chunk_index,
+                        "total_chunks": r.total_chunks,
+                        "tags": json.loads(r.tags_json or "[]"),
+                        "attachments": _hydrate_attachments(r.attachments_json),
+                        "score": float(r.vector_score or 0.0),
+                        "vector_score": float(r.vector_score or 0.0),
+                        "retrieval_method": "vector"
+                    })
 
             # Keyword scan for memories
             mem_stmt = select(MemoryItem)
@@ -145,8 +149,7 @@ def search_memory(
             keyword_memories = session.exec(mem_stmt).all()
             for mem in keyword_memories:
                 kw_score = 0.0
-                mem_lower = mem.content.casefold()
-                kw_hits = sum(1 for kw in query_keywords if kw in mem_lower)
+                kw_hits = lexical_hits(mem.content)
                 if query_keywords:
                     kw_score = (kw_hits / len(query_keywords)) * 0.4
 
@@ -184,11 +187,7 @@ def search_memory(
                 profile_stmt = profile_stmt.where(ProfileItem.source_agent == source_agent)
             profiles = session.exec(profile_stmt).all()
             for prof in profiles:
-                p_text = f"{prof.key}: {prof.value}".casefold()
-                p_score = 0.0
-                for kw in query_keywords:
-                    if kw in p_text:
-                        p_score += 0.4
+                p_score = lexical_hits(f"{prof.key}: {prof.value}") * 0.4
 
                 if p_score > 0:
                     candidates.append({
@@ -206,86 +205,88 @@ def search_memory(
         if scope_clean in ("all", "files"):
             distinct_files_map: Dict[str, Dict[str, Any]] = {}
             if is_postgres and query_vector is not None:
-                try:
-                    vector_str = f"[{','.join(str(x) for x in query_vector)}]"
+                vector_str = f"[{','.join(str(x) for x in query_vector)}]"
 
-                    # 1. Whole-Document Holistic Candidates Scan
-                    sql_docs = """
-                    SELECT id, key, filename, mime_type, multimodal_type, document_summary,
-                           1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
-                    FROM storage_files
-                    WHERE embedding_vector IS NOT NULL
-                      AND NOT EXISTS (SELECT 1 FROM resource_job_state r
-                                      WHERE r.key = storage_files.key AND r.deleted IS TRUE)
-                    ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                    LIMIT 30;
-                    """
-                    doc_rows = session.exec(text(sql_docs), params={"vec": vector_str}).all()
-                    for dr in doc_rows:
-                        distinct_files_map[dr.key] = {
-                            "id": dr.id,
-                            "file_id": dr.id,
-                            "file_key": dr.key,
-                            "filename": dr.filename,
-                            "mime_type": dr.mime_type,
-                            "multimodal_type": dr.multimodal_type or "text",
-                            "content": dr.document_summary or f"[{dr.multimodal_type.upper()}: {dr.filename}]",
-                            "score": float(dr.vector_score or 0.0),
-                            "doc_vector_score": float(dr.vector_score or 0.0),
-                            "chunk_index": 0,
-                            "total_chunks": 1,
-                            "matching_pages": [],
+                # 1. Whole-Document Holistic Candidates Scan
+                sql_docs = """
+                SELECT id, key, filename, mime_type, multimodal_type, document_summary,
+                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
+                FROM storage_files
+                WHERE embedding_vector IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM resource_job_state r
+                                  WHERE r.key = storage_files.key AND r.deleted IS TRUE)
+                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
+                LIMIT 30;
+                """
+                doc_rows = session.exec(text(sql_docs), params={"vec": vector_str}).all()
+                for dr in doc_rows:
+                    distinct_files_map[dr.key] = {
+                        "id": dr.id,
+                        "file_id": dr.id,
+                        "file_key": dr.key,
+                        "filename": dr.filename,
+                        "mime_type": dr.mime_type,
+                        "multimodal_type": dr.multimodal_type or "text",
+                        "content": dr.document_summary or f"[{dr.multimodal_type.upper()}: {dr.filename}]",
+                        "score": float(dr.vector_score or 0.0),
+                        "doc_vector_score": float(dr.vector_score or 0.0),
+                        "vector_score": float(dr.vector_score or 0.0),
+                        "retrieval_method": "vector",
+                        "chunk_index": 0,
+                        "total_chunks": 1,
+                        "matching_pages": [],
+                        "url": "",
+                        "source": "file",
+                        "category": "file"
+                    }
+
+                # 2. Page-Level & Visual Snippet Candidates Scan
+                sql_chunks = """
+                SELECT id, file_id, file_key, filename, chunk_index, total_chunks, page_number, is_visual_anchor, content,
+                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
+                FROM storage_chunks
+                WHERE embedding_vector IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM resource_job_state r
+                                  WHERE r.key = storage_chunks.file_key AND r.deleted IS TRUE)
+                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
+                LIMIT 60;
+                """
+                chunk_rows = session.exec(text(sql_chunks), params={"vec": vector_str}).all()
+                for cr in chunk_rows:
+                    fkey = cr.file_key
+                    chunk_score = float(cr.vector_score or 0.0)
+                    if fkey not in distinct_files_map:
+                        distinct_files_map[fkey] = {
+                            "id": cr.id,
+                            "file_id": cr.file_id,
+                            "file_key": cr.file_key,
+                            "filename": cr.filename,
+                            "content": cr.content,
+                            "page_number": cr.page_number,
+                            "chunk_index": cr.chunk_index,
+                            "total_chunks": cr.total_chunks,
+                            "score": chunk_score,
+                            "vector_score": chunk_score,
+                            "retrieval_method": "vector",
+                            "matching_pages": [cr.page_number] if cr.page_number is not None else [],
                             "url": "",
                             "source": "file",
                             "category": "file"
                         }
-
-                    # 2. Page-Level & Visual Snippet Candidates Scan
-                    sql_chunks = """
-                    SELECT id, file_id, file_key, filename, chunk_index, total_chunks, page_number, is_visual_anchor, content,
-                           1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
-                    FROM storage_chunks
-                    WHERE embedding_vector IS NOT NULL
-                      AND NOT EXISTS (SELECT 1 FROM resource_job_state r
-                                      WHERE r.key = storage_chunks.file_key AND r.deleted IS TRUE)
-                    ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                    LIMIT 60;
-                    """
-                    chunk_rows = session.exec(text(sql_chunks), params={"vec": vector_str}).all()
-                    for cr in chunk_rows:
-                        fkey = cr.file_key
-                        chunk_score = float(cr.vector_score or 0.0)
-                        if fkey not in distinct_files_map:
-                            distinct_files_map[fkey] = {
-                                "id": cr.id,
-                                "file_id": cr.file_id,
-                                "file_key": cr.file_key,
-                                "filename": cr.filename,
-                                "content": cr.content,
-                                "page_number": cr.page_number,
-                                "chunk_index": cr.chunk_index,
-                                "total_chunks": cr.total_chunks,
-                                "score": chunk_score,
-                                "matching_pages": [cr.page_number] if cr.page_number is not None else [],
-                                "url": "",
-                                "source": "file",
-                                "category": "file"
-                            }
-                        else:
-                            target = distinct_files_map[fkey]
-                            # Hierarchical fusion: 0.6 * page_score + 0.4 * doc_score
-                            doc_score = target.get("doc_vector_score", chunk_score)
-                            fused_score = round(0.6 * chunk_score + 0.4 * doc_score, 4)
-                            if chunk_score > target["score"]:
-                                target["content"] = cr.content
-                                target["score"] = fused_score
-                                target["chunk_index"] = cr.chunk_index
-                                target["total_chunks"] = cr.total_chunks
-                                target["page_number"] = cr.page_number
-                            if cr.page_number is not None and cr.page_number not in target["matching_pages"]:
-                                target["matching_pages"].append(cr.page_number)
-                except Exception:
-                    raise
+                    else:
+                        target = distinct_files_map[fkey]
+                        # Hierarchical fusion: 0.6 * page_score + 0.4 * doc_score
+                        doc_score = target.get("doc_vector_score", chunk_score)
+                        fused_score = round(0.6 * chunk_score + 0.4 * doc_score, 4)
+                        if chunk_score > target["score"]:
+                            target["content"] = cr.content
+                            target["score"] = fused_score
+                            target["vector_score"] = fused_score
+                            target["chunk_index"] = cr.chunk_index
+                            target["total_chunks"] = cr.total_chunks
+                            target["page_number"] = cr.page_number
+                        if cr.page_number is not None and cr.page_number not in target["matching_pages"]:
+                            target["matching_pages"].append(cr.page_number)
 
             # Fallback SQLite candidate scanner
             if not distinct_files_map:

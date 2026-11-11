@@ -36,6 +36,10 @@ def _get_api_keys() -> List[str]:
     return keys
 
 
+class EmbeddingInputError(ValueError):
+    """The caller supplied unsupported or invalid embedding input."""
+
+
 class EmbeddingUnavailable(RuntimeError):
     """The embedding provider could not return a usable vector."""
 
@@ -101,17 +105,17 @@ def _binary_part(inline_bytes, image_base64, mime_type):
     from gigamind.services.parser import binary_mime, MAX_INLINE_BYTES
 
     if inline_bytes is not None and image_base64 is not None:
-        raise ValueError("Provide only one binary input")
+        raise EmbeddingInputError("Provide only one binary input")
     if image_base64 is not None:
         if (
             not isinstance(image_base64, str)
             or len(image_base64) > ((MAX_INLINE_BYTES + 2) // 3) * 4
         ):
-            raise ValueError("Invalid or oversized base64 input")
+            raise EmbeddingInputError("Invalid or oversized base64 input")
         try:
             inline_bytes = base64.b64decode(image_base64, validate=True)
         except (ValueError, TypeError):
-            raise ValueError("Invalid base64 input") from None
+            raise EmbeddingInputError("Invalid base64 input") from None
     if inline_bytes is None:
         return None
     if (
@@ -119,12 +123,12 @@ def _binary_part(inline_bytes, image_base64, mime_type):
         or not inline_bytes
         or len(inline_bytes) > MAX_INLINE_BYTES
     ):
-        raise ValueError("Invalid or oversized binary input")
+        raise EmbeddingInputError("Invalid or oversized binary input")
     detected = binary_mime(inline_bytes)
     if detected is None or (mime_type is not None and mime_type != detected):
-        raise ValueError("Unsupported or mismatched embedding MIME type")
+        raise EmbeddingInputError("Unsupported or mismatched embedding MIME type")
     if image_base64 is not None and not detected.startswith("image/"):
-        raise ValueError("Image input must be PNG or JPEG")
+        raise EmbeddingInputError("Image input must be PNG or JPEG")
     if detected == "application/pdf":
         import io
         import pypdf
@@ -135,7 +139,7 @@ def _binary_part(inline_bytes, image_base64, mime_type):
         except Exception:
             valid = False
         if not valid:
-            raise ValueError(
+            raise EmbeddingInputError(
                 "PDF embedding input must contain one to six unencrypted pages"
             )
     return {
@@ -146,26 +150,36 @@ def _binary_part(inline_bytes, image_base64, mime_type):
     }
 
 
-def _response_vector(data):
+def validate_embedding_vector(values):
+    """Accept only finite, nonzero vectors of the configured dimension."""
     try:
-        values = data["embedding"]["values"]
         valid = (
             isinstance(values, list)
             and len(values) == DEFAULT_DIM
             and DEFAULT_DIM > 0
             and all(
-                isinstance(x, (int, float))
-                and not isinstance(x, bool)
-                and math.isfinite(x)
-                for x in values
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                for value in values
             )
-            and any(x != 0 for x in values)
+            and any(value != 0 for value in values)
         )
-    except (KeyError, TypeError, ValueError, OverflowError):
+    except OverflowError:
         valid = False
     if not valid:
-        raise ValueError("Invalid embedding response")
+        raise EmbeddingUnavailable("Gemini embedding returned an invalid response")
     return [float(value) for value in values]
+
+
+def _response_vector(data):
+    try:
+        values = data["embedding"]["values"]
+    except (KeyError, TypeError):
+        raise EmbeddingUnavailable(
+            "Gemini embedding returned an invalid response"
+        ) from None
+    return validate_embedding_vector(values)
 
 
 def generate_embedding(
@@ -182,7 +196,7 @@ def generate_embedding(
             or not text.strip()
             or len(text.encode("utf-8")) > MAX_TEXT_BYTES
         ):
-            raise ValueError(
+            raise EmbeddingInputError(
                 "Embedding text is empty or exceeds the application byte limit"
             )
         parts.append({"text": text})
@@ -190,7 +204,7 @@ def generate_embedding(
     if binary is not None:
         parts.append(binary)
     if not parts:
-        raise ValueError("Embedding input is empty")
+        raise EmbeddingInputError("Embedding input is empty")
     keys = _get_api_keys()
     if not keys:
         raise EmbeddingUnavailable("GEMINI_API_KEY environment variable is required.")
@@ -219,12 +233,13 @@ def generate_embedding(
             exc.close()
             alternate_key = code == 403 and len(keys) > 1
             if code != 429 and not alternate_key and not 500 <= code <= 599:
-                error_type = RuntimeError if code in (401, 403) else EmbeddingUnavailable
-                raise error_type(
+                raise EmbeddingUnavailable(
                     f"Gemini embedding request failed (HTTP {code})"
                 ) from None
             if alternate_key and attempt == max_attempts - 1:
-                raise RuntimeError("Gemini embedding request failed (HTTP 403)") from None
+                raise EmbeddingUnavailable(
+                    "Gemini embedding request failed (HTTP 403)"
+                ) from None
             if code == 429 or alternate_key:
                 key_pool.mark_rate_limited(active_key)
             if attempt < max_attempts - 1 and len(keys) == 1:

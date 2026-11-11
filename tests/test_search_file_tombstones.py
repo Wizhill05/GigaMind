@@ -141,6 +141,10 @@ def test_native_candidate_limits(postgres_engine, monkeypatch):
         session.commit()
     results = memory.search_memory("needle", scope="files", limit=10)
     assert {item["file_key"] for item in results} == {"live-doc", "live-chunk"}
+    assert all(
+        item["retrieval_method"] == "vector" and item["vector_score"] > 0.99
+        for item in results
+    )
 
 
 from tests.test_postgres_migrations import postgres_engine  # noqa: F401, fixture
