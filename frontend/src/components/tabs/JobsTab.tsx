@@ -29,7 +29,9 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
   const [confirm, setConfirm] = useState<"cancel" | "retry" | null>(null);
   const inFlight = useRef(false);
   const [visible, setVisible] = useState(!document.hidden);
-  const refresh = () => setReload((n) => n + 1);
+  const refresh = () => {
+    if (!inFlight.current) setReload((n) => n + 1);
+  };
   useEffect(() => {
     const onVisibility = () => setVisible(!document.hidden);
     document.addEventListener("visibilitychange", onVisibility);
@@ -51,6 +53,7 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
       },
       (e) => {
         if (!controller.signal.aborted) {
+          setDetail(null);
           setError(message(e));
           setLoading(false);
         }
@@ -61,13 +64,14 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
   useEffect(() => {
     if (
       !visible ||
+      busy ||
       loading ||
       (!jobs.some(pending) && !(detail && pending(detail)))
     )
       return;
     const timer = window.setTimeout(refresh, 5000);
     return () => window.clearTimeout(timer);
-  }, [visible, loading, jobs, detail]);
+  }, [visible, loading, jobs, detail, busy]);
   async function act() {
     if (!detail || !confirm || inFlight.current) return;
     inFlight.current = true;
@@ -88,12 +92,12 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
         setSelected(result.job_id);
       }
       setConfirm(null);
-      refresh();
+      setReload((n) => n + 1);
     } catch (e) {
       setActionError(message(e));
       if (e instanceof ApiError && e.status === 409) {
         setConfirm(null);
-        refresh();
+        setReload((n) => n + 1);
       }
     } finally {
       inFlight.current = false;
@@ -104,7 +108,7 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
     <section className="space-y-5">
       <div className="flex justify-between">
         <h1 className="text-xl font-semibold">Jobs</h1>
-        <button className={button} onClick={refresh}>
+        <button className={button} disabled={busy} onClick={refresh}>
           Refresh
         </button>
       </div>
@@ -115,7 +119,7 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
       {error && (
         <p role="alert" className="text-red-400">
           {error}{" "}
-          <button className="underline" onClick={refresh}>
+          <button className="underline" disabled={busy} onClick={refresh}>
             Retry load
           </button>
         </p>
@@ -130,8 +134,10 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
         {jobs.map((item) => (
           <button
             key={item.id}
+            disabled={busy}
             className="block w-full text-left border border-[#333] p-3 hover:border-orange-400"
             onClick={() => {
+              if (inFlight.current) return;
               setConfirm(null);
               setSelected(item.id);
             }}
@@ -144,21 +150,25 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
       <div className="flex gap-3 items-center">
         <button
           className={button}
-          disabled={page === 0}
-          onClick={() => setPage((p) => p - 1)}
+          disabled={busy || page === 0}
+          onClick={() => {
+            if (!inFlight.current) setPage((p) => p - 1);
+          }}
         >
           Previous
         </button>
         <span>Page {page + 1}</span>
         <button
           className={button}
-          disabled={jobs.length < 20}
-          onClick={() => setPage((p) => p + 1)}
+          disabled={busy || jobs.length < 20}
+          onClick={() => {
+            if (!inFlight.current) setPage((p) => p + 1);
+          }}
         >
           Next
         </button>
       </div>
-      {detail && detail.id === selected && (
+      {!loading && !error && detail && detail.id === selected && (
         <article className="border border-[#333] p-4 space-y-3">
           <h2 className="font-semibold">Job {detail.id}</h2>
           <p>
@@ -178,7 +188,9 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
             <button
               className={button}
               disabled={busy || confirm !== null}
-              onClick={() => setConfirm("cancel")}
+              onClick={() => {
+                if (!inFlight.current) setConfirm("cancel");
+              }}
             >
               Cancel job
             </button>
@@ -188,7 +200,9 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
               <button
                 className={button}
                 disabled={busy || confirm !== null}
-                onClick={() => setConfirm("retry")}
+                onClick={() => {
+                  if (!inFlight.current) setConfirm("retry");
+                }}
               >
                 Retry {detail.kind === "index_file" ? "indexing" : "cleanup"}
               </button>
@@ -214,7 +228,9 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
               <button
                 className={button}
                 disabled={busy}
-                onClick={() => setConfirm(null)}
+                onClick={() => {
+                  if (!inFlight.current) setConfirm(null);
+                }}
               >
                 Back
               </button>
