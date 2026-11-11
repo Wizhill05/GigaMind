@@ -395,3 +395,45 @@ def test_native_file_publication_rolls_back_and_clears_vectors(
     assert empty["file_id"] == original["file_id"] and empty["status"] == "empty"
     cleared = snapshot()
     assert cleared[0][2:] == (0, "empty", None) and cleared[1] == [] and cleared[2] == 3
+
+
+def test_native_queue_claims_and_lease_fencing(postgres_engine):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from sqlmodel import Session
+    from gigamind.services import jobs
+
+    migrations.migrate(postgres_engine)
+    barrier = Barrier(2)
+
+    def enqueue(_):
+        barrier.wait(timeout=5)
+        return jobs.enqueue(
+            "index_file",
+            {"key": "native/source.txt"},
+            "same-request",
+            engine=postgres_engine,
+        ).id
+
+    with ThreadPoolExecutor(2) as executor:
+        ids = list(executor.map(enqueue, range(2)))
+    assert ids[0] == ids[1]
+    barrier = Barrier(2)
+
+    def claim(_):
+        barrier.wait(timeout=5)
+        return jobs.claim(engine=postgres_engine)
+
+    with ThreadPoolExecutor(2) as executor:
+        claimed = list(executor.map(claim, range(2)))
+    assert sum(item is not None for item in claimed) == 1
+    owner = next(item for item in claimed if item is not None)
+    with Session(postgres_engine) as session:
+        jobs.JobLease(owner.id, owner.lease_token).publication_guard(session)
+        session.commit()
+    assert jobs.cancel_resource("native/source.txt", engine=postgres_engine) == 1
+    with Session(postgres_engine) as session, pytest.raises(jobs.PermanentFailure):
+        jobs.JobLease(owner.id, owner.lease_token).publication_guard(session)
+    assert not jobs.guarded(
+        owner.id, owner.lease_token, {"state": "completed"}, engine=postgres_engine
+    )

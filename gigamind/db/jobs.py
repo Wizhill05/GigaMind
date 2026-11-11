@@ -3,7 +3,7 @@ from sqlmodel import SQLModel, Field
 
 
 class Job(SQLModel, table=True):
-    __tablename__ = 'jobs'
+    __tablename__ = "jobs"
     id: str = Field(primary_key=True)
     kind: str
     resource_key: str = Field(index=True)
