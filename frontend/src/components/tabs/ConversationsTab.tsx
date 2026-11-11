@@ -48,7 +48,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   const [platformFilter, setPlatformFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
 
-  // Semantic Vector Search state
+  // Transcript search state
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<ConversationSearchResult[] | null>(null);
@@ -71,12 +71,14 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   const { toast } = useToast();
 
   const listRequest = useRef<AbortController | null>(null);
+  const [listLoading, setListLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const loadConversations = async () => {
     listRequest.current?.abort();
     const controller = new AbortController();
     listRequest.current = controller;
     const key = getApiKey();
+    setListLoading(true); setLoadError(null); setConversations([]);
     try {
       const res = await fetchConversations(page, 10, platformFilter || undefined, sourceAgentFilter || undefined, controller.signal);
       if (controller.signal.aborted || key !== getApiKey()) return;
@@ -88,6 +90,8 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
       setLoadError(null);
     } catch (error) {
       if (!controller.signal.aborted && key === getApiKey()) setLoadError(error instanceof Error ? error.message : 'Unable to load conversations');
+    } finally {
+      if (!controller.signal.aborted && key === getApiKey()) setListLoading(false);
     }
   };
 
@@ -98,7 +102,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
 
   useEffect(() => {
     searchRequest.current?.abort();
-    if (!submittedQuery) { setSearchResults(null); setIsSearching(false); return; }
+    if (!submittedQuery) { setSearchResults(null); setSearchError(null); setIsSearching(false); return; }
     const controller = new AbortController();
     searchRequest.current = controller;
     const key = getApiKey();
@@ -117,7 +121,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
     if (submittedQuery === searchQuery.trim()) setLocalRefresh(v => v + 1);
     else setSubmittedQuery(searchQuery.trim());
   };
-  const changed = () => { setLocalRefresh(v => v + 1); onMutation(); };
+  const changed = () => { searchRequest.current?.abort(); listRequest.current?.abort(); setSearchResults(submittedQuery ? [] : null); setIsSearching(!!submittedQuery); setConversations([]); setListLoading(true); setLocalRefresh(v => v + 1); onMutation(); };
 
   const runMutation = async (action: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -164,6 +168,8 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
       finally { setIsBackfilling(false); }
     });
   };
+
+  const resultsById = new Map(searchResults?.map(result => [result.id, result]));
 
   return (
     <fieldset disabled={busy} className="space-y-6 font-sans text-xs">
@@ -288,7 +294,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
         </div>
       )}
 
-      {/* SEMANTIC TRANSCRIPTS VECTOR SEARCH BAR */}
+      {/* TRANSCRIPT SEARCH BAR */}
       <div className="bg-[#141414] border border-[#262626] p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-white font-mono text-xs font-semibold">
@@ -382,7 +388,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
         {searchError && <div role="alert" className="p-4 text-rose-300">{searchError} <button onClick={() => setLocalRefresh(v => v + 1)} className="underline">Retry search</button></div>}
         {loadError && <div role="alert" className="p-4 text-rose-300">{loadError} <button onClick={() => void loadConversations()} className="underline">Retry</button></div>}
         {/* LOG ROWS */}
-        {isSearching ? <div className="p-4">Searching...</div> : searchError ? null : (searchResults !== null ? searchResults : conversations).length === 0 ? (
+        {isSearching ? <div className="p-4">Searching...</div> : searchError || (searchResults === null && loadError) ? null : searchResults === null && listLoading ? <div className="p-4">Loading...</div> : (searchResults !== null ? searchResults : conversations).length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e] space-y-3">
             <MessageSquare className="w-8 h-8 mx-auto text-[#444444]" />
             <p className="text-white font-medium">No chat transcript logs found</p>
@@ -435,14 +441,14 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                         </button>
                       )}
 
-                      {searchResults?.find(result => result.id === conv.id) && (
+                      {resultsById.has(conv.id) && (
                         <span className="text-[10px] font-mono bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 px-1.5 py-0.2">
-                          {searchResults?.find(result => result.id === conv.id)?.retrieval_method} · score {searchResults?.find(result => result.id === conv.id)?.score.toFixed(2)}
+                          {resultsById.get(conv.id)?.retrieval_method === 'lexical+vector' ? 'fusion' : resultsById.get(conv.id)?.retrieval_method} · score {resultsById.get(conv.id)?.score.toFixed(2)}
                         </span>
                       )}
                     </div>
 
-                    {searchResults?.find(result => result.id === conv.id)?.evidence.map((item, index) => <p key={index} className="text-[#8a8f9e]">{item.role}: {item.text}</p>)}
+                    {resultsById.get(conv.id)?.evidence.map((item, index) => <p key={index} className="text-[#8a8f9e]">{item.role}: {item.text}</p>)}
                     <p className="text-[#8a8f9e] text-xs line-clamp-1 break-words font-sans">
                       {conv.summary}
                     </p>

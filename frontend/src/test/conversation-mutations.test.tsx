@@ -9,7 +9,7 @@ const list = () => new Response(JSON.stringify({conversations: [{id:'1', title:'
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 it('retains a failed import for retry and reports pending indexing', async () => {
   const changed = vi.fn();
-  const fetcher = vi.fn().mockResolvedValueOnce(list()).mockResolvedValueOnce(new Response(JSON.stringify({detail:'Bad export'}), {status:400})).mockResolvedValueOnce(new Response(JSON.stringify({success:true, ingested:2, skipped:1, pending_indexing:2, total_processed:3, message:'Imported'})));
+  const fetcher = vi.fn().mockResolvedValueOnce(list()).mockResolvedValueOnce(new Response(JSON.stringify({detail:'Bad export'}), {status:400})).mockResolvedValueOnce(new Response(JSON.stringify({success:true, ingested:2, skipped:1, pending_indexing:2, total_processed:3, message:'Imported'}))).mockResolvedValue(list());
   vi.stubGlobal('fetch', fetcher);
   const view = render(<ToastProvider><ConversationsTab onOpenTranscript={() => {}} onMutation={changed}/></ToastProvider>);
   fireEvent.click(screen.getByText('Import Chat History'));
