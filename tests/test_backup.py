@@ -179,85 +179,140 @@ def test_expected_input_digest_and_cli(tmp_path):
     assert target.exists()
 
 
-def test_snapshot_during_wal_transactions(tmp_path):
-    from threading import Barrier, Thread
+def test_digest_restore_rejects_active_wal(tmp_path):
+    import hashlib
+
+    source, target = tmp_path / "source", tmp_path / "target"
+    fixture_db(source)
+    with sqlite3.connect(source) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("UPDATE memories SET content='wal change' WHERE id='m'")
+        conn.commit()
+        original = source.read_bytes()
+        wal = (tmp_path / "source-wal").read_bytes()
+        with pytest.raises(ValueError, match="nonempty WAL"):
+            restore(source, target, hashlib.sha256(original).hexdigest())
+        assert not target.exists()
+        assert source.read_bytes() == original
+        assert (tmp_path / "source-wal").read_bytes() == wal
+
+
+def test_snapshot_during_wal_transactions(tmp_path, monkeypatch):
+    from threading import Event, Thread
+    from gigamind.services import backup as backup_service
 
     source, snapshot, restored = (
         tmp_path / n for n in ("source", "snapshot", "restored")
     )
     fixture_db(source)
-    writer = sqlite3.connect(source)
-    writer.execute("PRAGMA journal_mode=WAL")
-    writer.execute(
-        "CREATE TABLE pairs (generation INTEGER, side INTEGER, PRIMARY KEY(generation, side))"
+    keeper = sqlite3.connect(source)
+    keeper.execute("PRAGMA journal_mode=WAL")
+    keeper.execute("CREATE TABLE pairs (generation INTEGER, side INTEGER)")
+    keeper.execute("INSERT INTO pairs VALUES (0, 0), (0, 1)")
+    keeper.execute("CREATE TABLE padding (data BLOB)")
+    keeper.executemany(
+        "INSERT INTO padding VALUES (?)", [(os.urandom(4096),) for _ in range(100)]
     )
-    writer.commit()
-    writer.execute("INSERT INTO pairs VALUES (0, 0), (0, 1)")
-    writer.commit()
-    barrier = Barrier(2)
+    keeper.commit()
+    started, release, committed = Event(), Event(), Event()
     errors = []
+    real_connect = sqlite3.connect
 
     def write():
         try:
-            with sqlite3.connect(source, timeout=5) as conn:
-                barrier.wait(timeout=5)
-                for generation in range(1, 201):
-                    with conn:
-                        conn.execute("INSERT INTO pairs VALUES (?, 0)", (generation,))
-                        conn.execute("INSERT INTO pairs VALUES (?, 1)", (generation,))
+            with real_connect(source, timeout=5) as conn:
+                conn.execute("BEGIN")
+                conn.execute("INSERT INTO pairs VALUES (1, 0)")
+                started.set()
+                if not release.wait(10):
+                    raise TimeoutError("backup did not start")
+                conn.execute("INSERT INTO pairs VALUES (1, 1)")
+                conn.commit()
+                committed.set()
         except BaseException as exc:
             errors.append(exc)
+            committed.set()
+
+    class ObservedConnection(sqlite3.Connection):
+        def backup(self, target):
+            observed = False
+
+            def progress(status, remaining, total):
+                nonlocal observed
+                if not observed:
+                    observed = True
+                    assert remaining > 0 and total > 1
+                    release.set()
+                    assert committed.wait(10)
+
+            super().backup(target, pages=1, progress=progress)
+            assert observed
+
+    def connect(database, *args, **kwargs):
+        if kwargs.get("uri"):
+            kwargs["factory"] = ObservedConnection
+        return real_connect(database, *args, **kwargs)
 
     thread = Thread(target=write)
     thread.start()
     try:
-        barrier.wait(timeout=5)
+        assert started.wait(10)
+        monkeypatch.setattr(backup_service.sqlite3, "connect", connect)
         backup(source, snapshot)
     finally:
+        release.set()
         thread.join(timeout=10)
-        writer.close()
+        keeper.close()
     assert not thread.is_alive()
     assert not errors
     restore(snapshot, restored)
-    with sqlite3.connect(restored) as conn:
+    with real_connect(restored) as conn:
         rows = conn.execute(
             "SELECT generation, count(*), sum(side) FROM pairs GROUP BY generation ORDER BY generation"
         ).fetchall()
-    assert rows and rows[0] == (0, 2, 1)
+    assert rows[0] == (0, 2, 1)
     assert all(count == 2 and total == 1 for _, count, total in rows)
-    assert [row[0] for row in rows] == list(range(len(rows)))
 
 
 def test_service_workflows_survive_restore(tmp_path, monkeypatch):
     from fastapi import HTTPException
     from sqlmodel import Session
-    from gigamind.services import trust, context
+    from gigamind.services import trust, context, file_uploads
+    from gigamind import main
     from gigamind.db.jobs import ResourceJobState
 
     source, snapshot, restored = (
         tmp_path / n for n in ("source", "snapshot", "restored")
     )
-    fixture_db(source)
     engine = create_engine(f"sqlite:///{source}")
+    migrations.migrate(engine)
+    with Session(engine) as session:
+        session.add(
+            database.MemoryItem(id="m", content="hello", created_at="now", last_accessed="now")
+        )
+        session.add(
+            memory_index.MemoryIndexState(memory_id="m", revision=3, created_at="now", updated_at="now")
+        )
+        session.commit()
     monkeypatch.setattr(security, "engine", engine)
     monkeypatch.setattr(trust, "engine", engine)
     client, token = security.create_client(
         "reader", ["memory:read", "memory:propose"], ["p"]
     )
     revoked, revoked_token = security.create_client("revoked", ["memory:read"], ["p"])
-    with Session(engine) as session:
-        credential = session.get(security.ClientCredential, revoked.id)
-        credential.revoked = True
-        session.add(credential)
-        session.add(
-            ResourceJobState(
-                key="m", current_job_id="j", created_at="now", updated_at="now"
-            )
-        )
-        manifest = session.get(UploadManifest, "k")
-        manifest.sha256 = "a" * 64
-        session.add(manifest)
-        session.commit()
+    monkeypatch.setattr(main, "engine", engine)
+    main.revoke_client(revoked.id, security.Actor("admin", set(), None, True))
+    file, job = file_uploads.prepare_upload(
+        "files/recovery.txt",
+        "recovery.txt",
+        "text/plain",
+        "text",
+        1,
+        "test",
+        "recovery-upload",
+        sha256="a" * 64,
+        engine=engine,
+    )
     actor = security.get_actor("Bearer " + token)
     admin = security.Actor("admin", set(), None, True)
 
@@ -312,9 +367,9 @@ def test_service_workflows_survive_restore(tmp_path, monkeypatch):
         trust.get_memory(restored_actor, old["id"])["memory"]["status"] == "superseded"
     )
     with Session(restored_engine) as session:
-        assert session.get(ResourceJobState, "m").current_job_id == "j"
-        assert session.get(UploadManifest, "k").sha256 == "a" * 64
-        assert session.get(Job, "j").state == "queued"
+        assert session.get(ResourceJobState, file["key"]).current_job_id == job["id"]
+        assert session.get(UploadManifest, file["key"]).sha256 == "a" * 64
+        assert session.get(Job, job["id"]).state == "queued"
         assert session.get(memory_index.MemoryIndexState, "m").revision == 3
     engine.dispose()
     restored_engine.dispose()

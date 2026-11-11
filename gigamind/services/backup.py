@@ -67,6 +67,11 @@ def restore(db, output, expected_sha256=None):
         source = _path(db)
         if source.is_symlink() or not source.is_file():
             raise ValueError("Source must be an existing regular file, not a symlink")
+        wal = Path(str(source) + "-wal")
+        if wal.exists() and wal.stat().st_size:
+            raise ValueError(
+                "Digest-protected restore requires a standalone input without a nonempty WAL"
+            )
         with source.open("rb") as artifact:
             actual = hashlib.file_digest(artifact, "sha256").hexdigest()
         if not hmac.compare_digest(actual, expected_sha256.lower()):
