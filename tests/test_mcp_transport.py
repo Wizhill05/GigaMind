@@ -145,7 +145,9 @@ def test_transport(server):
                         "project_ids": ["p"],
                         "is_admin": False,
                     }
-                    assert (await session.call_tool("get_identity", {"extra": 1})).isError
+                    assert (
+                        await session.call_tool("get_identity", {"extra": 1})
+                    ).isError
                     assert (await session.call_tool("get_server_status", {})).isError
                     proposal = await session.call_tool(
                         "propose_memory",
@@ -297,3 +299,93 @@ def test_transport_runs_across_successive_application_lifespans(monkeypatch):
             )
             assert called.status_code == 200, called.text
             assert called.json()["result"]["structuredContent"] == {"status": "online"}
+
+
+def test_identity_uses_current_key_and_expiry_on_every_request(server, tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from sqlmodel import Session, create_engine
+    from gigamind.security import ClientCredential
+
+    admin = {"Authorization": "Bearer test-master-key"}
+    response = httpx.post(
+        server + "/api/v1/admin/clients",
+        headers=admin,
+        trust_env=False,
+        json={
+            "name": "identity lifecycle",
+            "scopes": ["memory:read"],
+            "project_ids": ["B", "A"],
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    created = response.json()
+    expected = {
+        "id": created["client"]["id"],
+        "scopes": ["memory:read"],
+        "project_ids": ["A", "B"],
+        "is_admin": False,
+    }
+    call = {
+        "jsonrpc": "2.0",
+        "id": 99,
+        "method": "tools/call",
+        "params": {"name": "get_identity", "arguments": {}},
+    }
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            trust_env=False, headers={"Authorization": "Bearer " + created["token"]}
+        ) as client:
+            async with streamable_http_client(server + "/mcp", http_client=client) as (
+                read,
+                write,
+                _,
+            ):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    assert (
+                        await session.call_tool("get_identity", {})
+                    ).structuredContent == expected
+                    rotated_response = httpx.post(
+                        server + "/api/v1/admin/clients/" + expected["id"] + "/rotate",
+                        headers=admin,
+                        trust_env=False,
+                        json={"expected_revision": created["client"]["revision"]},
+                    )
+                    assert rotated_response.status_code == 200, rotated_response.text
+                    rotated = rotated_response.json()
+                    assert (
+                        await client.post(server + "/mcp", json=call)
+                    ).status_code == 401
+        async with httpx.AsyncClient(
+            trust_env=False, headers={"Authorization": "Bearer " + rotated["token"]}
+        ) as client:
+            async with streamable_http_client(server + "/mcp", http_client=client) as (
+                read,
+                write,
+                _,
+            ):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    assert (
+                        await session.call_tool("get_identity", {})
+                    ).structuredContent == expected
+                    # Change only the isolated server database, avoiding timing sleeps.
+                    db = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
+                    try:
+                        with Session(db) as db_session:
+                            credential = db_session.get(
+                                ClientCredential, expected["id"]
+                            )
+                            credential.expires_at = (
+                                datetime.now(timezone.utc) - timedelta(seconds=1)
+                            ).isoformat()
+                            db_session.commit()
+                    finally:
+                        db.dispose()
+                    assert (
+                        await client.post(server + "/mcp", json=call)
+                    ).status_code == 401
+
+    asyncio.run(exercise())
