@@ -1,0 +1,11 @@
+{
+  "origin": "SYNTHETIC DEMO: fictional assistant data, not user preferences",
+  "projects": ["demo-orchard", "demo-harbor", "demo-observatory"],
+  "topics": ["planning", "release", "research", "budget", "design", "testing", "meeting", "documentation"],
+  "queries": [
+    {"project": "demo-orchard", "query": "launch cadence", "contains": "weekly"},
+    {"project": "demo-harbor", "query": "launch cadence", "contains": "monthly"},
+    {"project": null, "query": "response format", "contains": "concise"},
+    {"project": "demo-orchard", "query": "quartzplatypus", "contains": null}
+  ]
+}
