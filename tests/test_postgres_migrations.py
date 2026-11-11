@@ -1425,9 +1425,30 @@ def test_native_v4_validity_upgrade_and_queries(postgres_engine, monkeypatch):
     from fastapi import HTTPException
     from gigamind.security import Actor
     from gigamind.services import trust, context, knowledge_validity
+    from gigamind import security
+    from gigamind.services import file_uploads
+    from gigamind.db.jobs import Job, UploadManifest, ResourceJobState
+    from gigamind.db.database import StorageFileItem
+    from sqlmodel import Session
+    import hashlib
 
     monkeypatch.setattr(trust, "engine", postgres_engine)
     migrations.migrate(postgres_engine)
+    monkeypatch.setattr(security, "engine", postgres_engine)
+    credential, token = security.create_client(
+        "validity-upgrade", ["memory:read"], ["p"]
+    )
+    source, job = file_uploads.prepare_upload(
+        "files/validity-upgrade.txt",
+        "validity-upgrade.txt",
+        "text/plain",
+        "text",
+        2,
+        "synthetic-test",
+        "validity-upgrade",
+        sha256=hashlib.sha256(b"ok").hexdigest(),
+        engine=postgres_engine,
+    )
     admin = Actor("admin", set(), None, True)
     reader = Actor("reader", {"memory:read"}, {"p"})
     proposal = trust.create_proposal(
@@ -1461,6 +1482,15 @@ def test_native_v4_validity_upgrade_and_queries(postgres_engine, monkeypatch):
     }
     migrations.migrate(postgres_engine)
     assert migrations.schema_ready(postgres_engine)
+    assert security.get_actor("Bearer " + token).id == credential.id
+    with Session(postgres_engine) as session:
+        assert session.get(Job, job["id"]).state == "queued"
+        assert session.get(UploadManifest, source["key"]).job_id == job["id"]
+        assert session.get(ResourceJobState, source["key"]).current_job_id == job["id"]
+        assert (
+            session.get(StorageFileItem, source["id"]).filename
+            == "validity-upgrade.txt"
+        )
     assert trust.get_history(admin, memory["id"])["revisions"][0]["revision"] == 1
     knowledge_validity.set_validity(
         admin,
@@ -1474,3 +1504,65 @@ def test_native_v4_validity_upgrade_and_queries(postgres_engine, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         context.get_memory(reader, memory["id"])
     assert exc.value.status_code == 404
+    for kind in ("fact", "preference"):
+        p = trust.create_proposal(
+            admin,
+            content=f"apple current {kind}",
+            project_id="p",
+            kind=kind,
+            evidence=[],
+            idempotency_key=kind,
+        )["proposal"]
+        accepted = trust.resolve_proposal(
+            admin, p["id"], action="approve", expected_revision=1
+        )["memory"]
+        if kind == "preference":
+            rule = accepted
+            knowledge_validity.set_validity(
+                admin,
+                rule["id"],
+                expected_revision=1,
+                valid_from="2030-01-01T00:00:00Z",
+                valid_until="2030-01-02T00:00:00Z",
+            )
+        else:
+            fact = accepted
+    for instant, visible in (
+        ("2029-12-31T00:00:00.000000+00:00", False),
+        ("2030-01-01T00:00:00.000000+00:00", True),
+        ("2030-01-02T00:00:00.000000+00:00", False),
+    ):
+        monkeypatch.setattr(knowledge_validity, "current_time", lambda: instant)
+        result = context.get_context(reader, "apple", "p")
+        assert [item["id"] for item in result["rules"]] == (
+            [rule["id"]] if visible else []
+        )
+        assert [item["id"] for item in result["memories"]] == [fact["id"]]
+    assert [
+        item["id"] for item in context.search_accepted(reader, "apple", "p", 1)
+    ] == [fact["id"]]
+    before = trust.get_memory(admin, memory["id"])
+    history = trust.get_history(admin, memory["id"])
+    activity = trust.list_activity(admin)
+
+    def fail_activity(
+        conn, cursor, statement, parameters, execution_context, executemany
+    ):
+        if "insert into trust_activity" in statement.lower():
+            raise RuntimeError("injected audit persistence failure")
+
+    event.listen(postgres_engine, "before_cursor_execute", fail_activity)
+    try:
+        with pytest.raises(RuntimeError, match="audit persistence"):
+            knowledge_validity.set_validity(
+                admin,
+                memory["id"],
+                expected_revision=2,
+                valid_from=None,
+                valid_until=None,
+            )
+    finally:
+        event.remove(postgres_engine, "before_cursor_execute", fail_activity)
+    assert trust.get_memory(admin, memory["id"]) == before
+    assert trust.get_history(admin, memory["id"]) == history
+    assert trust.list_activity(admin) == activity

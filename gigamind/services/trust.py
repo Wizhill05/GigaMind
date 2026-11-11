@@ -524,8 +524,8 @@ def restore_memory(actor, memory_id, *, revision, expected_revision):
             )
             .values(
                 content=data["content"],
-                valid_from=data.get("valid_from", m.valid_from),
-                valid_until=data.get("valid_until", m.valid_until),
+                valid_from=data.get("valid_from", AcceptedKnowledge.valid_from),
+                valid_until=data.get("valid_until", AcceptedKnowledge.valid_until),
                 status=data["status"],
                 data_json=json.dumps(
                     {k: data[k] for k in ("category", "tags", "evidence", "kind")}

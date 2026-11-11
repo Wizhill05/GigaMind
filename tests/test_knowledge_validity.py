@@ -264,7 +264,7 @@ def test_context_uses_one_instant(records, monkeypatch):
     admin, agent, memory = records
     proposal = trust.create_proposal(
         agent,
-        content="apple rule",
+        content="Use Rust for coding",
         project_id="a",
         kind="preference",
         evidence=[{"source_type": "doc", "source_id": "1", "quote": "x"}],
