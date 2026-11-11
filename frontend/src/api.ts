@@ -118,20 +118,17 @@ export async function hardResetMemories(password: string): Promise<{ success: bo
   return res.json();
 }
 
-export async function fetchProfileRules(category?: string, sourceAgent?: string): Promise<ProfileRule[] | null> {
-  try {
-    const params = new URLSearchParams();
-    if (category) params.append('category', category);
-    if (sourceAgent) params.append('source_agent', sourceAgent);
+const profileRuleSchema = z.object({
+  id: z.string(), key: z.string(), value: z.string(), category: z.string(),
+  source_agent: z.string(), updated_at: z.string(),
+});
 
-    const res = await fetch(`/api/v1/get_profile?${params.toString()}`, { headers: getHeaders() });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.profile || [];
-  } catch (err) {
-    console.error('fetchProfileRules error:', err);
-    return null;
-  }
+export async function fetchProfileRules(category?: string, sourceAgent?: string, signal?: AbortSignal): Promise<ProfileRule[]> {
+  const params = new URLSearchParams();
+  if (category) params.append('category', category);
+  if (sourceAgent) params.append('source_agent', sourceAgent);
+  const res = await checkedFetch(`/api/v1/get_profile?${params.toString()}`, { headers: getHeaders(), signal });
+  return z.object({ profile: z.array(profileRuleSchema) }).parse(await res.json()).profile;
 }
 
 export async function setProfileRule(data: {
@@ -148,17 +145,9 @@ export async function setProfileRule(data: {
     return await res.json();
 }
 
-export async function deleteProfileRule(id: string): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/v1/profile/${id}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
-    });
-    return res.ok;
-  } catch (err) {
-    console.error('deleteProfileRule error:', err);
-    return false;
-  }
+export async function deleteProfileRule(id: string): Promise<void> {
+  const res = await checkedFetch(`/api/v1/profile/${encodeURIComponent(id)}`, { method: 'DELETE', headers: getHeaders() });
+  z.object({ success: z.literal(true), id: z.string(), message: z.string() }).parse(await res.json());
 }
 
 const conversationSchema = z.object({

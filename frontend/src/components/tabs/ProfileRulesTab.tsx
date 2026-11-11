@@ -1,42 +1,58 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Filter, Search, Trash2 } from 'lucide-react';
 import { PixelShield } from '../ui/PixelIcons';
 import { ProfileRule } from '../../types';
-import { fetchProfileRules, deleteProfileRule } from '../../api';
+import { fetchProfileRules, deleteProfileRule, getApiKey } from '../../api';
 import { AgentBadge, CategoryBadge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 
 interface ProfileRulesTabProps {
   refreshVersion: number;
+  onMutation?: () => void;
   onOpenNewRuleModal: () => void;
 }
 
-export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleModal, refreshVersion }) => {
+export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleModal, refreshVersion, onMutation }) => {
   const [rules, setRules] = useState<ProfileRule[]>([]);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
 
   const { toast } = useToast();
-
-  const loadRules = async () => {
-    const res = await fetchProfileRules(categoryFilter || undefined, sourceAgentFilter || undefined);
-    if (res) {
-      setRules(res);
-    }
-  };
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [pending, setPending] = useState(false);
+  const [version, setVersion] = useState(0);
+  const deleting = useRef(false);
 
   useEffect(() => {
-    loadRules();
-  }, [categoryFilter, sourceAgentFilter, refreshVersion]);
+    const controller = new AbortController();
+    const key = getApiKey();
+    setLoading(true);
+    setError('');
+    fetchProfileRules(categoryFilter || undefined, sourceAgentFilter || undefined, controller.signal)
+      .then((result) => { if (!controller.signal.aborted && getApiKey() === key) setRules(result); })
+      .catch((err: unknown) => { if (!controller.signal.aborted && getApiKey() === key) setError(err instanceof Error ? err.message : 'Failed to load profile rules'); })
+      .finally(() => { if (!controller.signal.aborted && getApiKey() === key) setLoading(false); });
+    return () => controller.abort();
+  }, [categoryFilter, sourceAgentFilter, refreshVersion, version]);
 
   const handleDelete = async (id: string) => {
-    if (window.confirm(`Confirm deletion of profile rule: ${id}?`)) {
-      const ok = await deleteProfileRule(id);
-      if (ok) {
-        toast(`Profile rule deleted`, 'success');
-        loadRules();
-      }
+    if (deleting.current || !window.confirm(`Confirm deletion of profile rule: ${id}?`)) return;
+    deleting.current = true;
+    setPending(true);
+    setDeleteError('');
+    try {
+      await deleteProfileRule(id);
+      toast('Profile rule deleted', 'success');
+      setVersion((v) => v + 1);
+      onMutation?.();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete profile rule');
+    } finally {
+      deleting.current = false;
+      setPending(false);
     }
   };
 
@@ -56,11 +72,12 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
         <div>
           <h2 className="text-xl font-semibold text-white tracking-tight">Identity & Profile Rules</h2>
           <p className="text-xs text-[#8a8f9e] mt-0.5">
-            Permanent bio statements, tech preferences, and core behavioral directives ({rules.length} total)
+            Legacy administrative profile records. Reviewed Knowledge preferences are used for scoped agent context.
           </p>
         </div>
 
         <button
+          disabled={pending}
           onClick={onOpenNewRuleModal}
           className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm btn-press"
         >
@@ -77,6 +94,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
             <Search className="w-3.5 h-3.5 text-[#8a8f9e] absolute left-3 top-2.5" />
             <input
               type="text"
+              disabled={pending}
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Search rule keys or values..."
@@ -88,6 +106,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
             <div className="flex items-center gap-1.5 bg-[#0f0f0f] border border-[#262626] px-2.5 py-1.5 rounded-none text-xs text-[#8a8f9e]">
               <Filter className="w-3.5 h-3.5" />
               <select
+                disabled={pending}
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
                 className="bg-transparent text-white outline-none cursor-pointer"
@@ -101,6 +120,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
 
             <div className="flex items-center gap-1.5 bg-[#0f0f0f] border border-[#262626] px-2.5 py-1.5 rounded-none text-xs text-[#8a8f9e]">
               <select
+                disabled={pending}
                 value={sourceAgentFilter}
                 onChange={(e) => setSourceAgentFilter(e.target.value)}
                 className="bg-transparent text-white outline-none cursor-pointer"
@@ -116,7 +136,10 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
         </div>
 
         {/* ROWS STACK */}
-        {filteredRules.length === 0 ? (
+        {deleteError && <div role="alert" className="p-4 text-rose-400">Delete failed: {deleteError}</div>}
+        {loading ? <div className="p-12 text-center text-[#8a8f9e]">Loading profile rules...</div> : error ? (
+          <div role="alert" className="p-4 text-rose-400">{error} <button onClick={() => setVersion((v) => v + 1)} className="underline">Retry</button></div>
+        ) : filteredRules.length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e]">
             No profile rules match search criteria
           </div>
@@ -154,6 +177,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({ onOpenNewRuleM
 
                 {/* ROW ACTION */}
                 <button
+                  disabled={pending}
                   onClick={() => handleDelete(rule.id)}
                   className="bg-[#161616] border border-[#333333] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 flex-shrink-0 opacity-90 group-hover:opacity-100 btn-press"
                 >

@@ -297,6 +297,7 @@ export const AppContent: React.FC = () => {
 
                 {activeTab === "rules" && (
                   <ProfileRulesTab
+                    onMutation={() => { void loadStats(); }}
                     refreshVersion={refreshVersion}
                     onOpenNewRuleModal={() => setIsRuleModalOpen(true)}
                   />
