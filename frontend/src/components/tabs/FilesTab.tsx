@@ -25,6 +25,8 @@ import {
   fetchIndexedFiles,
   searchFiles,
   uploadFile,
+  recoverUpload,
+  UploadRecoveryReference,
   deleteStorageFile,
   reindexStorageFile,
   fetchFileChunks,
@@ -197,38 +199,58 @@ export const FilesTab: React.FC<{
     e.target.value = "";
   };
 
+  const uploadBusy = useRef(false);
+  const [recovering, setRecovering] = useState(false);
+  const [failures, setFailures] = useState<{ id: number; name: string; error: string; credential: string; recovery?: UploadRecoveryReference }[]>([]);
+  const nextFailure = useRef(0);
+  const refreshAfterUpload = () => {
+    if (onMutation) onMutation();
+    else void loadFiles();
+  };
+  const handleRecovery = async (failure: typeof failures[number]) => {
+    if (uploadBusy.current || !failure.recovery || getApiKey() !== failure.credential) return;
+    uploadBusy.current = true;
+    setRecovering(true);
+    try {
+      const result = await recoverUpload(failure.recovery);
+      if (!alive.current || getApiKey() !== failure.credential) return;
+      setFailures(current => current.filter(item => item.id !== failure.id));
+      toast(`Upload verified (job ${result.job_id}, ${result.state}). See Jobs for indexing status.`, "success");
+      refreshAfterUpload();
+    } catch (error) {
+      if (alive.current && getApiKey() === failure.credential)
+        setFailures(current => current.map(item => item.id === failure.id ? { ...item, error: error instanceof Error ? error.message : "Verification failed" } : item));
+    } finally {
+      uploadBusy.current = false;
+      if (alive.current) setRecovering(false);
+    }
+  };
+
   // Handle direct file upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
-
+    const input = e.currentTarget;
+    const selected = Array.from(input.files ?? []);
+    input.value = "";
+    if (!selected.length || uploadBusy.current) return;
+    uploadBusy.current = true;
+    const credential = getApiKey();
     setIsUploading(true);
     let successCount = 0;
-
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      toast(`Uploading ${file.name}...`, "info");
-      const res = await uploadFile(file, "files");
-      if (res.success) {
-        successCount++;
-      } else {
-        toast(
-          `Upload failed for ${file.name}: ${res.error || "Unknown error"}`,
-          "error",
-        );
+    try {
+      for (const file of selected) {
+        if (!alive.current || getApiKey() !== credential) break;
+        const result = await uploadFile(file, "files");
+        if (!alive.current || getApiKey() !== credential) break;
+        if (result.success) successCount++;
+        else setFailures(current => [...current, { id: nextFailure.current++, name: file.name, error: result.error, credential, recovery: result.recovery }]);
       }
-    }
-
-    setIsUploading(false);
-    e.target.value = "";
-
-    if (successCount > 0) {
-      toast(
-        `Uploaded ${successCount} file(s). Vector indexing queued in background.`,
-        "success",
-      );
-      void loadFiles();
-      onMutation?.();
+      if (successCount && alive.current && getApiKey() === credential) {
+        toast(`Uploaded ${successCount} file(s). Indexing is pending. See Jobs.`, "success");
+        refreshAfterUpload();
+      }
+    } finally {
+      uploadBusy.current = false;
+      if (alive.current) setIsUploading(false);
     }
   };
 
@@ -383,11 +405,20 @@ export const FilesTab: React.FC<{
               multiple
               className="hidden"
               onChange={handleFileUpload}
-              disabled={isUploading}
+              disabled={isUploading || recovering}
             />
           </label>
         </div>
       </div>
+
+      {failures.map(failure => (
+        <div key={failure.id} role="alert" className="border border-red-800 p-3 text-white space-y-2">
+          <p>{failure.name}: {failure.error}</p>
+          {failure.recovery && <p>Recovery reference: {failure.recovery.key}, job {failure.recovery.job_id}</p>}
+          {failure.recovery && <button disabled={isUploading || recovering || getApiKey() !== failure.credential} onClick={() => void handleRecovery(failure)}>Verify existing upload</button>}
+          <button disabled={isUploading || recovering} onClick={() => setFailures(current => current.filter(item => item.id !== failure.id))}>Dismiss</button>
+        </div>
+      ))}
 
       {/* METRICS ROW */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

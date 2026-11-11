@@ -404,3 +404,28 @@ it("gates Files reads, refreshes source data through the header and updates stat
   );
   expect(screen.queryByText("updated.txt")).not.toBeInTheDocument();
 });
+
+it("keeps an uncertain upload and verifies it only on explicit request", async () => {
+  setApiKey("test-key");
+  const mutation = vi.fn();
+  const fetcher = vi.fn((url: string, init?: RequestInit) => {
+    if (url === "/api/v1/files/upload?prefix=files" && init?.method === "POST")
+      return Promise.resolve(new Response(JSON.stringify({ detail: { message: "Upload outcome unknown", key: "files/key", job_id: "job-1" } }), { status: 503 }));
+    if (url === "/api/v1/files/upload/recover" && init?.method === "POST")
+      return Promise.resolve(new Response(JSON.stringify({ key: "files/key", job_id: "job-1", state: "queued", verified: true })));
+    return Promise.resolve(list());
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const view = render(<ToastProvider><FilesTab onMutation={mutation} /></ToastProvider>);
+  await screen.findByText("example.txt");
+  const input = view.container.querySelector('input[type="file"][multiple]');
+  if (!input) throw new Error("Missing upload input");
+  fireEvent.change(input, { target: { files: [new File(["a"], "a.txt")] } });
+  const verify = await screen.findByText("Verify existing upload");
+  expect(mutation).not.toHaveBeenCalled();
+  fireEvent.click(verify);
+  await screen.findByText(/job job-1, queued/);
+  expect(mutation).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls.filter(([url]) => url.includes("/upload?"))).toHaveLength(1);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/recover"))).toHaveLength(1);
+});

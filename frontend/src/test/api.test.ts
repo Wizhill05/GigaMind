@@ -52,6 +52,7 @@ it("renders recoverable upload errors as text with the recovery reference", asyn
     success: false,
     error:
       "Upload outcome unknown. Recovery reference: files/key, job pending-job",
+    recovery: { key: "files/key", job_id: "pending-job" },
   });
 });
 it("rejects malformed upload success rather than passing unchecked data into attachments", async () => {

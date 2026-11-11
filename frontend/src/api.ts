@@ -301,10 +301,24 @@ export async function searchFiles(query?: string, limit: number = 5, imageBase64
   return z.object({ results: z.array(fileSearchResultSchema) }).parse(await res.json()).results;
 }
 
+const recoveryReferenceSchema = z.object({ key: z.string().min(1).max(1024), job_id: z.string().min(1).max(255) });
+export type UploadRecoveryReference = z.infer<typeof recoveryReferenceSchema>;
+const recoveryResultSchema = recoveryReferenceSchema.extend({ state: z.string().min(1), verified: z.literal(true) });
+
+export async function recoverUpload(reference: UploadRecoveryReference) {
+  const checked = recoveryReferenceSchema.parse(reference);
+  const response = await checkedFetch('/api/v1/files/upload/recover', {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify(checked),
+  });
+  const result = recoveryResultSchema.parse(await response.json());
+  if (result.key !== checked.key || result.job_id !== checked.job_id) throw new Error('Recovery response does not match the requested upload');
+  return result;
+}
+
 export async function uploadFile(
   file: File,
   prefix: string = "files",
-): Promise<{ success: boolean; file?: MemoryAttachment; error?: string }> {
+): Promise<{ success: true; file: MemoryAttachment; error?: never } | { success: false; file?: never; error: string; recovery?: UploadRecoveryReference }> {
   try {
     const formData = new FormData();
     formData.append("file", file);
@@ -322,7 +336,7 @@ export async function uploadFile(
       const body: unknown = await res.json().catch(() => null);
       const detail = z.object({ detail: z.json() }).safeParse(body);
       const recoverable = z
-        .object({ message: z.string(), key: z.string(), job_id: z.string() })
+        .object({ message: z.string(), key: z.string().min(1).max(1024), job_id: z.string().min(1).max(255) })
         .safeParse(detail.success ? detail.data.detail : null);
       const error = recoverable.success
         ? `${recoverable.data.message}. Recovery reference: ${recoverable.data.key}, job ${recoverable.data.job_id}`
@@ -331,7 +345,7 @@ export async function uploadFile(
             ? detail.data.detail
             : JSON.stringify(detail.data.detail)
           : `Upload failed (${res.status})`;
-      return { success: false, error };
+      return { success: false, error, ...(recoverable.success ? { recovery: { key: recoverable.data.key, job_id: recoverable.data.job_id } } : {}) };
     }
     const body: unknown = await res.json();
     return z
@@ -350,19 +364,6 @@ export async function uploadFile(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Network error";
     return { success: false, error: message };
-  }
-}
-
-export async function fetchFiles(prefix: string = '', limit: number = 100): Promise<{ enabled: boolean; files: MemoryAttachment[] } | null> {
-  try {
-    const res = await fetch(`/api/v1/files?prefix=${encodeURIComponent(prefix)}&limit=${limit}`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error('fetchFiles error:', err);
-    return null;
   }
 }
 
