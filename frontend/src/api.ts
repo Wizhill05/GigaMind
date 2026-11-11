@@ -203,25 +203,20 @@ export async function backfillConversationVectors() {
   return backfillSchema.parse(await res.json());
 }
 
-export async function searchConversations(
-  query: string,
-  platform?: string,
-  sourceAgent?: string,
-  limit: number = 10
-): Promise<any[] | null> {
-  try {
-    const res = await fetch('/api/v1/conversations/search', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ query, platform, source_agent: sourceAgent, limit }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.results || [];
-  } catch (err) {
-    console.error('searchConversations error:', err);
-    return null;
-  }
+const conversationSearchResultSchema = conversationSchema.extend({
+  messages_count: z.number().int().nonnegative(), score: z.number().finite(),
+  lexical_score: z.number().finite(), vector_score: z.number().finite().optional(),
+  retrieval_method: z.enum(['lexical', 'vector', 'lexical+vector']),
+  evidence: z.array(z.object({ role: z.string(), index: z.number().int(), text: z.string() }).passthrough()),
+});
+const conversationSearchSchema = z.object({ results: z.array(conversationSearchResultSchema), count: z.number().int().nonnegative(), query: z.string(), platform: z.string().nullable() });
+export type ConversationSearchResult = z.infer<typeof conversationSearchResultSchema>;
+export async function searchConversations(query: string, platform?: string, sourceAgent?: string, limit: number = 10, signal?: AbortSignal): Promise<ConversationSearchResult[]> {
+  const res = await checkedFetch('/api/v1/conversations/search', {
+    method: 'POST', headers: getHeaders(), signal,
+    body: JSON.stringify({ query, platform, source_agent: sourceAgent, limit }),
+  });
+  return conversationSearchSchema.parse(await res.json()).results;
 }
 
 export async function searchMemory(

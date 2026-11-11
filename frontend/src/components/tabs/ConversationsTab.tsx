@@ -22,6 +22,7 @@ import { PixelTerminal } from '../ui/PixelIcons';
 import { Conversation } from '../../types';
 import {
   fetchConversations,
+  type ConversationSearchResult,
   getApiKey,
   importConversationsFile,
   searchConversations,
@@ -50,7 +51,12 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   // Semantic Vector Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [searchResults, setSearchResults] = useState<ConversationSearchResult[] | null>(null);
+
+  const searchRequest = useRef<AbortController | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [localRefresh, setLocalRefresh] = useState(0);
 
   // Import Chat History State
   const [showImportCard, setShowImportCard] = useState(false);
@@ -86,22 +92,32 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   };
 
   useEffect(() => {
-    if (searchResults === null) void loadConversations();
+    void loadConversations();
     return () => listRequest.current?.abort();
-  }, [page, platformFilter, sourceAgentFilter, searchResults, refreshVersion]);
+  }, [page, platformFilter, sourceAgentFilter, refreshVersion, localRefresh]);
 
-  // Handle semantic transcript search
-  const handleTranscriptSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!searchQuery.trim()) {
-      setSearchResults(null);
-      return;
-    }
-    setIsSearching(true);
-    const res = await searchConversations(searchQuery.trim(), platformFilter || undefined, sourceAgentFilter || undefined, 10);
-    setSearchResults(res || []);
-    setIsSearching(false);
+  useEffect(() => {
+    searchRequest.current?.abort();
+    if (!submittedQuery) { setSearchResults(null); setIsSearching(false); return; }
+    const controller = new AbortController();
+    searchRequest.current = controller;
+    const key = getApiKey();
+    setSearchResults([]); setSearchError(null); setIsSearching(true);
+    void searchConversations(submittedQuery, platformFilter || undefined, sourceAgentFilter || undefined, 10, controller.signal)
+      .then(results => { if (!controller.signal.aborted && key === getApiKey()) setSearchResults(results); })
+      .catch(error => { if (!controller.signal.aborted && key === getApiKey()) setSearchError(error instanceof Error ? error.message : 'Search failed'); })
+      .finally(() => { if (!controller.signal.aborted && key === getApiKey()) setIsSearching(false); });
+    return () => controller.abort();
+  }, [submittedQuery, platformFilter, sourceAgentFilter, localRefresh, refreshVersion]);
+
+  const handleTranscriptSearch = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    searchRequest.current?.abort();
+    setSearchResults(null); setSearchError(null);
+    if (submittedQuery === searchQuery.trim()) setLocalRefresh(v => v + 1);
+    else setSubmittedQuery(searchQuery.trim());
   };
+  const changed = () => { setLocalRefresh(v => v + 1); onMutation(); };
 
   const runMutation = async (action: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -120,7 +136,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
       setImportStatus(`Imported ${result.ingested}; skipped ${result.skipped}; ${result.pending_indexing} pending indexing.`);
       toast(result.message, 'success');
       setFile(null);
-      onMutation();
+      changed();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Import failed';
       setImportStatus(`Error: ${message}`);
@@ -136,15 +152,15 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   };
   const handleDeleteConversation = (id: string, title?: string) => {
     if (busyRef.current || !window.confirm(`Permanently delete conversation transcript "${title || id}" from database?`)) return;
-    void runMutation(async () => { await deleteConversation(id); toast('Deleted conversation transcript', 'success'); onMutation(); });
+    void runMutation(async () => { await deleteConversation(id); toast('Deleted conversation transcript', 'success'); changed(); });
   };
   const handleVectorizeSingle = (id: string) => {
-    void runMutation(async () => { await vectorizeConversation(id); toast('Vectorization request completed', 'success'); onMutation(); });
+    void runMutation(async () => { await vectorizeConversation(id); toast('Vectorization request completed', 'success'); changed(); });
   };
   const handleBackfillAll = () => {
     void runMutation(async () => {
       setIsBackfilling(true);
-      try { const result = await backfillConversationVectors(); toast(result.message, 'success'); onMutation(); }
+      try { const result = await backfillConversationVectors(); toast(result.message, 'success'); changed(); }
       finally { setIsBackfilling(false); }
     });
   };
@@ -174,7 +190,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
 
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
-            onClick={() => { setSearchResults(null); setSearchQuery(''); loadConversations(); }}
+            onClick={() => { searchRequest.current?.abort(); setSubmittedQuery(''); setSearchResults(null); setSearchQuery(''); setLocalRefresh(v => v + 1); }}
             className="px-3 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-white border border-[#333333] transition-colors flex items-center gap-1.5 font-mono text-[11px]"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -277,7 +293,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-white font-mono text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5 text-[#ff6b00]" />
-            <span>Semantic Transcript Vector Search</span>
+            <span>Transcript Search</span>
           </div>
         </div>
 
@@ -287,8 +303,8 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search concepts across all conversation sessions (e.g. 'Laptop for Blender', 'Body temperature recovery', 'FastAPI OAuth')..."
+              onChange={(e) => { searchRequest.current?.abort(); setSubmittedQuery(''); setSearchResults(null); setIsSearching(false); setSearchQuery(e.target.value); }}
+              placeholder="Search conversation sessions (e.g. 'Laptop for Blender', 'Body temperature recovery', 'FastAPI OAuth')..."
               className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-white placeholder-[#8a8f9e] outline-none font-sans text-xs"
             />
           </div>
@@ -303,7 +319,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
           {searchResults !== null && (
             <button
               type="button"
-              onClick={() => { setSearchResults(null); setSearchQuery(''); }}
+              onClick={() => { searchRequest.current?.abort(); setSubmittedQuery(''); setSearchResults(null); setSearchQuery(''); }}
               className="px-3 py-2 bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border border-[#333333] transition-colors"
             >
               Clear
@@ -330,6 +346,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
               <select
                 value={platformFilter}
                 onChange={(e) => {
+                  searchRequest.current?.abort(); setSearchResults(submittedQuery ? [] : null); setConversations([]);
                   setPlatformFilter(e.target.value);
                   setPage(1);
                 }}
@@ -346,6 +363,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
               <select
                 value={sourceAgentFilter}
                 onChange={(e) => {
+                  searchRequest.current?.abort(); setSearchResults(submittedQuery ? [] : null); setConversations([]);
                   setSourceAgentFilter(e.target.value);
                   setPage(1);
                 }}
@@ -361,15 +379,16 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
           </div>
         </div>
 
+        {searchError && <div role="alert" className="p-4 text-rose-300">{searchError} <button onClick={() => setLocalRefresh(v => v + 1)} className="underline">Retry search</button></div>}
         {loadError && <div role="alert" className="p-4 text-rose-300">{loadError} <button onClick={() => void loadConversations()} className="underline">Retry</button></div>}
         {/* LOG ROWS */}
-        {(searchResults !== null ? searchResults : conversations).length === 0 ? (
+        {isSearching ? <div className="p-4">Searching...</div> : searchError ? null : (searchResults !== null ? searchResults : conversations).length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e] space-y-3">
             <MessageSquare className="w-8 h-8 mx-auto text-[#444444]" />
             <p className="text-white font-medium">No chat transcript logs found</p>
             <p className="text-xs max-w-md mx-auto">
               {searchResults !== null
-                ? 'No conversation transcripts matched your vector search query.'
+                ? 'No conversation transcripts matched your search.'
                 : 'Click "Import Chat History" above to ingest your Claude or ChatGPT export files directly into GigaMind.'}
             </p>
           </div>
@@ -416,13 +435,14 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                         </button>
                       )}
 
-                      {conv.score !== undefined && (
+                      {searchResults?.find(result => result.id === conv.id) && (
                         <span className="text-[10px] font-mono bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 px-1.5 py-0.2">
-                          {(conv.score * 100).toFixed(1)}% match
+                          {searchResults?.find(result => result.id === conv.id)?.retrieval_method} · score {searchResults?.find(result => result.id === conv.id)?.score.toFixed(2)}
                         </span>
                       )}
                     </div>
 
+                    {searchResults?.find(result => result.id === conv.id)?.evidence.map((item, index) => <p key={index} className="text-[#8a8f9e]">{item.role}: {item.text}</p>)}
                     <p className="text-[#8a8f9e] text-xs line-clamp-1 break-words font-sans">
                       {conv.summary}
                     </p>
@@ -431,7 +451,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
 
                 <div className="flex items-center gap-2.5 flex-shrink-0">
                   <span className="text-[11px] font-mono text-[#8a8f9e]">
-                    {conv.messages ? conv.messages.length : (conv.messages_count || 0)} messages
+                    {conv.messages ? conv.messages.length : 0} messages
                   </span>
 
                   <button
