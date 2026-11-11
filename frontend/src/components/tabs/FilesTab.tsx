@@ -18,9 +18,10 @@ import {
   ImageIcon,
   Image as LucideImage
 } from 'lucide-react';
-import { StorageFile, StorageChunk, SearchResult } from '../../types';
+import { StorageFile, StorageChunk } from '../../types';
 import {
   getApiKey,
+  FileSearchResult,
   fetchIndexedFiles,
   searchFiles,
   uploadFile,
@@ -41,7 +42,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
   const [searchImageBase64, setSearchImageBase64] = useState<string | null>(null);
   const [searchImageName, setSearchImageName] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
-  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [searchResults, setSearchResults] = useState<FileSearchResult[] | null>(null);
   // Selected file for viewing chunks in modal
   const [selectedFileForChunks, setSelectedFileForChunks] = useState<StorageFile | null>(null);
   const [fileChunks, setFileChunks] = useState<StorageChunk[]>([]);
@@ -84,27 +85,57 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
 
   useEffect(() => () => chunkRequest.current?.abort(), []);
 
-  // Handle direct file search
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!searchQuery.trim() && !searchImageBase64) {
-      setSearchResults(null);
-      return;
-    }
-    setIsSearching(true);
-    const results = await searchFiles(searchQuery.trim() || undefined, 10, searchImageBase64 || undefined);
-    setSearchResults(results || []);
+  const searchRequest = useRef<AbortController | null>(null);
+  const imageReader = useRef<FileReader | null>(null);
+  const activeSearch = useRef(false);
+  const currentSearch = useRef({ query: searchQuery, image: searchImageBase64 });
+  currentSearch.current = { query: searchQuery, image: searchImageBase64 };
+  const [searchError, setSearchError] = useState('');
+  const invalidateSearch = () => {
+    searchRequest.current?.abort();
+    searchRequest.current = null;
     setIsSearching(false);
+    setSearchResults(null);
+    setSearchError('');
   };
+  const runSearch = async (query: string, image: string | null) => {
+    invalidateSearch();
+    if (!query.trim() && !image) { activeSearch.current = false; return; }
+    activeSearch.current = true;
+    const controller = new AbortController();
+    searchRequest.current = controller;
+    const key = getApiKey();
+    setIsSearching(true);
+    try {
+      const results = await searchFiles(query.trim() || undefined, 10, image || undefined, controller.signal);
+      if (!controller.signal.aborted && alive.current && getApiKey() === key) setSearchResults(results);
+    } catch (error) {
+      if (!controller.signal.aborted && alive.current && getApiKey() === key) setSearchError(error instanceof Error ? error.message : 'Search failed');
+    } finally {
+      if (!controller.signal.aborted && alive.current) {
+        if (getApiKey() !== key) setSearchError('Credentials changed. Retry search.');
+        setIsSearching(false);
+      }
+    }
+  };
+  const handleSearch = (e?: React.FormEvent) => { e?.preventDefault(); void runSearch(searchQuery, searchImageBase64); };
+  useEffect(() => {
+    if (activeSearch.current) void runSearch(searchQuery, searchImageBase64);
+    return () => { searchRequest.current?.abort(); imageReader.current?.abort(); imageReader.current = null; };
+  }, [refreshVersion]);
 
   const handleImageQueryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    imageReader.current?.abort();
+    invalidateSearch();
+    setSearchImageBase64(null); setSearchImageName(null);
     const reader = new FileReader();
+    imageReader.current = reader;
     reader.onload = () => {
-      const b64 = (reader.result as string).split(',')[1];
-      setSearchImageBase64(b64);
-      setSearchImageName(file.name);
+      if (!alive.current || imageReader.current !== reader || typeof reader.result !== 'string') return;
+      const b64 = reader.result.split(',')[1];
+      if (b64) { setSearchImageBase64(b64); setSearchImageName(file.name); }
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -155,7 +186,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
         if (!alive.current || getApiKey() !== credential) return;
         toast(`Indexing queued for ${file.filename} (job ${result.job_id}, ${result.state}). See Jobs.`, 'success');
       }
-      void loadFiles(); onMutation?.();
+      void loadFiles(); if (activeSearch.current) void runSearch(currentSearch.current.query, currentSearch.current.image); onMutation?.();
     } catch (error) {
       if (alive.current && getApiKey() === credential) toast(error instanceof Error ? error.message : 'File action failed', 'error');
     } finally {
@@ -289,7 +320,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
               <input
                 type="text"
                 value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
+                onChange={e => { imageReader.current?.abort(); imageReader.current = null; invalidateSearch(); setSearchQuery(e.target.value); }}
                 placeholder="Search concepts inside PDF papers, algorithms, or code files (e.g. QAOA 128 qubits, transmon fidelity)..."
                 className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-white placeholder-[#8a8f9e] outline-none font-sans text-xs"
               />
@@ -310,7 +341,6 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
 
             <button
               type="submit"
-              disabled={isSearching}
               className="px-4 py-2 bg-[#ff6b00] hover:bg-[#e05e00] text-white font-medium transition-colors flex items-center gap-1.5 font-sans text-xs"
             >
               {isSearching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
@@ -319,7 +349,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
             {(searchResults !== null || searchImageBase64) && (
               <button
                 type="button"
-                onClick={() => { setSearchResults(null); setSearchQuery(''); setSearchImageBase64(null); setSearchImageName(null); }}
+                onClick={() => { imageReader.current?.abort(); imageReader.current = null; invalidateSearch(); activeSearch.current = false; setSearchQuery(''); setSearchImageBase64(null); setSearchImageName(null); }}
                 className="px-3 py-2 bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border border-[#333333] transition-colors"
               >
                 Clear
@@ -333,7 +363,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
               <span>Query Image: <strong>{searchImageName}</strong></span>
               <button
                 type="button"
-                onClick={() => { setSearchImageBase64(null); setSearchImageName(null); }}
+                onClick={() => { imageReader.current?.abort(); imageReader.current = null; invalidateSearch(); setSearchImageBase64(null); setSearchImageName(null); }}
                 className="ml-auto text-[#8a8f9e] hover:text-white"
               >
                 <X className="w-3 h-3" />
@@ -342,6 +372,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
           )}
         </form>
 
+        {searchError && <div role="alert">Search failed: {searchError} <button type="button" onClick={() => handleSearch()}>Retry</button></div>}
         {/* SEARCH RESULTS PREVIEW */}
         {searchResults !== null && (
           <div className="mt-4 space-y-3 pt-3 border-t border-[#262626]">
@@ -364,7 +395,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
                           {res.citation || res.filename || 'File'}
                         </span>
                         <span className="text-[10px] font-mono text-[#8a8f9e]">
-                          Score: {(res.score * 100).toFixed(1)}%
+                          Score: {res.score}
                         </span>
                       </div>
 
@@ -381,6 +412,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
                       )}
                     </div>
 
+                    <div className="text-[#8a8f9e]">Source: {res.source}{res.file_key && ` · ${res.file_key}`}{res.page_number != null && ` · Page ${res.page_number}`}{res.chunk_index != null && ` · Chunk ${res.chunk_index + 1}${res.total_chunks != null ? ` / ${res.total_chunks}` : ''}`}{res.vector_score != null && ` · Vector score: ${res.vector_score}`}{res.rerank_score != null && ` · Rerank score: ${res.rerank_score}`}</div>
                     <p className="text-white text-xs leading-relaxed font-sans whitespace-pre-wrap bg-[#141414] p-2.5 border border-[#1f1f1f]">
                       {res.content}
                     </p>

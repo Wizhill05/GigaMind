@@ -243,24 +243,22 @@ export async function searchMemory(
   }
 }
 
-export async function searchFiles(query?: string, limit: number = 5, imageBase64?: string): Promise<SearchResult[] | null> {
-  try {
-    const res = await fetch('/api/v1/search_files', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({
-        query: query || null,
-        image_base64: imageBase64 || null,
-        limit
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.results || [];
-  } catch (err) {
-    console.error('searchFiles error:', err);
-    return null;
-  }
+const fileSearchResultSchema = z.object({
+  id: z.string(), source: z.string(), content: z.string(), score: z.number(),
+  filename: z.string().optional(), file_key: z.string().optional(), file_id: z.string().optional(),
+  multimodal_type: z.string().optional(), page_number: z.number().nullable().optional(),
+  chunk_index: z.number().nullable().optional(), total_chunks: z.number().nullable().optional(),
+  vector_score: z.number().optional(), rerank_score: z.number().optional(),
+  matching_pages: z.array(z.number()).optional(), citation: z.string().optional(), url: z.string().optional(),
+}).passthrough();
+export type FileSearchResult = z.infer<typeof fileSearchResultSchema>;
+
+export async function searchFiles(query?: string, limit: number = 5, imageBase64?: string, signal?: AbortSignal): Promise<FileSearchResult[]> {
+  const res = await checkedFetch('/api/v1/search_files', {
+    method: 'POST', headers: getHeaders(), signal,
+    body: JSON.stringify({ query: query || null, image_base64: imageBase64 || null, limit }),
+  });
+  return z.object({ results: z.array(fileSearchResultSchema) }).parse(await res.json()).results;
 }
 
 export async function searchMultimodal(
