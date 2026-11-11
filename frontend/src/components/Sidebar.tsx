@@ -34,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'OVERVIEW' },
     { id: 'activity', label: 'Activity', icon: PixelTerminal, group: 'MONITOR & LAB' },
     { id: 'jobs', label: 'Jobs', icon: PixelTerminal, group: 'MONITOR & LAB' },
+    { id: 'coordination', label: 'Coordination', icon: PixelShield, group: 'KNOWLEDGE BASE' },
     { id: 'review', label: 'Review', icon: PixelShield, group: 'KNOWLEDGE BASE' },
     { id: 'knowledge', label: 'Approved Knowledge', icon: PixelShield, group: 'KNOWLEDGE BASE' },
     { id: 'memories', label: 'Memories', icon: PixelDatabase, group: 'KNOWLEDGE BASE', badge: counts.memories },

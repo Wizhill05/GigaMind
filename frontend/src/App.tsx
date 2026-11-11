@@ -13,6 +13,7 @@ import { ActivityTab } from "./components/tabs/ActivityTab";
 import { ReviewTab } from "./components/tabs/ReviewTab";
 import { KnowledgeTab } from "./components/tabs/KnowledgeTab";
 import { ClientsTab } from "./components/tabs/ClientsTab";
+import { CoordinationTab } from "./components/tabs/CoordinationTab";
 import { JobsTab } from "./components/tabs/JobsTab";
 import { SettingsTab } from "./components/tabs/SettingsTab";
 import { MemoryModal } from "./components/modals/MemoryModal";
@@ -279,6 +280,8 @@ export const AppContent: React.FC = () => {
                 {activeTab === "activity" && (
                   <ActivityTab refreshVersion={refreshVersion} />
                 )}
+
+                {activeTab === "coordination" && <CoordinationTab refreshVersion={refreshVersion} />}
 
                 {activeTab === "review" && (
                   <ReviewTab
