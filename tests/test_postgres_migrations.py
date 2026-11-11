@@ -1159,7 +1159,7 @@ def test_native_v2_upload_manifest_upgrade_and_single_admission(
         connection.execute(text("INSERT INTO schema_migrations (version) VALUES (2)"))
     migrations.migrate(postgres_engine)
     assert "upload_manifests" in inspect(postgres_engine).get_table_names()
-    assert migrations.schema_version(postgres_engine) == 3
+    assert migrations.schema_version(postgres_engine) == migrations.VERSION
     with Session(postgres_engine) as session:
         assert (
             session.get(StorageFileItem, "legacy-file").document_summary

@@ -101,6 +101,8 @@ def test_transport(server):
                         "get_context",
                         "get_memory",
                         "propose_memory",
+                        "save_handoff",
+                        "report_memory_issue",
                     }
                     assert (
                         await session.call_tool("get_server_status", {})

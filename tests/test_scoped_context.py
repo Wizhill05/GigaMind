@@ -4,14 +4,14 @@ import pytest
 from fastapi import HTTPException
 from sqlmodel import create_engine
 
-from gigamind.db.trust_models import initialize_trust_tables
+from gigamind.db.migrations import migrate
 from gigamind.security import Actor
 from gigamind.services import context, trust
 
 
 def test_scoped_accepted_search_and_budget(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path}/db")
-    initialize_trust_tables(engine)
+    migrate(engine)
     monkeypatch.setattr(trust, "engine", engine)
     admin = Actor("admin", set(), None, True)
     agent = Actor("agent", {"memory:read"}, {"a"})
@@ -65,7 +65,7 @@ def test_context_prioritizes_scoped_preferences_for_unrelated_tasks(
     tmp_path, monkeypatch
 ):
     engine = create_engine(f"sqlite:///{tmp_path}/rules.db")
-    initialize_trust_tables(engine)
+    migrate(engine)
     monkeypatch.setattr(trust, "engine", engine)
     admin = Actor("admin", set(), None, True)
     agent = Actor("agent", {"memory:read"}, {"a"})
@@ -88,7 +88,7 @@ def test_context_prioritizes_scoped_preferences_for_unrelated_tasks(
 
 def test_unauthorized_empty_search_and_admin_global_default(tmp_path, monkeypatch):
     engine = create_engine(f'sqlite:///{tmp_path}/global.db')
-    initialize_trust_tables(engine)
+    migrate(engine)
     monkeypatch.setattr(trust, 'engine', engine)
     admin = Actor('admin', set(), None, True)
     reader = Actor('reader', {'memory:read'}, {'a'})

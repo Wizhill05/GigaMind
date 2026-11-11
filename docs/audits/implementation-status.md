@@ -28,8 +28,9 @@ Additional reviewed features:
 - Global-body limits and local CI verification are implemented. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
 
 In review:
+- Scoped handoff/issue services, REST/MCP tools and context integration are integrated provisionally. Parent full-diff review and26 focused integrated checks pass; broader SDK/rollback/native coverage remains required.
 - Conversation list error/retry, cancellation and header refresh are implemented provisionally, with parent source-role/provenance corrections. Current frontend70 tests and production build pass. Conversation search/mutation reliability remains incomplete.
-- Local SQLite backup/new-path restore commands are integrated provisionally. The initial 12 backup/migration checks pass, but actual proposal/history recovery and concurrent-write checks are still required before acceptance. PostgreSQL and object recovery remain unfinished.
+- Local SQLite backup/new-path restore commands are integrated provisionally. Input checksum verification and actual trust/credential recovery checks are added. Deterministic overlapping-write and full service-workflow recovery checks are still required before acceptance. PostgreSQL and object recovery remain unfinished.
 
 Still required:
 - Approved records are available through scoped context/MCP tools and a dedicated Knowledge console. They remain separate from legacy MemoryItem storage; richer retrieval and clear source presentation remain required.

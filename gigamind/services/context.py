@@ -131,8 +131,13 @@ def get_context(actor, query, project_id=None, token_budget=4096):
         ):
             result = candidate
     from gigamind.services import coordination
+
     handoff = coordination.latest_handoff(actor, project_id)["handoff"]
     candidate = dict(result, handoff=handoff)
-    if handoff and len(json.dumps(candidate, ensure_ascii=True).encode("utf-8")) <= token_budget:
+    if (
+        handoff
+        and len(json.dumps(candidate, ensure_ascii=True).encode("utf-8"))
+        <= token_budget
+    ):
         result = candidate
     return result
