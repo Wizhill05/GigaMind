@@ -475,3 +475,124 @@ def test_native_conversation_import_is_idempotent_and_unindexed(
             )
         ).one()
     assert tuple(row) == ("[]", None, "2023-11-14T22:13:20+00:00")
+
+
+def test_native_transcript_search_filters_before_candidates_and_unions_text(
+    postgres_engine, monkeypatch
+):
+    import json
+    from sqlalchemy.exc import DBAPIError
+    from sqlmodel import Session
+    from gigamind.db.database import ConversationItem
+    from gigamind.services import memory
+
+    monkeypatch.setenv("EMBEDDING_DIM", "2")
+    monkeypatch.setattr(memory, "engine", postgres_engine)
+    monkeypatch.setattr(memory, "is_postgres", True)
+    monkeypatch.setattr(memory.embedding_config, "DEFAULT_DIM", 2)
+    monkeypatch.setattr(memory, "generate_embedding", lambda *args: [1.0, 0.0])
+    migrations.migrate(postgres_engine)
+    with Session(postgres_engine) as session:
+        for i in range(65):
+            session.add(
+                ConversationItem(
+                    id=f"hidden-{i}",
+                    platform="Other" if i % 2 else "Claude",
+                    source_agent="GPT" if i % 2 else "other",
+                    title="ordinary",
+                    summary="",
+                    created_at="2024-01-01T00:00:00+00:00",
+                    messages_json="[]",
+                )
+            )
+        session.add(
+            ConversationItem(
+                id="semantic-visible",
+                platform="Claude",
+                source_agent="GPT",
+                title="ordinary",
+                summary="",
+                created_at="2024-01-01T00:00:00+00:00",
+                messages_json="[]",
+            )
+        )
+        session.add(
+            ConversationItem(
+                id="text-visible",
+                platform="Claude",
+                source_agent="GPT",
+                title="ordinary",
+                summary="",
+                created_at="2024-01-01T00:00:00+00:00",
+                messages_json=json.dumps(
+                    [
+                        {
+                            "role": "assistant",
+                            "content": "x" * 500 + " needle",
+                            "id": "last-source-node",
+                        }
+                    ]
+                ),
+            )
+        )
+        session.flush()
+        session.execute(
+            text(
+                "UPDATE conversations SET embedding_vector='[1,0]'::vector WHERE id LIKE 'hidden-%'"
+            )
+        )
+        session.execute(
+            text(
+                "UPDATE conversations SET embedding_vector='[0.9,0.1]'::vector WHERE id='semantic-visible'"
+            )
+        )
+        session.commit()
+    found = memory.search_conversations(
+        "synonym", platform="claude", source_agent="gpt"
+    )
+    assert [item["id"] for item in found] == ["semantic-visible"]
+    assert found[0]["retrieval_method"] == "vector"
+    combined = memory.search_conversations(
+        "needle", platform="claude", source_agent="gpt", limit=1
+    )
+    assert [item["id"] for item in combined] == ["text-visible"]
+    assert combined[0]["evidence"][0]["id"] == "last-source-node"
+    assert "needle" in combined[0]["evidence"][0]["text"]
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE conversations DROP COLUMN embedding_vector CASCADE")
+        )
+    with pytest.raises(DBAPIError, match="embedding_vector"):
+        memory.search_conversations("needle")
+
+
+def test_native_worker_bootstrap_registers_all_models(postgres_engine, monkeypatch):
+    import subprocess
+    import sys
+    from gigamind.db import jobs, memory_index
+    from gigamind import security
+
+    monkeypatch.setenv("EMBEDDING_DIM", "2")
+    with postgres_engine.connect() as connection:
+        namespace = connection.execute(text("SELECT current_schema()")).scalar_one()
+    url = make_url(os.environ["GIGAMIND_TEST_POSTGRES_URL"]).set(
+        drivername="postgresql"
+    )
+    url = url.update_query_dict({"options": f"-csearch_path={namespace},public"})
+    env = {
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": os.getcwd(),
+        "PYTHON_DOTENV_DISABLED": "1",
+        "DATABASE_URL": url.render_as_string(hide_password=False),
+        "ENVIRONMENT": "production",
+        "EMBEDDING_DIM": "2",
+    }
+    run = subprocess.run(
+        [sys.executable, "-m", "gigamind.cli.worker", "--once"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "Worker ready" in run.stdout and migrations.schema_ready(postgres_engine)

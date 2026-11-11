@@ -16,14 +16,19 @@ Additional reviewed foundations:
 - Isolated synthetic demo CLI with 64 source memories, 15 conversations, scoped reviewed facts/rules and pending proposals; source indexes stay pending.
 - Canonical branch-aware CLI/REST source imports, atomic deduplication, complete text/role retention and no automatic promotion to facts or provider requirement. Segmentation/indexing and full provenance ledger remain unfinished.
 
+Additional reviewed integration:
+- Admin jobs API and standalone worker, controlled graceful shutdown/renewal and native clean startup. Automatic source pipelines and latest-resource ownership remain unfinished.
+- Auth/list race and deletion behavior verified in 32 frontend tests; production build passes.
+- Full decoded transcript lexical search without a provider, optional existing vector candidates with SQL prefilters, source snippets and native search checks.
+
 In flight:
-- Queue HTTP/worker startup integration, full-transcript lexical retrieval and missing authentication/memory component scenarios. React auth/list implementation is intermediate pending those behavior checks.
+- Current resource ownership/tombstones for indexing, credential lifecycle and review activity console.
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.
 - Handoffs, issue reporting, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD.
 - External-provider interoperability acceptance, credential expiry/last use and input/upload bounds. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
-- Full corpus semantic/lexical retrieval, transcript segmentation including late turns, branch-aware unified imports and reliable no-match behavior.
+- Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Durable import/index/reindex jobs with progress/retries; multimodal page limits and truthful index state; safe shared-attachment GC.
 - Remaining UI API errors/cancellation/invalidation and component scenarios; credentials/activity/handoff/retrieval inspector screens.
 - Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, reproducible CI/deployment/docs and real multi-client acceptance/recovery checks.

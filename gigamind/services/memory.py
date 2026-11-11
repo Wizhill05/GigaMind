@@ -749,8 +749,48 @@ def search_conversations(
     """Search complete legacy transcripts, with optional existing vector candidates."""
     import re
 
-    query = (query or "").strip()[:2048]
-    terms = list(dict.fromkeys(re.findall(r"\w+", query.casefold())))
+    if not isinstance(query, str) or len(query) > 2048:
+        raise HTTPException(422, "Query must be text with at most 2048 characters")
+    query = query.strip()
+    stop_words = {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "is",
+        "are",
+        "was",
+        "were",
+        "to",
+        "of",
+        "in",
+        "on",
+        "for",
+        "from",
+        "what",
+        "which",
+        "when",
+        "where",
+        "how",
+        "why",
+        "do",
+        "does",
+        "did",
+        "i",
+        "my",
+        "you",
+        "your",
+        "me",
+        "about",
+    }
+    terms = list(
+        dict.fromkeys(
+            term
+            for term in re.findall(r"\w+", query.casefold())
+            if term not in stop_words
+        )
+    )
     if not terms:
         return []
     try:
@@ -758,17 +798,37 @@ def search_conversations(
     except (TypeError, ValueError, OverflowError):
         limit = 5
 
-    def valid_vector(value):
-        return (isinstance(value, list) and len(value) == embedding_config.DEFAULT_DIM
-                and all(isinstance(x, (int, float)) and not isinstance(x, bool)
-                        and math.isfinite(x) for x in value) and any(value))
+    def finite_number(value):
+        try:
+            return (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+            )
+        except OverflowError:
+            return False
+
+    def unit_vector(value):
+        try:
+            if not (
+                isinstance(value, list)
+                and len(value) == embedding_config.DEFAULT_DIM
+                and value
+                and all(finite_number(x) for x in value)
+            ):
+                return None
+            norm = math.hypot(*value)
+            if not norm or not math.isfinite(norm):
+                return None
+            return [component / norm for component in value]
+        except (OverflowError, ValueError):
+            return None
 
     try:
         vector = generate_embedding(query)
     except Exception:
         vector = None
-    if not valid_vector(vector):
-        vector = None
+    vector = unit_vector(vector)
 
     with Session(engine) as session:
         native_scores = {}
@@ -782,16 +842,28 @@ def search_conversations(
                 ORDER BY embedding_vector <=> CAST(:vec AS vector), id
                 LIMIT :candidate_limit
             """)
-            rows = session.exec(sql, params={"vec": str(vector), "platform": platform,
-                "source_agent": source_agent, "candidate_limit": max(40, limit)}).all()
-            native_scores = {row.id: float(row.score) for row in rows
-                             if row.score is not None and math.isfinite(row.score)}
+            rows = session.exec(
+                sql,
+                params={
+                    "vec": str(vector),
+                    "platform": platform,
+                    "source_agent": source_agent,
+                    "candidate_limit": max(40, limit),
+                },
+            ).all()
+            native_scores = {
+                row.id: float(row.score)
+                for row in rows
+                if row.score is not None and math.isfinite(row.score)
+            }
 
         stmt = select(ConversationItem)
         if platform:
             stmt = stmt.where(func.lower(ConversationItem.platform) == platform.lower())
         if source_agent:
-            stmt = stmt.where(func.lower(ConversationItem.source_agent) == source_agent.lower())
+            stmt = stmt.where(
+                func.lower(ConversationItem.source_agent) == source_agent.lower()
+            )
         stmt = stmt.order_by(ConversationItem.id).execution_options(yield_per=20)
         best = []
         for c in session.exec(stmt):
@@ -807,19 +879,45 @@ def search_conversations(
                 folded = field.casefold()
                 hits.update(term for term in terms if term in folded)
             for index, message in enumerate(messages):
-                if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+                if not isinstance(message, dict) or not isinstance(
+                    message.get("content"), str
+                ):
                     continue
                 content = message["content"]
                 folded = content.casefold()
                 found = [term for term in terms if term in folded]
                 hits.update(found)
                 if found and len(snippets) < 3:
-                    match = re.search(re.escape(found[0]), content, re.IGNORECASE)
-                    pos = match.start() if match else 0
-                    snippet = {"role": message.get("role", "unknown"), "index": index,
-                               "text": content[max(0, pos - 100):pos + 200]}
+                    pos = folded.find(found[0])
+                    if len(folded) != len(content):
+                        folded_offset = 0
+                        for original_index, char in enumerate(content):
+                            folded_offset += len(char.casefold())
+                            if folded_offset > pos:
+                                pos = original_index
+                                break
+                    role = message.get("role")
+                    snippet = {
+                        "role": role
+                        if isinstance(role, str) and len(role) <= 128
+                        else "unknown",
+                        "index": index,
+                        "text": content[max(0, pos - 100) : pos + 200],
+                    }
                     for key in ("id", "created_at"):
-                        if key in message:
+                        value = message.get(key)
+                        if (
+                            key == "id"
+                            and isinstance(value, str)
+                            and len(value) <= 4096
+                        ) or (
+                            key == "created_at"
+                            and (
+                                isinstance(value, str)
+                                and len(value) <= 128
+                                or finite_number(value)
+                            )
+                        ):
                             snippet[key] = message[key]
                     snippets.append(snippet)
             lexical = len(hits) / len(terms)
@@ -829,20 +927,34 @@ def search_conversations(
                     stored = json.loads(c.embedding_json or "[]")
                 except (ValueError, TypeError):
                     stored = None
-                if valid_vector(stored):
+                stored = unit_vector(stored)
+                if stored:
                     semantic = cosine_similarity(vector, stored)
             if not lexical and (semantic is None or semantic <= 0):
                 continue
-            score = lexical + (max(0.0, semantic) * 0.25 if semantic is not None else 0)
-            result = {"id": c.id, "source": "conversation", "platform": c.platform,
-                      "title": c.title, "summary": c.summary,
-                      "source_agent": c.source_agent or "user",
-                      "content": f"[{c.platform.upper()} Transcript] {c.title}: {c.summary}",
-                      "messages": messages, "messages_count": len(messages),
-                      "created_at": c.created_at, "score": round(score, 4),
-                      "retrieval_method": "lexical+vector" if lexical and semantic is not None
-                                          else "lexical" if lexical else "vector",
-                      "evidence": snippets}
+            score = (0.5 + lexical * 0.25 if lexical else 0) + (
+                min(1.0, max(0.0, semantic)) * 0.25 if semantic is not None else 0
+            )
+            result = {
+                "id": c.id,
+                "source": "conversation",
+                "platform": c.platform,
+                "title": c.title,
+                "summary": c.summary,
+                "source_agent": c.source_agent or "user",
+                "content": f"[{c.platform.upper()} Transcript] {c.title}: {c.summary}",
+                "messages": messages,
+                "messages_count": len(messages),
+                "created_at": c.created_at,
+                "score": round(score, 4),
+                "lexical_score": lexical,
+                "retrieval_method": "lexical+vector"
+                if lexical and semantic is not None
+                else "lexical"
+                if lexical
+                else "vector",
+                "evidence": snippets,
+            }
             if semantic is not None:
                 result["vector_score"] = semantic
             best.append(result)
@@ -850,6 +962,7 @@ def search_conversations(
             if len(best) > limit:
                 best.pop()
         return best
+
 
 def backfill_conversation_vectors() -> int:
     """Computes and backfills Gemini Embedding 2 vectors for all stored conversations."""
@@ -861,7 +974,10 @@ def backfill_conversation_vectors() -> int:
             if c.messages_json:
                 try:
                     msgs = json.loads(c.messages_json)
-                    msgs_preview = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')[:100]}" for m in msgs[:4])
+                    msgs_preview = "\n".join(
+                        f"{m.get('role', 'user')}: {m.get('content', '')[:100]}"
+                        for m in msgs[:4]
+                    )
                 except Exception:
                     pass
             text_for_vector = f"Chat Platform: {c.platform}. Title: {c.title}\nSummary: {c.summary}\n{msgs_preview}"

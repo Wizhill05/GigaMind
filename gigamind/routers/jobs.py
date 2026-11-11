@@ -10,7 +10,9 @@ from gigamind.db.jobs import Job
 from gigamind.security import require_scope
 from gigamind.services import jobs
 
-router = APIRouter(prefix="/api/v1/jobs", dependencies=[Depends(require_scope("admin"))])
+router = APIRouter(
+    prefix="/api/v1/jobs", dependencies=[Depends(require_scope("admin"))]
+)
 
 
 class JobRequest(BaseModel):
@@ -23,18 +25,33 @@ class JobRequest(BaseModel):
 
 def public(job):
     return {
-        "id": job.id, "kind": job.kind, "payload": json.loads(job.payload_json),
-        "idempotency_key": job.idempotency_key, "state": job.state,
+        "id": job.id,
+        "kind": job.kind,
+        "payload": json.loads(job.payload_json),
+        "idempotency_key": job.idempotency_key,
+        "state": job.state,
         "result": json.loads(job.result_json) if job.result_json else None,
-        "error": job.error, "attempts": job.attempts, "max_attempts": job.max_attempts,
-        "available_at": job.available_at, "created_at": job.created_at, "updated_at": job.updated_at,
+        "error": job.error,
+        "attempts": job.attempts,
+        "max_attempts": job.max_attempts,
+        "available_at": job.available_at,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
     }
 
 
 @router.post("")
 def create(req: JobRequest):
     try:
-        return public(jobs.enqueue(req.kind, req.payload, req.idempotency_key, req.max_attempts, engine=engine))
+        return public(
+            jobs.enqueue(
+                req.kind,
+                req.payload,
+                req.idempotency_key,
+                req.max_attempts,
+                engine=engine,
+            )
+        )
     except jobs.Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
@@ -42,9 +59,13 @@ def create(req: JobRequest):
 
 
 @router.get("")
-def list_jobs(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=100000)):
+def list_jobs(
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=100000)
+):
     with Session(engine) as session:
-        rows = session.exec(select(Job).order_by(Job.created_at, Job.id).offset(offset).limit(limit)).all()
+        rows = session.exec(
+            select(Job).order_by(Job.created_at, Job.id).offset(offset).limit(limit)
+        ).all()
         return {"jobs": [public(row) for row in rows]}
 
 

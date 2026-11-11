@@ -1,4 +1,5 @@
 """Run the durable job worker as a separate process."""
+
 import argparse
 import math
 import signal
@@ -14,6 +15,7 @@ def finite_range(low, high):
         if not math.isfinite(number) or not low <= number <= high:
             raise argparse.ArgumentTypeError(f"must be between {low} and {high}")
         return number
+
     return parse
 
 
@@ -33,6 +35,7 @@ def main():
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
+    print("Worker ready", flush=True)
     while not stop.is_set():
         job = run_once(lease_seconds=args.lease_seconds)
         if args.once:

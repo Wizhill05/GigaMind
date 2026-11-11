@@ -50,11 +50,15 @@ def _message(msg, node_id=None):
         result["id"] = identifier
     timestamp = msg.get("create_time", msg.get("created_at"))
     if timestamp is not None:
-        if (
-            isinstance(timestamp, bool)
-            or not isinstance(timestamp, (str, int, float))
-            or (isinstance(timestamp, (int, float)) and not math.isfinite(timestamp))
-        ):
+        try:
+            valid_time = (
+                not isinstance(timestamp, bool)
+                and isinstance(timestamp, (str, int, float))
+                and (isinstance(timestamp, str) or math.isfinite(timestamp))
+            )
+        except OverflowError:
+            valid_time = False
+        if not valid_time:
             raise ValueError("Invalid message timestamp")
         result["created_at"] = timestamp
     return result
