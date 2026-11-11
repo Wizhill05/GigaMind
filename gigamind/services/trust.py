@@ -493,12 +493,14 @@ def list_activity(actor, project_id=None, *, limit=100, offset=0):
     pagination(limit, offset)
     with Session(engine) as s:
         query = scoped_query(actor, ActivityEvent, project_id)
+        total = s.exec(select(func.count()).select_from(query.subquery())).one()
         rows = s.exec(
-            query.order_by(ActivityEvent.created_at, ActivityEvent.id)
+            query.order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
             .offset(offset)
             .limit(limit)
         ).all()
         return {
+            "total": total,
             "events": [
                 x.model_dump() if hasattr(x, "model_dump") else x.dict() for x in rows
             ]

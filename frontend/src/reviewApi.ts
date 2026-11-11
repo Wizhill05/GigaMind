@@ -122,3 +122,15 @@ export const previewProposal = (
       signal,
     },
   );
+
+const activityEvent = z.object({
+  id: z.string(), project_id: z.string().nullable(), writer_id: z.string(),
+  action: z.string(), target_id: z.string(), revision: z.number(),
+  status: z.string(), created_at: z.string(), updated_at: z.string(),
+});
+export type ActivityEvent = z.infer<typeof activityEvent>;
+export const listActivity = (project: string, offset: number, signal?: AbortSignal) => {
+  const params = new URLSearchParams({ limit: "20", offset: String(offset) });
+  if (project) params.set("project_id", project);
+  return request(`/activity?${params}`, z.object({ events: z.array(activityEvent), total: z.number() }), { signal });
+};
