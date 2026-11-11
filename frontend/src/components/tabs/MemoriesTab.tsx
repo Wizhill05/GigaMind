@@ -56,11 +56,14 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
     } catch (error) {
       if (!controller.signal.aborted && storageAlive.current && getApiKey() === credential) setStorageError(error instanceof Error ? error.message : 'Could not load files');
     } finally {
-      if (!controller.signal.aborted && storageAlive.current && getApiKey() === credential) setIsStorageLoading(false);
+      if (!controller.signal.aborted && storageAlive.current) {
+        if (getApiKey() !== credential) { setStorageFiles([]); setStorageError('Credentials changed. Retry to load files.'); }
+        setIsStorageLoading(false);
+      }
     }
   };
   const handleReindex = async (key: string) => {
-    if (indexing.current.has(key)) return;
+    if (indexing.current.size > 0) return;
     indexing.current.add(key); setReindexingKey(key);
     const credential = getApiKey();
     try {
@@ -72,7 +75,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
       if (storageAlive.current && getApiKey() === credential) toast(error instanceof Error ? error.message : 'Could not queue vector extraction', 'error');
     } finally {
       indexing.current.delete(key);
-      if (storageAlive.current && getApiKey() === credential) setReindexingKey(null);
+      if (storageAlive.current) setReindexingKey(null);
     }
   };
 
@@ -216,7 +219,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
             <div role="alert" className="p-4 text-red-400">{storageError} <button onClick={() => void loadStorageFiles()}>Retry</button></div>
           ) : storageFiles.length === 0 ? (
             <div className="p-12 text-center text-[#8a8f9e]">
-              No files have been uploaded and vectorized yet. Upload PDFs or documents via the Memory modal or FastMCP tools.
+              No files are available. Upload a document from Files to queue indexing; check progress in Jobs.
             </div>
           ) : (
             <div className="divide-y divide-[#262626]">
@@ -263,7 +266,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
                     )}
                     <button
                       onClick={() => handleReindex(file.key)}
-                      disabled={reindexingKey === file.key}
+                      disabled={reindexingKey !== null}
                       className="flex items-center gap-1 bg-[#141414] hover:bg-[#252525] border border-[#333333] text-[#c1c5d0] px-2.5 py-1 text-xs transition-colors disabled:opacity-50"
                       title="Re-extract text and re-generate embeddings"
                     >

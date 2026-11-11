@@ -70,7 +70,10 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
     } catch (error) {
       if (!controller.signal.aborted && alive.current && getApiKey() === key) setListError(error instanceof Error ? error.message : 'Could not load files');
     } finally {
-      if (!controller.signal.aborted && alive.current && getApiKey() === key) setIsLoading(false);
+      if (!controller.signal.aborted && alive.current) {
+        if (getApiKey() !== key) { setFiles([]); setListError('Credentials changed. Retry to load files.'); }
+        setIsLoading(false);
+      }
     }
   };
   useEffect(() => {
@@ -157,7 +160,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
       if (alive.current && getApiKey() === credential) toast(error instanceof Error ? error.message : 'File action failed', 'error');
     } finally {
       mutations.current.delete(file.key);
-      if (alive.current && getApiKey() === credential) setReindexingKeys(prev => ({ ...prev, [file.key]: false }));
+      if (alive.current) setReindexingKeys(prev => ({ ...prev, [file.key]: false }));
     }
   };
   const handleDelete = (file: StorageFile) => void handleMutation(file, 'delete');
@@ -173,7 +176,10 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
     } catch (error) {
       if (!controller.signal.aborted && alive.current && getApiKey() === credential) setChunkError(error instanceof Error ? error.message : 'Could not load chunks');
     } finally {
-      if (!controller.signal.aborted && alive.current && getApiKey() === credential) setIsLoadingChunks(false);
+      if (!controller.signal.aborted && alive.current) {
+        if (getApiKey() !== credential) { setFileChunks([]); setChunkError('Credentials changed. Retry to load chunks.'); }
+        setIsLoadingChunks(false);
+      }
     }
   };
 
@@ -413,7 +419,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
         {isLoading ? (
           <div className="p-12 text-center text-[#8a8f9e] space-y-2">
             <RefreshCw className="w-6 h-6 animate-spin mx-auto text-[#ff6b00]" />
-            <p>Loading files from Cloudflare R2 and Neon pgvector...</p>
+            <p>Loading files...</p>
           </div>
         ) : listError ? (
           <div role="alert" className="p-4 text-red-400">{listError} <button onClick={() => void loadFiles()}>Retry</button></div>
@@ -531,6 +537,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
 
                           <button
                             onClick={() => handleDelete(file)}
+                            disabled={isReindexing}
                             className="p-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-red-400 border border-[#333333] transition-colors"
                             title="Delete File from R2"
                           >
@@ -558,7 +565,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
                 <div>
                   <h3 className="text-sm font-semibold text-white">{selectedFileForChunks.filename}</h3>
                   <p className="text-[11px] font-mono text-[#8a8f9e]">
-                    {fileChunks.length} Semantic Vector Chunks Extracted in Neon
+                    {fileChunks.length} indexed chunks
                   </p>
                 </div>
               </div>

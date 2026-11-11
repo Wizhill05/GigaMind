@@ -25,6 +25,7 @@ Additional reviewed integration:
 Additional reviewed features:
 - Admin upload/recovery routes now use durable registration, one immutable PUT, bounded remote verification and checksum-gated acknowledgement. Authenticated HTTP tests cover collisions without overwrite, decoded 20 MB limits, cancelled in-flight uploads, stale/missing/mismatched recovery and tombstones. A real unrelated indexing worker renews its lease during a blocked upload. These are local tests with provider/storage boundaries substituted.
 - Jobs console supports progress, cancellation, indexing/cleanup retries, polling, hidden-tab pause and stale-response protection. Approved Knowledge console supports project/status filters, evidence, history, revision-checked deletion/restore and explicit conflict reload. Both are tested through the real App authentication and header-refresh flows.
+- File list/chunk errors, cancellation, credential/unmount guards and truthful index/cleanup job acknowledgements are reviewed in Files and the Memories file subtab, including App refresh. File search and upload/recovery UX remain unfinished.
 - Global-body limits and local CI verification are implemented. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
 
 Additional reviewed units:
@@ -43,6 +44,6 @@ Still required:
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Automatic import indexing jobs, live-provider multimodal/token acceptance and complete source state presentation. Upload indexing, file reindex/deletion, Jobs progress/retries and reference-safe shared-attachment GC are implemented.
 - Remaining UI API errors/cancellation/invalidation and component scenarios; handoff/retrieval inspector screens; review activity is implemented.
-- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:278 backend tests pass with24 optional native checks skipped; all24 native checks passed separately. The frontend suite has104 passing tests and a successful production build. Hosted CI has not been run.
+- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:278 backend tests pass with24 optional native checks skipped; all24 native checks passed separately. The frontend suite has116 passing tests and a successful production build. Hosted CI has not been run.
 
 Every agent change requires parent full-diff review and relevant local tests before acceptance. See implementation-review-log.md for findings and verification limits.

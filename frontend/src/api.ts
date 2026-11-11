@@ -355,20 +355,20 @@ export async function fetchFiles(prefix: string = '', limit: number = 100): Prom
 }
 
 const fileSchema = z.object({
-  id: z.string(), key: z.string(), filename: z.string(),
+  id: z.string().min(1), key: z.string().min(1), filename: z.string(),
   mime_type: z.string().nullish().transform(v => v ?? undefined),
-  size_bytes: z.number(), source_agent: z.string().nullish().transform(v => v ?? undefined),
-  extracted_text_length: z.number(), total_chunks: z.number(), indexing_status: z.string(),
+  size_bytes: z.number().int().nonnegative().safe(), source_agent: z.string().nullish().transform(v => v ?? undefined),
+  extracted_text_length: z.number().int().nonnegative().safe(), total_chunks: z.number().int().nonnegative().safe(), indexing_status: z.string(),
   url: z.string().nullish().transform(v => v ?? undefined), created_at: z.string(),
   updated_at: z.string().nullish().transform(v => v ?? undefined),
 });
 const chunkSchema = z.object({
-  id: z.string(), file_key: z.string(), chunk_index: z.number(), total_chunks: z.number(),
+  id: z.string().min(1), file_key: z.string().min(1), chunk_index: z.number().int().nonnegative(), total_chunks: z.number().int().nonnegative(),
   page_number: z.number().nullish().transform(v => v ?? undefined),
   is_visual_anchor: z.boolean().nullish().transform(v => v ?? undefined),
   content: z.string(), created_at: z.string(),
 });
-const jobSchema = z.object({ key: z.string(), job_id: z.string(), state: z.string() });
+const jobSchema = z.object({ key: z.string().min(1), job_id: z.string().min(1), state: z.string().min(1) });
 
 export async function deleteStorageFile(key: string) {
   const res = await checkedFetch('/api/v1/files/delete', {
@@ -379,7 +379,7 @@ export async function deleteStorageFile(key: string) {
 
 export async function fetchIndexedFiles(limit = 100, signal?: AbortSignal) {
   const res = await checkedFetch(`/api/v1/files/indexed?limit=${limit}`, { headers: getHeaders(), signal });
-  return z.object({ files: z.array(fileSchema), count: z.number() }).parse(await res.json());
+  return z.object({ files: z.array(fileSchema), count: z.number().int().nonnegative().safe() }).parse(await res.json());
 }
 
 export async function reindexStorageFile(key: string) {
@@ -391,7 +391,7 @@ export async function reindexStorageFile(key: string) {
 
 export async function fetchFileChunks(key: string, signal?: AbortSignal) {
   const res = await checkedFetch(`/api/v1/files/chunks?key=${encodeURIComponent(key)}`, { headers: getHeaders(), signal });
-  return z.object({ key: z.string(), chunks: z.array(chunkSchema), count: z.number() }).parse(await res.json());
+  return z.object({ key: z.string().min(1), chunks: z.array(chunkSchema), count: z.number().int().nonnegative().safe() }).parse(await res.json());
 }
 
 export async function importConversationsFile(file: File, platform?: string) {
