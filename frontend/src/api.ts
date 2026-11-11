@@ -161,24 +161,24 @@ export async function deleteProfileRule(id: string): Promise<boolean> {
   }
 }
 
-export async function fetchConversations(
-  page: number = 1,
-  limit: number = 20,
-  platform?: string,
-  sourceAgent?: string
-): Promise<{ conversations: Conversation[]; total: number; total_vectorized?: number; page: number; pages: number } | null> {
-  try {
-    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-    if (platform) params.append('platform', platform);
-    if (sourceAgent) params.append('source_agent', sourceAgent);
+const conversationSchema = z.object({
+  id: z.string(), platform: z.string(), title: z.string(), summary: z.string(),
+  source_agent: z.string(), created_at: z.string(), is_vectorized: z.boolean().optional(),
+  messages: z.array(z.object({ role: z.enum(['user', 'assistant', 'system']), content: z.string() })),
+});
+const conversationListSchema = z.object({
+  conversations: z.array(conversationSchema), total: z.number(), total_vectorized: z.number(),
+  page: z.number(), pages: z.number(),
+});
 
-    const res = await fetch(`/api/v1/conversations?${params.toString()}`, { headers: getHeaders() });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error('fetchConversations error:', err);
-    return null;
-  }
+export async function fetchConversations(
+  page: number = 1, limit: number = 20, platform?: string, sourceAgent?: string, signal?: AbortSignal
+): Promise<z.infer<typeof conversationListSchema>> {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (platform) params.append('platform', platform);
+  if (sourceAgent) params.append('source_agent', sourceAgent);
+  const res = await checkedFetch(`/api/v1/conversations?${params.toString()}`, { headers: getHeaders(), signal });
+  return conversationListSchema.parse(await res.json());
 }
 
 export async function deleteConversation(id: string): Promise<boolean> {

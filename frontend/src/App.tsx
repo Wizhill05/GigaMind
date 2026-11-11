@@ -212,7 +212,7 @@ export const AppContent: React.FC = () => {
             )}
 
             {activeTab === 'transcripts' && (
-              <ConversationsTab onOpenTranscript={(conv) => setActiveTranscript(conv)} />
+              <ConversationsTab refreshVersion={refreshVersion} onOpenTranscript={(conv) => setActiveTranscript(conv)} />
             )}
 
             {activeTab === 'vector-lab' && <VectorSearchLabTab />}

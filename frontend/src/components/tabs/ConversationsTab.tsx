@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Filter,
   Eye,
@@ -22,6 +22,7 @@ import { PixelTerminal } from '../ui/PixelIcons';
 import { Conversation } from '../../types';
 import {
   fetchConversations,
+  getApiKey,
   importConversationsFile,
   searchConversations,
   deleteConversation,
@@ -33,9 +34,10 @@ import { useToast } from '../ui/Toast';
 
 interface ConversationsTabProps {
   onOpenTranscript: (conv: Conversation) => void;
+  refreshVersion?: number;
 }
 
-export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTranscript }) => {
+export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTranscript, refreshVersion = 0 }) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -58,21 +60,31 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
 
   const { toast } = useToast();
 
+  const listRequest = useRef<AbortController | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const loadConversations = async () => {
-    const res = await fetchConversations(page, 10, platformFilter || undefined, sourceAgentFilter || undefined);
-    if (res) {
+    listRequest.current?.abort();
+    const controller = new AbortController();
+    listRequest.current = controller;
+    const key = getApiKey();
+    try {
+      const res = await fetchConversations(page, 10, platformFilter || undefined, sourceAgentFilter || undefined, controller.signal);
+      if (controller.signal.aborted || key !== getApiKey()) return;
+      if (page > Math.max(1, res.pages)) { setPage(Math.max(1, res.pages)); return; }
       setConversations(res.conversations);
       setTotalPages(res.pages || 1);
-      setTotalCount(res.total || 0);
-      setTotalVectorized(res.total_vectorized || 0);
+      setTotalCount(res.total);
+      setTotalVectorized(res.total_vectorized);
+      setLoadError(null);
+    } catch (error) {
+      if (!controller.signal.aborted && key === getApiKey()) setLoadError(error instanceof Error ? error.message : 'Unable to load conversations');
     }
   };
 
   useEffect(() => {
-    if (searchResults === null) {
-      loadConversations();
-    }
-  }, [page, platformFilter, sourceAgentFilter, searchResults]);
+    if (searchResults === null) void loadConversations();
+    return () => listRequest.current?.abort();
+  }, [page, platformFilter, sourceAgentFilter, searchResults, refreshVersion]);
 
   // Handle semantic transcript search
   const handleTranscriptSearch = async (e?: React.FormEvent) => {
@@ -363,6 +375,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
           </div>
         </div>
 
+        {loadError && <div role="alert" className="p-4 text-rose-300">{loadError} <button onClick={() => void loadConversations()} className="underline">Retry</button></div>}
         {/* LOG ROWS */}
         {(searchResults !== null ? searchResults : conversations).length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e] space-y-3">
