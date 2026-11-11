@@ -6,6 +6,8 @@ import json
 import os
 import secrets
 import uuid
+from datetime import datetime, timezone, timedelta
+from sqlalchemy import update, or_
 from sqlalchemy import UniqueConstraint
 from gigamind.services.oauth import (
     resource_config,
@@ -37,6 +39,10 @@ class ClientCredential(SQLModel, table=True):
     scopes_json: str
     project_ids_json: str
     revoked: bool = False
+    created_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    last_used_at: Optional[str] = None
+    revision: int = 0
 
 
 class OAuthBinding(SQLModel, table=True):
@@ -59,6 +65,41 @@ class Actor:
     is_admin: bool = False
 
 
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
+def normalize_expiry(value):
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None or parsed <= now_utc():
+            raise ValueError()
+        return parsed.astimezone(timezone.utc).isoformat()
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("expires_at must be a future timezone-aware ISO timestamp")
+
+
+def usable(client):
+    if client.revoked:
+        return False
+    try:
+        return client.expires_at is None or datetime.fromisoformat(client.expires_at) > now_utc()
+    except (ValueError, TypeError):
+        return False
+
+
+def record_use(session, client):
+    now = now_utc()
+    cutoff = (now - timedelta(minutes=5)).isoformat()
+    session.exec(update(ClientCredential).where(
+        ClientCredential.id == client.id,
+        or_(ClientCredential.last_used_at == None, ClientCredential.last_used_at < cutoff),
+    ).values(last_used_at=now.isoformat()))
+    session.commit()
+
+
 def get_actor(authorization: Optional[str] = Header(default=None)) -> Actor:
     if not authorization or not authorization.startswith("Bearer "):
         raise unauthorized()
@@ -77,11 +118,12 @@ def get_actor(authorization: Optional[str] = Header(default=None)) -> Actor:
         client = session.exec(
             select(ClientCredential).where(ClientCredential.token_hash == digest)
         ).first()
-        if client and not client.revoked:
+        if client and usable(client):
+            record_use(session, client)
             projects = json.loads(client.project_ids_json)
             return Actor(
                 client.id,
-                set(json.loads(client.scopes_json)),
+                set(json.loads(client.scopes_json)) - {"admin"},
                 set(projects) if projects is not None else None,
             )
     config = resource_config()
@@ -101,7 +143,8 @@ def get_actor(authorization: Optional[str] = Header(default=None)) -> Actor:
                     if binding
                     else None
                 )
-                if client and not client.revoked:
+                if client and usable(client):
+                    record_use(session, client)
                     projects = json.loads(client.project_ids_json)
                     return Actor(
                         client.id,
@@ -138,11 +181,14 @@ def require_scope(*scopes: str):
     return dependency
 
 
-def create_client(name: str, scopes: list[str], project_ids: list[str]):
+def create_client(name: str, scopes: list[str], project_ids: list[str], expires_at: Optional[str] = None):
+    expires_at = normalize_expiry(expires_at)
     token = "gm_" + secrets.token_urlsafe(32)
     client = ClientCredential(
         id=str(uuid.uuid4()),
         name=name,
+        created_at=now_utc().isoformat(),
+        expires_at=expires_at,
         token_hash=hashlib.sha256(token.encode()).hexdigest(),
         scopes_json=json.dumps(scopes),
         project_ids_json=json.dumps(project_ids),
@@ -161,4 +207,8 @@ def public_client(client: ClientCredential):
         "scopes": json.loads(client.scopes_json),
         "project_ids": json.loads(client.project_ids_json),
         "revoked": client.revoked,
+        "created_at": client.created_at,
+        "expires_at": client.expires_at,
+        "last_used_at": client.last_used_at,
+        "revision": client.revision,
     }

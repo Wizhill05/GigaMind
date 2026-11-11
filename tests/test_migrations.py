@@ -7,7 +7,7 @@ def test_fresh_and_repeat(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'db'}")
     assert not migrations.schema_ready(engine)
     migrations.migrate(engine)
-    assert migrations.schema_version(engine) == 1
+    assert migrations.schema_version(engine) == migrations.VERSION
     assert migrations.schema_ready(engine)
     migrations.migrate(engine)
     assert migrations.schema_ready(engine)

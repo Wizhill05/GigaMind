@@ -12,7 +12,7 @@ from sqlmodel import SQLModel
 
 from gigamind.db import trust_models  # register trust tables
 
-VERSION = 1
+VERSION = 2
 LEGACY_COLUMNS = {
     "memories": {
         "media_type": "TEXT DEFAULT 'text'",
@@ -239,8 +239,14 @@ def migrate(engine):
                 raise RuntimeError(
                     f"Database schema version {version} is newer than supported version {VERSION}"
                 )
-            if version < VERSION:
+            if version < 1:
                 _upgrade(conn)
+            if version < 2 and inspect(conn).has_table("client_credentials", schema=schema):
+                columns = {c["name"] for c in inspect(conn).get_columns("client_credentials", schema=schema)}
+                for name, ddl in {"created_at": "TEXT", "expires_at": "TEXT", "last_used_at": "TEXT", "revision": "INTEGER NOT NULL DEFAULT 0"}.items():
+                    if name not in columns:
+                        conn.exec_driver_sql(f'ALTER TABLE client_credentials ADD COLUMN "{name}" {ddl}')
+            if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),
                     {"version": VERSION},

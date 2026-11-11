@@ -6,7 +6,9 @@ import base64
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, BackgroundTasks, Query
 from contextlib import asynccontextmanager
-from sqlalchemy import text
+from sqlalchemy import text, update, or_
+import hashlib
+import secrets
 from gigamind.protocol import manager, mcp_endpoint
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse, Response
@@ -34,7 +36,7 @@ from gigamind.services.memory import (
     delete_conversation,
     vectorize_conversation
 )
-from gigamind.security import Actor, ClientCredential, SCOPES, create_client, get_actor, public_client, require_scope
+from gigamind.security import Actor, ClientCredential, SCOPES, create_client, get_actor, public_client, require_scope, now_utc
 from gigamind.db.database import engine
 from sqlmodel import Session, select
 from gigamind.db.trust_models import initialize_trust_tables
@@ -253,18 +255,44 @@ class ClientRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     scopes: List[str]
     project_ids: List[str]
+    expires_at: Optional[str] = None
+
+class RotationRequest(BaseModel):
+    expected_revision: int = Field(ge=0)
 
 @app.get("/api/v1/admin/clients")
-def list_clients(actor: Actor = Depends(require_scope("admin"))):
+def list_clients(limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0), actor: Actor = Depends(require_scope("admin"))):
     with Session(engine) as session:
-        return {"clients": [public_client(c) for c in session.exec(select(ClientCredential)).all()]}
+        return {"clients": [public_client(c) for c in session.exec(select(ClientCredential).order_by(ClientCredential.id).offset(offset).limit(limit)).all()]}
 
 @app.post("/api/v1/admin/clients")
 def add_client(req: ClientRequest, actor: Actor = Depends(require_scope("admin"))):
     if not set(req.scopes).issubset(SCOPES - {"admin"}) or not req.project_ids or any(not p.strip() for p in req.project_ids):
         raise HTTPException(422, "Valid non-admin scopes and project IDs are required")
-    client, token = create_client(req.name, req.scopes, req.project_ids)
+    try:
+        client, token = create_client(req.name, req.scopes, req.project_ids, req.expires_at)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     return {"client": public_client(client), "token": token}
+
+@app.post("/api/v1/admin/clients/{client_id}/rotate")
+def rotate_client(client_id: str, req: RotationRequest, actor: Actor = Depends(require_scope("admin"))):
+    token = "gm_" + secrets.token_urlsafe(32)
+    with Session(engine) as session:
+        result = session.exec(update(ClientCredential).where(
+            ClientCredential.id == client_id,
+            ClientCredential.revoked == False,
+            ClientCredential.revision == req.expected_revision,
+            or_(ClientCredential.expires_at == None, ClientCredential.expires_at > now_utc().isoformat()),
+        ).values(token_hash=hashlib.sha256(token.encode()).hexdigest(), revision=ClientCredential.revision + 1))
+        if result.rowcount != 1:
+            session.rollback()
+            if not session.get(ClientCredential, client_id):
+                raise HTTPException(404, "Client not found")
+            raise HTTPException(409, "Client cannot be rotated or revision is stale")
+        session.commit()
+        client = session.get(ClientCredential, client_id)
+        return {"client": public_client(client), "token": token}
 
 @app.post("/api/v1/admin/clients/{client_id}/revoke")
 def revoke_client(client_id: str, actor: Actor = Depends(require_scope("admin"))):
