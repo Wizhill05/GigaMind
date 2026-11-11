@@ -18,20 +18,25 @@ Additional reviewed foundations:
 
 Additional reviewed integration:
 - Admin jobs API and standalone worker, controlled graceful shutdown/renewal and native clean startup. Automatic source pipelines remain unfinished. Current-resource ownership and durable tombstones now fence stale publishers and block re-enqueue after forgetting, with native concurrency checks.
-- Auth/list race, deletion, credential and activity behavior verified in 44 frontend tests; production build passes. Client expiry, throttled last use, atomic rotation/revocation and v2 legacy migration are verified, including native races.
+- Auth/list race, deletion, credential and activity behavior verified in the frontend suite; production build passes. Client expiry, throttled last use, atomic rotation/revocation and v2 legacy migration are verified, including native races.
 - Full decoded transcript lexical search without a provider, optional existing vector candidates with SQL prefilters, source snippets and native search checks.
 - MIME-safe text/image embedding requests, all-page PDF anchors, stored-metadata reindex and strict provider-vector validation. Offline payload and native publication checks pass; live-provider OCR/token/relevance acceptance remains unfinished.
 
-In flight:
-- HTTP upload/recovery integration, decoded-file validation and remaining memory-engine features. Atomic registration and checksum manifests are reviewed; global-body limits and local CI verification are implemented. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
+Additional reviewed features:
+- Admin upload/recovery routes now use durable registration, one immutable PUT, bounded remote verification and checksum-gated acknowledgement. Authenticated HTTP tests cover collisions without overwrite, decoded 20 MB limits, cancelled in-flight uploads, stale/missing/mismatched recovery and tombstones. A real unrelated indexing worker renews its lease during a blocked upload. These are local tests with provider/storage boundaries substituted.
+- Jobs console supports progress, cancellation, indexing/cleanup retries, polling, hidden-tab pause and stale-response protection. Approved Knowledge console supports project/status filters, evidence, history, revision-checked deletion/restore and explicit conflict reload. Both are tested through the real App authentication and header-refresh flows.
+- Global-body limits and local CI verification are implemented. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
+
+In review:
+- Local SQLite backup/new-path restore commands are integrated provisionally. The initial 12 backup/migration checks pass, but actual proposal/history recovery and concurrent-write checks are still required before acceptance. PostgreSQL and object recovery remain unfinished.
 
 Still required:
-- Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.
+- Approved records are available through scoped context/MCP tools and a dedicated Knowledge console. They remain separate from legacy MemoryItem storage; richer retrieval and clear source presentation remain required.
 - Handoffs, issue reporting, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD. Approved-record deletion, read redaction and admin audit/restore are implemented with stale-supersession protection.
-- External-provider interoperability acceptance and decoded-file upload bounds. Global encoded-body limits including MCP are implemented. Credential expiry/last-use/rotation are implemented; credential console is implemented. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
+- External-provider interoperability acceptance. Decoded-file upload bounds and global encoded-body limits including MCP are implemented. Credential expiry/last-use/rotation and credential console are implemented. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
-- Automatic upload/import indexing jobs and UI progress/retries; live-provider multimodal/token acceptance and truthful source state. Durable file reindex/deletion and reference-safe shared-attachment GC are implemented.
+- Automatic import indexing jobs, live-provider multimodal/token acceptance and complete source state presentation. Upload indexing, file reindex/deletion, Jobs progress/retries and reference-safe shared-attachment GC are implemented.
 - Remaining UI API errors/cancellation/invalidation and component scenarios; handoff/retrieval inspector screens; review activity is implemented.
-- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:237 backend tests pass;20 native checks pass separately. Hosted CI has not been run.
+- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:261 backend tests pass with21 optional native checks skipped; the21 native checks passed separately. The frontend suite has65 passing tests and a successful production build. The final Knowledge conflict guard additionally passes all8 focused Knowledge tests and a fresh build. Hosted CI has not been run.
 
 Every agent change requires parent full-diff review and relevant local tests before acceptance. See implementation-review-log.md for findings and verification limits.

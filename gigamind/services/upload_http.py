@@ -142,15 +142,26 @@ def upload(data, filename, mime_type, prefix, actor):
         )
     except jobs.Conflict as exc:
         raise HTTPException(409, str(exc)) from None
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(503, "Upload registration unavailable") from None
     try:
         if not file_uploads.begin_upload(key, job["id"]):
             raise jobs.Conflict("Upload admission denied")
     except jobs.Conflict:
-        raise HTTPException(409, {"message": "Upload admission denied", "key": key, "job_id": job["id"]}) from None
+        raise HTTPException(
+            409, {"message": "Upload admission denied", "key": key, "job_id": job["id"]}
+        ) from None
     except Exception:
-        raise HTTPException(503, {"message": "Upload admission unavailable", "key": key, "job_id": job["id"]}) from None
+        raise HTTPException(
+            503,
+            {
+                "message": "Upload admission unavailable",
+                "key": key,
+                "job_id": job["id"],
+            },
+        ) from None
     try:
         storage_service.create_immutable_object(key, data, mime_type)
     except Exception:
