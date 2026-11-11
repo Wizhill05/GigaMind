@@ -37,6 +37,7 @@ def test_launcher_end_to_end(tmp_path):
         "--port",
         str(port),
     ]
+    key = None
     with (tmp_path / "log").open("w+") as log:
         proc = subprocess.Popen(
             command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT
@@ -88,7 +89,8 @@ def test_launcher_end_to_end(tmp_path):
             proc.send_signal(signal.SIGTERM)
             proc.wait(timeout=15)
         log.seek(0)
-        assert key not in log.read()
+        if key is not None:
+            assert key not in log.read()
     assert (
         subprocess.run(command, cwd=ROOT, env=env, capture_output=True).returncode != 0
     )
@@ -127,24 +129,58 @@ def test_stop_during_spawn_reaps_owned_group(tmp_path, monkeypatch):
 
         def wait(self, timeout=None):
             waits.append(timeout)
-            if timeout is not None:
-                raise subprocess.TimeoutExpired('child', timeout)
+            if not signals or signals[-1][1] != signal.SIGKILL:
+                raise subprocess.TimeoutExpired("child", timeout)
             return -signal.SIGKILL
 
     def spawn(*args, **kwargs):
-        env = kwargs['env']
-        assert 'HTTP_PROXY' not in env and 'GEMINI_API_KEY' not in env
-        assert env['npm_config_offline'] == 'true'
-        for name in ('npm_config_userconfig', 'npm_config_globalconfig'):
-            assert Path(env[name]).read_text() == ''
-            assert Path(env[name]).parent == tmp_path / 'runtime'
+        env = kwargs["env"]
+        assert "HTTP_PROXY" not in env and "GEMINI_API_KEY" not in env
+        assert env["npm_config_offline"] == "true"
+        for name in ("npm_config_userconfig", "npm_config_globalconfig"):
+            assert Path(env[name]).read_text() == ""
+            assert Path(env[name]).parent == tmp_path / "runtime"
         handlers[signal.SIGTERM](signal.SIGTERM, None)
         return Child()
 
-    monkeypatch.setattr(sys, 'argv', ['demo', '--runtime-dir', str(tmp_path / 'runtime')])
-    monkeypatch.setattr(demo_server.signal, 'signal', lambda sig, fn: handlers.update({sig: fn}))
-    monkeypatch.setattr(demo_server.subprocess, 'Popen', spawn)
-    monkeypatch.setattr(demo_server.os, 'killpg', lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(
+        sys, "argv", ["demo", "--runtime-dir", str(tmp_path / "runtime")]
+    )
+    monkeypatch.setattr(
+        demo_server.signal, "signal", lambda sig, fn: handlers.update({sig: fn})
+    )
+    monkeypatch.setattr(demo_server.subprocess, "Popen", spawn)
+    monkeypatch.setattr(
+        demo_server.os, "killpg", lambda pid, sig: signals.append((pid, sig))
+    )
     assert demo_server.main() == 128 + signal.SIGTERM
     assert signals == [(43210, signal.SIGTERM), (43210, signal.SIGKILL)]
-    assert waits == [3, None]
+    assert waits == [3, 3]
+
+
+def test_real_child_ignoring_term_is_killed_and_reaped():
+    import selectors
+    from gigamind.cli.demo_server import _stop_owned_group
+
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(60)",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(child.stdout, selectors.EVENT_READ)
+            assert selector.select(timeout=5), "child did not initialize"
+            assert child.stdout.readline().strip() == "ready"
+        _stop_owned_group(child, timeout=0.1)
+        assert child.returncode == -signal.SIGKILL
+    finally:
+        if child.poll() is None:
+            os.killpg(child.pid, signal.SIGKILL)
+            child.wait(timeout=3)
+        child.stdout.close()

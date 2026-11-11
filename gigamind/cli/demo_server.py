@@ -11,6 +11,23 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _stop_owned_group(child, timeout=3):
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        child.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pass
+    # A descendant may outlive the group leader.
+    try:
+        os.killpg(child.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    child.wait(timeout=timeout)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -114,20 +131,7 @@ def main():
         return 0
     finally:
         if child is not None:
-            try:
-                os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                child.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass
-            # A descendant may outlive the group leader.
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            child.wait()
+            _stop_owned_group(child)
 
 
 if __name__ == "__main__":
