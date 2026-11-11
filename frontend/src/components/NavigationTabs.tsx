@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 export type TabType =
+  | "jobs"
   | "clients"
   | "activity"
   | "review"
@@ -43,6 +44,7 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
     icon: typeof Shield;
     badge?: number;
   }[] = [
+    { id: "jobs", label: "Jobs", icon: Shield },
     { id: "clients", label: "Clients", icon: Shield },
     { id: "activity", label: "Activity", icon: Shield },
     { id: "review", label: "Review", icon: Shield },

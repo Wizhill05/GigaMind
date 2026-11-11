@@ -33,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, count
   const navItems: NavItemDef[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'OVERVIEW' },
     { id: 'activity', label: 'Activity', icon: PixelTerminal, group: 'MONITOR & LAB' },
+    { id: 'jobs', label: 'Jobs', icon: PixelTerminal, group: 'MONITOR & LAB' },
     { id: 'review', label: 'Review', icon: PixelShield, group: 'KNOWLEDGE BASE' },
     { id: 'memories', label: 'Memories', icon: PixelDatabase, group: 'KNOWLEDGE BASE', badge: counts.memories },
     { id: 'files', label: 'Files & Storage', icon: HardDrive, group: 'KNOWLEDGE BASE', badge: counts.files },
