@@ -311,3 +311,7 @@ Read every API/component/test change; integrated as9fad1be. Checked actual file-
 Parent provisional review of demo launchera566629
 
 Read every launcher, static-path, Vite/Header, documentation and test change; integrated as5b32e3c. Parent removed repurposed HOME, added private empty npm configurations and offline/update-notifier flags; focused launcher tests2 passed, including actual build/server and hostile-env target preservation. The launcher's signal/child-spawn race and bounded shutdown still require correction before a persistent preview. Parent also excludes new static/demo environment variables from the default pytest process. No persistent demo has been started.
+
+2026-11-11, parent recovery of failed validity-console task
+
+Read the failed activity and verified its isolated checkout is clean, the actual KnowledgeTab path exists and the package lock is present. The edit command used repository-relative frontend/src paths from the wrong working directory, then attempted tests without installing dependencies. No application change or actual environment blocker was established. Retry must discover/verify its prepared root, use explicit workdir/absolute apply_patch paths, install from the existing lockfile, and recover from routine command failure. The prior no-change task is not accepted work.
