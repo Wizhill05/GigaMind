@@ -54,6 +54,7 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
       (e) => {
         if (!controller.signal.aborted) {
           setDetail(null);
+          setConfirm(null);
           setError(message(e));
           setLoading(false);
         }

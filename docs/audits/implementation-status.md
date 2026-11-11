@@ -23,7 +23,7 @@ Additional reviewed integration:
 - MIME-safe text/image embedding requests, all-page PDF anchors, stored-metadata reindex and strict provider-vector validation. Offline payload and native publication checks pass; live-provider OCR/token/relevance acceptance remains unfinished.
 
 In flight:
-- HTTP upload/recovery integration, decoded-file validation, file job progress and remaining memory-engine features. Atomic registration and checksum manifests are reviewed; global-body limits and local CI verification are implemented. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
+- HTTP upload/recovery integration, decoded-file validation and remaining memory-engine features. Atomic registration and checksum manifests are reviewed; global-body limits and local CI verification are implemented. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.

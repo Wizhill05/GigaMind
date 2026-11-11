@@ -9,6 +9,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { JobsTab } from "../components/tabs/JobsTab";
 
@@ -241,4 +242,117 @@ test("cleanup retry uses file deletion and selects its returned job", async () =
         String(url).endsWith("/files/delete") && init?.method === "POST",
     ),
   ).toBe(true);
+});
+
+test("pauses polling while hidden and aborts an in-flight load on unmount", async () => {
+  vi.useFakeTimers();
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(json({ jobs: [job] }));
+  const view = render(<JobsTab refreshVersion={0} />);
+  await act(async () => {});
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    hidden.mockReturnValue(true);
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15000);
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  let finish: (response: Response) => void = () => {};
+  const late = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  fetcher.mockReturnValueOnce(late);
+  await act(async () => {
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  const signal = fetcher.mock.calls[1]?.[1]?.signal;
+  view.unmount();
+  expect(signal?.aborted).toBe(true);
+  await act(async () => {
+    finish(json({ jobs: [job] }));
+    await late;
+    await vi.advanceTimersByTimeAsync(15000);
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+test("ignores late selected-job details and hides failed-load actions", async () => {
+  let finish: (response: Response) => void = () => {};
+  const late = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  let failDetail = false;
+  const other = { ...job, id: "other", state: "completed" };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.includes("?")) return json({ jobs: [job, other] });
+    if (url.endsWith("/one")) return late;
+    return failDetail ? json({ detail: "detail offline" }, 503) : json(other);
+  });
+  render(<JobsTab refreshVersion={0} />);
+  fireEvent.click(await screen.findByRole("button", { name: /queued · one/ }));
+  fireEvent.click(screen.getByRole("button", { name: /completed · other/ }));
+  await screen.findByText("Job other");
+  await act(async () => {
+    finish(json(job));
+    await late;
+  });
+  expect(screen.queryByText("Job one")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Cancel job" }),
+  ).not.toBeInTheDocument();
+  failDetail = true;
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await screen.findByText("detail offline");
+  expect(screen.queryByText("Job other")).not.toBeInTheDocument();
+});
+
+test("App gates Jobs and header refresh reloads selected detail", async () => {
+  const { App } = await import("../App");
+  let details = 0;
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/jobs?"))
+        return json({ jobs: [{ ...job, state: "completed" }] });
+      if (url === "/api/v1/jobs/one") {
+        details++;
+        return json({ ...job, state: "completed" });
+      }
+      return json({
+        total_memories: 0,
+        total_storage_files: 0,
+        total_profile_rules: 0,
+        total_chat_logs: 0,
+      });
+    });
+  render(<App />);
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole("button", { name: "Jobs" }),
+  ).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Master API Key"), {
+    target: { value: "master" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Authorize Connection" }));
+  const sidebar = within(await screen.findByRole("complementary"));
+  fireEvent.click(sidebar.getByRole("button", { name: "Jobs" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /completed · one/ }),
+  );
+  await screen.findByText("Job one");
+  const before = details;
+  fireEvent.click(screen.getByTitle("Refresh telemetry"));
+  await waitFor(() => expect(details).toBeGreaterThan(before));
+  expect(screen.getByText("Job one")).toBeInTheDocument();
 });
