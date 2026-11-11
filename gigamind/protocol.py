@@ -138,7 +138,7 @@ async def mcp_endpoint(scope, receive, send):
     try:
         actor = await asyncio.to_thread(get_actor, request.headers.get("authorization"))
     except HTTPException as exc:
-        await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(
+        await JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)(
             scope, receive, send
         )
         return

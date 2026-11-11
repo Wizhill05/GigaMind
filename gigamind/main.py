@@ -40,8 +40,11 @@ from sqlmodel import Session, select
 from gigamind.db.trust_models import initialize_trust_tables
 from gigamind.db.migrations import schema_ready
 from gigamind.routers.review import router as review_router
+from gigamind.routers.oauth import router as oauth_router
+from gigamind.services.oauth import resource_config
 
 # Initialize DB
+resource_config()
 init_db()
 ClientCredential.__table__.create(engine, checkfirst=True)
 initialize_trust_tables(engine)
@@ -59,6 +62,7 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 app.include_router(review_router)
+app.include_router(oauth_router)
 
 class MCPMiddleware:
     def __init__(self, app):
@@ -231,7 +235,7 @@ def read_root(request: Request):
         "mcp_endpoint": "/mcp",
         "openapi_spec": "/openapi.json",
         "legacy_sse": "unavailable",
-        "oauth": "unavailable"
+        "oauth": "external" if resource_config() else "unavailable"
     }
 @app.api_route("/oauth/{path:path}", methods=["GET", "POST"])
 def oauth_unavailable(path: str):

@@ -5,6 +5,8 @@ import json
 import os
 import secrets
 import uuid
+from sqlalchemy import UniqueConstraint
+from gigamind.services.oauth import resource_config, verify_external_token, OAuthTokenError
 from dataclasses import dataclass
 from typing import Optional
 
@@ -23,6 +25,17 @@ class ClientCredential(SQLModel, table=True):
     project_ids_json: str
     revoked: bool = False
 
+class OAuthBinding(SQLModel, table=True):
+    __tablename__ = "oauth_bindings"
+    __table_args__ = (UniqueConstraint("issuer", "subject"),)
+    id: str = Field(primary_key=True)
+    issuer: str
+    subject: str
+    client_id: str = Field(foreign_key="client_credentials.id")
+    revoked: bool = False
+    created_at: str
+    revoked_at: Optional[str] = None
+
 @dataclass
 class Actor:
     id: str
@@ -33,7 +46,7 @@ class Actor:
 
 def get_actor(authorization: Optional[str] = Header(default=None)) -> Actor:
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Missing or invalid Bearer credential")
+        raise unauthorized()
     token = authorization[7:].strip()
     master = os.getenv("GIGAMIND_API_KEY", "")
     if master and master != "gigamind-secret-key-change-me" and hmac.compare_digest(token, master):
@@ -44,12 +57,30 @@ def get_actor(authorization: Optional[str] = Header(default=None)) -> Actor:
         if client and not client.revoked:
             projects = json.loads(client.project_ids_json)
             return Actor(client.id, set(json.loads(client.scopes_json)), set(projects) if projects is not None else None)
-    raise HTTPException(401, "Missing or invalid Bearer credential")
+    config = resource_config()
+    if config:
+        try:
+            identity = verify_external_token(token, config[0])
+            with Session(engine) as session:
+                binding = session.exec(select(OAuthBinding).where(OAuthBinding.issuer == identity.issuer, OAuthBinding.subject == identity.subject, OAuthBinding.revoked == False)).first()
+                client = session.get(ClientCredential, binding.client_id) if binding else None
+                if client and not client.revoked:
+                    projects = json.loads(client.project_ids_json)
+                    return Actor(client.id, (set(json.loads(client.scopes_json)) & identity.scopes) - {"admin"}, set(projects) if projects is not None else None, False)
+        except OAuthTokenError:
+            pass
+    raise unauthorized()
+
+
+def unauthorized():
+    config = resource_config()
+    headers = {"WWW-Authenticate": f'Bearer resource_metadata="{config[1]}/.well-known/oauth-protected-resource/mcp"'} if config else None
+    return HTTPException(401, "Missing or invalid Bearer credential", headers=headers)
 
 
 def require_scope(*scopes: str):
     def dependency(actor: Actor = Depends(get_actor)) -> Actor:
-        if not actor.is_admin and not set(scopes).issubset(actor.scopes):
+        if not actor.is_admin and ("admin" in scopes or not set(scopes).issubset(actor.scopes)):
             raise HTTPException(403, "Insufficient scope")
         return actor
     return dependency

@@ -92,7 +92,7 @@ def load_oauth_config():
     ]
     if not any(values):
         return None
-    return OAuthConfig(*values)
+    return OAuthConfig(*values, allow_loopback_http=os.getenv("OAUTH_ALLOW_LOOPBACK_HTTP", "").lower() == "true")
 
 
 @dataclass(frozen=True)
@@ -232,3 +232,23 @@ def verify_external_token(token, config=None):
         raise
     except Exception:
         raise OAuthTokenError("Invalid token") from None
+
+
+def resource_config():
+    config = load_oauth_config()
+    origin = os.getenv("GIGAMIND_PUBLIC_URL", "")
+    if config is None:
+        if origin:
+            raise ValueError("OAuth configuration is required with GIGAMIND_PUBLIC_URL")
+        return None
+    try:
+        url = urlsplit(origin)
+        loopback = url.hostname == "localhost" or (url.hostname and _is_loopback(url.hostname))
+        production = os.getenv("ENVIRONMENT", "development").lower() in ("prod", "production") or bool(os.getenv("RENDER"))
+        if (not url.hostname or url.username is not None or url.password is not None or url.path or url.query or url.fragment or url.port == 0 or not (url.scheme == "https" or (url.scheme == "http" and loopback and config.allow_loopback_http and not production))):
+            raise ValueError
+    except ValueError:
+        raise ValueError("Invalid GIGAMIND_PUBLIC_URL") from None
+    if config.audience != origin + "/mcp":
+        raise ValueError("OAUTH_AUDIENCE must equal GIGAMIND_PUBLIC_URL + /mcp")
+    return config, origin
