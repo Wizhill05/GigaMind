@@ -81,3 +81,9 @@ Parent updated real SDK fixture to approve its fixture knowledge and added scope
 2026-11-11, OAuth worker ee24bbfe review
 
 Read its completion transcript and checked its checkout: no changes or commit. Nothing accepted. OAuth remains unavailable; split replacement into signed-token verifier first, then persistent local bindings/discovery/lifecycle integration. Existing unused in-memory issuer must not be restored to mounted routes.
+
+2026-11-11, parent review of jobs draft bfcf8301 and verifier f06670fb
+
+Jobs: read every draft file and main registration diff. Draft is NOT accepted: only two sequential tests; missing real concurrent claims/idempotency, heartbeat and HTTP authorization coverage. More seriously, cancellation only protects job-row completion, not the indexing handler's side effects. Add lease fencing inside the file-index publication transaction and cancel file jobs before index deletion. Existing index service separately commits native vectors and suppresses their errors, so worker success can be false; correct that within this integration. Preserve draft in worktree 514493ab for focused corrective worker.
+
+Verifier: read all code, signer/local-server tests and dependency change. Parent original tests: 19 passed. Parent tightened issuer URL validation (was only JWKS URL) and rejects loopback HTTP in production even when explicitly enabled. Added invalid-issuer and production-loopback regressions; parent final verifier run: 25 passed. JWT identity verification accepted as foundation only; binding, scopes, discovery and credential lifecycle still require integration. No real issuer or keys accessed.
