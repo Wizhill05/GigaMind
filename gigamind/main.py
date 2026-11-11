@@ -10,6 +10,7 @@ from sqlalchemy import text, update, or_
 import hashlib
 import secrets
 from gigamind.protocol import create_manager, mcp_endpoint
+from gigamind.middleware.body_limits import BodyLimitMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -82,6 +83,7 @@ class MCPMiddleware:
             await self.app(scope, receive, send)
 
 app.add_middleware(MCPMiddleware)
+app.add_middleware(BodyLimitMiddleware)
 
 # Enable CORS
 app.add_middleware(
