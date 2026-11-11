@@ -11,7 +11,7 @@ function deferred() {
   return { promise, resolve };
 }
 const stats = { total_memories: 0, total_storage_files: 0, total_profile_rules: 0, total_chat_logs: 0 };
-afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 it('keeps protected content unmounted and reports invalid credentials', async () => {
   const request = vi.fn().mockResolvedValue(response({}, 401));
@@ -76,4 +76,36 @@ it('aborts an in-flight authentication on unmount', async () => {
   await waitFor(() => expect(signal).toBeDefined());
   view.unmount();
   expect(signal?.aborted).toBe(true);
+});
+
+it('explains that scoped credentials cannot open the admin dashboard', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({}, 403)));
+  render(<App />);
+  fireEvent.change(screen.getByLabelText('Master API Key'), { target: { value: 'scoped-key' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Authorize Connection' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('requires an admin credential');
+  expect(screen.queryByRole('complementary')).toBeNull();
+});
+
+it('refreshes sidebar counts after a successful memory deletion', async () => {
+  const { within } = await import('@testing-library/react');
+  let deleted = false;
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+    if (init?.method === 'DELETE') {
+      deleted = true;
+      return Promise.resolve(response({ success: true }));
+    }
+    if (url === '/api/v1/stats') return Promise.resolve(response({ ...stats, total_memories: deleted ? 1 : 2 }));
+    return Promise.resolve(response({ memories: [{ id: deleted ? 'remaining' : 'target', content: deleted ? 'remaining' : 'target', category: 'coding', source_agent: 'gpt' }], total: deleted ? 1 : 2, page: 1, pages: 1 }));
+  }));
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  localStorage.setItem('gigamind_master_key', 'key');
+  render(<App />);
+  const sidebar = within(await screen.findByRole('complementary'));
+  expect(sidebar.getByRole('button', { name: /Memories/ }).textContent).toMatch(/Memories\s*2/);
+  fireEvent.click(sidebar.getByRole('button', { name: /Memories/ }));
+  await screen.findByText('target');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  await screen.findByText('remaining');
+  await waitFor(() => expect(sidebar.getByRole('button', { name: /Memories/ }).textContent).toMatch(/Memories\s*1/));
 });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check, Paperclip, ExternalLink, RefreshCw, FileText } from 'lucide-react';
 import { PixelDatabase } from '../ui/PixelIcons';
 import { Memory, StorageFile } from '../../types';
@@ -77,8 +77,10 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
     });
     return () => controller.abort();
   }, [page, categoryFilter, sourceAgentFilter, debouncedSearch, activeSubTab, reload, refreshVersion]);
-  const listState = useRef({ page, categoryFilter, sourceAgentFilter, debouncedSearch });
-  listState.current = { page, categoryFilter, sourceAgentFilter, debouncedSearch };
+  const listState = useRef({ page, categoryFilter, sourceAgentFilter, debouncedSearch, memories });
+  useLayoutEffect(() => {
+    listState.current = { page, categoryFilter, sourceAgentFilter, debouncedSearch, memories };
+  }, [page, categoryFilter, sourceAgentFilter, debouncedSearch, memories]);
 
   const handleDelete = async (id: string) => {
     if (window.confirm(`Confirm deletion of memory item: ${id}?`)) {
@@ -88,7 +90,8 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
         toast(`Memory ${id} deleted successfully`, 'success');
         const current = listState.current;
         const sameList = current.page === page && current.categoryFilter === categoryFilter &&
-          current.sourceAgentFilter === sourceAgentFilter && current.debouncedSearch === debouncedSearch;
+          current.sourceAgentFilter === sourceAgentFilter && current.debouncedSearch === debouncedSearch &&
+          current.memories === memories;
         if (sameList && page > 1 && memories.length === 1) setPage(page - 1);
         else setReload(value => value + 1);
         onMutation();

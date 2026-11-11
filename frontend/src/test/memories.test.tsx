@@ -127,3 +127,31 @@ it('returns to page one after deleting its last page-two row', async () => {
   expect(screen.getByText('Page 1 of 2')).toBeTruthy();
   expect(mutation).toHaveBeenCalledTimes(1);
 });
+
+it('keeps page two when refreshed results arrive while deletion is pending', async () => {
+  const pending = deferred();
+  let refreshed = false;
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+    if (init?.method === 'DELETE') return pending.promise;
+    if (url.includes('page=2') && refreshed) return Promise.resolve(new Response(JSON.stringify({
+      memories: [{ id: 'last', content: 'last', category: 'coding', source_agent: 'gpt' },
+        { id: 'new', content: 'new arrival', category: 'coding', source_agent: 'gpt' }],
+      total: 12, page: 2, pages: 2,
+    })));
+    return Promise.resolve(list(url.includes('page=2') ? 'last' : 'first', url.includes('page=2') ? 2 : 1));
+  }));
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const mutation = vi.fn();
+  const renderTab = (version: number) => <ToastProvider><MemoriesTab refreshVersion={version} onMutation={mutation} onOpenNewModal={() => {}} onOpenEditModal={() => {}} /></ToastProvider>;
+  const view = render(renderTab(0));
+  await screen.findByText('first');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByText('last');
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  refreshed = true;
+  view.rerender(renderTab(1));
+  await screen.findByText('new arrival');
+  await act(async () => pending.resolve(new Response('{}')));
+  expect(screen.getByText('Page 2 of 2')).toBeTruthy();
+  expect(mutation).toHaveBeenCalledTimes(1);
+});
