@@ -89,6 +89,8 @@ class StorageChunkItem(SQLModel, table=True):
 raw_db_url = os.getenv("DATABASE_URL")
 if raw_db_url and raw_db_url.startswith("postgres://"):
     raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+if raw_db_url and raw_db_url.startswith("postgresql://"):
+    raw_db_url = raw_db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 def get_db_engine():
     global raw_db_url

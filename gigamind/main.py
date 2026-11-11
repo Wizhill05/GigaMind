@@ -38,6 +38,7 @@ from gigamind.security import Actor, ClientCredential, SCOPES, create_client, ge
 from gigamind.db.database import engine
 from sqlmodel import Session, select
 from gigamind.db.trust_models import initialize_trust_tables
+from gigamind.db.migrations import schema_ready
 from gigamind.routers.review import router as review_router
 
 # Initialize DB
@@ -278,10 +279,11 @@ def ready():
     if not key or key == "gigamind-secret-key-change-me":
         raise HTTPException(503, "Admin credential is not configured")
     try:
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
+        ready_schema = schema_ready(engine)
     except Exception:
         raise HTTPException(503, "Database unavailable")
+    if not ready_schema:
+        raise HTTPException(503, "Database schema is not ready")
     return {"status": "ready"}
 
 # ==========================================
