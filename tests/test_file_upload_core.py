@@ -166,7 +166,12 @@ def test_manifest_admission_and_recovery(engine):
     _, job = prepare(engine, sha256=digest)
     engine.dispose()
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda _: file_uploads.begin_upload("file/a", job["id"], engine=engine), range(2)))
+        results = list(
+            pool.map(
+                lambda _: file_uploads.begin_upload("file/a", job["id"], engine=engine),
+                range(2),
+            )
+        )
     assert sorted(results) == [False, True]
     file_uploads.record_unknown("file/a", job["id"], engine=engine)
     for data in (None, b"ab", b"xyz"):
@@ -188,3 +193,35 @@ def test_cancelled_manifest_cannot_restart(engine):
     with pytest.raises(jobs.Conflict):
         file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)
     assert not file_uploads.begin_upload("file/a", job["id"], engine=engine)
+
+
+def test_new_index_job_cannot_bypass_manifest_verification(engine, monkeypatch):
+    from gigamind.db.database import StorageChunkItem
+    from gigamind.services import indexing
+
+    StorageChunkItem.__table__.create(engine)
+    monkeypatch.setattr(indexing, "engine", engine)
+    monkeypatch.setattr(indexing, "is_postgres", False)
+    monkeypatch.setattr(indexing.embedding, "DEFAULT_DIM", 3)
+    monkeypatch.setattr(indexing, "generate_embedding", lambda **kw: [1.0, 2.0, 3.0])
+    _, prepared = prepare(engine, sha256=hashlib.sha256(b"abc").hexdigest())
+    assert file_uploads.begin_upload("file/a", prepared["id"], engine=engine)
+    replacement = jobs.enqueue("index_file", {"key": "file/a"}, engine=engine)
+    claimed = jobs.claim(engine=engine)
+    guard = jobs.JobLease(replacement.id, claimed.lease_token).publication_guard
+    with pytest.raises(jobs.PermanentFailure, match="not been verified"):
+        indexing.index_file_content("file/a", "a.txt", b"abc", publication_guard=guard)
+    with Session(engine) as session:
+        assert session.exec(select(StorageChunkItem)).all() == []
+        assert session.exec(select(StorageFileItem)).one().indexing_status == "pending"
+    assert file_uploads.verify_upload("file/a", prepared["id"], b"abc", engine=engine)
+    indexing.index_file_content("file/a", "a.txt", b"abc", publication_guard=guard)
+    assert not file_uploads.verify_upload(
+        "file/a", prepared["id"], b"xyz", engine=engine
+    )
+    with pytest.raises(jobs.PermanentFailure, match="not been verified"):
+        indexing.index_file_content("file/a", "a.txt", b"xyz", publication_guard=guard)
+    with Session(engine) as session:
+        assert session.exec(select(StorageChunkItem)).one().content == "abc"
+    with pytest.raises(jobs.Conflict):
+        file_uploads.acknowledge_upload("file/a", prepared["id"], engine=engine)

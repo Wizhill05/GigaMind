@@ -1126,3 +1126,81 @@ def test_native_upload_preparation_is_atomic_and_repeatable(
         )
     assert denied.value.status_code == 409
     assert jobs.status(claimed.id, engine=postgres_engine).state == "cancelled"
+
+
+def test_native_v2_upload_manifest_upgrade_and_single_admission(
+    postgres_engine, monkeypatch
+):
+    import hashlib
+    from concurrent.futures import ThreadPoolExecutor
+    from sqlmodel import Session
+    from gigamind.db.database import StorageFileItem
+    from gigamind.db.jobs import UploadManifest
+    from gigamind.services import file_uploads, jobs
+    from sqlalchemy import inspect
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    migrations.migrate(postgres_engine)
+    with Session(postgres_engine) as session:
+        session.add(
+            StorageFileItem(
+                id="legacy-file",
+                key="legacy.txt",
+                filename="legacy.txt",
+                created_at="old",
+                updated_at="old",
+                document_summary="preserve this",
+            )
+        )
+        session.commit()
+    with postgres_engine.begin() as connection:
+        UploadManifest.__table__.drop(connection)
+        connection.execute(text("DELETE FROM schema_migrations"))
+        connection.execute(text("INSERT INTO schema_migrations (version) VALUES (2)"))
+    migrations.migrate(postgres_engine)
+    assert "upload_manifests" in inspect(postgres_engine).get_table_names()
+    assert migrations.schema_version(postgres_engine) == 3
+    with Session(postgres_engine) as session:
+        assert (
+            session.get(StorageFileItem, "legacy-file").document_summary
+            == "preserve this"
+        )
+    _, job = file_uploads.prepare_upload(
+        "manifest.txt",
+        "manifest.txt",
+        "text/plain",
+        "text",
+        3,
+        "admin",
+        "manifest-upgrade",
+        sha256=hashlib.sha256(b"abc").hexdigest(),
+        engine=postgres_engine,
+    )
+    with ThreadPoolExecutor(2) as pool:
+        admitted = list(
+            pool.map(
+                lambda _: file_uploads.begin_upload(
+                    "manifest.txt", job["id"], engine=postgres_engine
+                ),
+                range(2),
+            )
+        )
+    assert sorted(admitted) == [False, True]
+    assert jobs.claim(engine=postgres_engine) is None
+    assert not file_uploads.verify_upload(
+        "manifest.txt", job["id"], b"xyz", engine=postgres_engine
+    )
+    assert file_uploads.verify_upload(
+        "manifest.txt", job["id"], b"abc", engine=postgres_engine
+    )
+    file_uploads.acknowledge_upload("manifest.txt", job["id"], engine=postgres_engine)
+    claimed = jobs.claim(engine=postgres_engine)
+    assert claimed.id == job["id"]
+    with Session(postgres_engine) as session:
+        jobs.JobLease(claimed.id, claimed.lease_token).publication_guard(session)
+    assert not file_uploads.verify_upload(
+        "manifest.txt", job["id"], None, engine=postgres_engine
+    )
+    with Session(postgres_engine) as session:
+        with pytest.raises(jobs.PermanentFailure, match="not been verified"):
+            jobs.JobLease(claimed.id, claimed.lease_token).publication_guard(session)

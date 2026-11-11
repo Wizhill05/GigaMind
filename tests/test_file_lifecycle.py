@@ -38,7 +38,17 @@ admin = Actor("admin", set(), None, True)
 
 def test_unresolved_upload_blocks_delete_after_cancel(setup):
     engine = setup
-    _, job = file_uploads.prepare_upload("file", "a", "text/plain", "text", 3, "user", "idem", sha256=hashlib.sha256(b"abc").hexdigest(), engine=engine)
+    _, job = file_uploads.prepare_upload(
+        "file",
+        "a",
+        "text/plain",
+        "text",
+        3,
+        "user",
+        "idem",
+        sha256=hashlib.sha256(b"abc").hexdigest(),
+        engine=engine,
+    )
     assert file_uploads.begin_upload("file", job["id"], engine=engine)
     jobs.cancel(job["id"], engine=engine)
     with pytest.raises(HTTPException) as exc:
@@ -51,7 +61,17 @@ def test_unresolved_upload_blocks_delete_after_cancel(setup):
 
 
 def test_delete_unstarted_upload_prevents_admission(setup):
-    _, job = file_uploads.prepare_upload("file", "a", "text/plain", "text", 3, "user", "idem", sha256=hashlib.sha256(b"abc").hexdigest(), engine=setup)
+    _, job = file_uploads.prepare_upload(
+        "file",
+        "a",
+        "text/plain",
+        "text",
+        3,
+        "user",
+        "idem",
+        sha256=hashlib.sha256(b"abc").hexdigest(),
+        engine=setup,
+    )
     file_lifecycle.request_delete(admin, "file", setup)
     assert not file_uploads.begin_upload("file", job["id"], engine=setup)
 

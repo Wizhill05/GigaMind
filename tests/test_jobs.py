@@ -10,6 +10,7 @@ def test_queue_lifecycle(tmp_path, monkeypatch):
     )
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
     clock = lambda: now[0]
     j = jobs.enqueue(
@@ -50,6 +51,7 @@ def test_worker_retry(tmp_path, monkeypatch):
     )
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
     clock = lambda: now[0]
     calls = []
@@ -81,6 +83,7 @@ def test_concurrency_and_fencing(tmp_path):
     )
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     barrier = Barrier(2)
 
     def enqueue():
@@ -116,6 +119,7 @@ def test_expiry_and_terminal(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'expiry.db'}")
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     now = [datetime(2026, 1, 1, tzinfo=timezone.utc)]
     clock = lambda: now[0]
     job = jobs.enqueue(
@@ -144,6 +148,7 @@ def test_real_heartbeat(tmp_path, monkeypatch):
     )
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     renewed = threading.Event()
     original = jobs.heartbeat
 
@@ -172,6 +177,7 @@ def test_invalid_lease(tmp_path, duration):
     engine = create_engine(f"sqlite:///{tmp_path / 'bounds.db'}")
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     with pytest.raises(ValueError):
         jobs.claim(engine=engine, lease_seconds=duration)
 
@@ -180,6 +186,7 @@ def test_input_bounds(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'inputs.db'}")
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     for payload in (
         {"key": ""},
         {"key": "x" * 1025},
@@ -205,6 +212,7 @@ def test_publication_guard_and_permanent_failure(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'publication.db'}")
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     job = jobs.enqueue("index_file", {"key": "a"}, engine=engine)
     lease = jobs.claim(engine=engine)
     with Session(engine) as session:
@@ -232,6 +240,7 @@ def test_claim_returns_the_token_it_acquired_when_cancelled_immediately_after_co
     engine = create_engine(f"sqlite:///{tmp_path / 'claim-snapshot.db'}")
     jobs.Job.__table__.create(engine)
     jobs.ResourceJobState.__table__.create(engine)
+    jobs.UploadManifest.__table__.create(engine)
     job = jobs.enqueue("index_file", {"key": "a"}, engine=engine)
     cancelled = False
 

@@ -39,8 +39,8 @@ def _prepare_upload(
     if sha256 is not None:
         if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
             raise ValueError("sha256 must be a lowercase SHA256 hex digest")
-        if type(size_bytes) is not int or size_bytes < 0:
-            raise ValueError("size_bytes must be a nonnegative integer")
+        if type(size_bytes) is not int or not 0 <= size_bytes <= 20_000_000:
+            raise ValueError("size_bytes must be an integer between 0 and 20000000")
     if not idempotency_key:
         raise ValueError("An idempotency key is required")
     values = dict(
@@ -102,7 +102,11 @@ def _prepare_upload(
         )
         session.add(file)
         if sha256 is not None:
-            session.add(UploadManifest(key=key, job_id=job.id, sha256=sha256, size_bytes=size_bytes))
+            session.add(
+                UploadManifest(
+                    key=key, job_id=job.id, sha256=sha256, size_bytes=size_bytes
+                )
+            )
         session.commit()
         return _snapshot(file, job)
 
@@ -154,7 +158,10 @@ def acknowledge_upload(key, job_id, *, engine=None, clock=jobs.utcnow):
             or not job
             or job.kind != "index_file"
             or job.resource_key != key
-            or (manifest is not None and (manifest.job_id != job_id or manifest.state != "verified"))
+            or (
+                manifest is not None
+                and (manifest.job_id != job_id or manifest.state != "verified")
+            )
             or job.state not in {"queued", "running", "retrying", "completed", "failed"}
             or session.exec(
                 select(StorageFileItem.id).where(StorageFileItem.key == key)
@@ -176,15 +183,26 @@ def begin_upload(key, job_id, *, engine=None, clock=jobs.utcnow):
         owner = jobs.lock_resource(session, key, jobs.stamp(clock()))
         manifest = session.get(UploadManifest, key)
         job = session.get(Job, job_id)
-        if (owner.deleted or owner.current_job_id != job_id or not manifest
-            or manifest.job_id != job_id or manifest.state != "prepared"
-            or not job or job.state != "queued"):
+        if (
+            owner.deleted
+            or owner.current_job_id != job_id
+            or not manifest
+            or manifest.job_id != job_id
+            or manifest.state != "prepared"
+            or not job
+            or job.state != "queued"
+        ):
             session.commit()
             return False
-        result = session.execute(update(UploadManifest).where(
-            UploadManifest.key == key, UploadManifest.job_id == job_id,
-            UploadManifest.state == "prepared",
-        ).values(state="inflight"))
+        result = session.execute(
+            update(UploadManifest)
+            .where(
+                UploadManifest.key == key,
+                UploadManifest.job_id == job_id,
+                UploadManifest.state == "prepared",
+            )
+            .values(state="inflight")
+        )
         session.commit()
         return result.rowcount == 1
 
@@ -195,7 +213,11 @@ def record_unknown(key, job_id, *, engine=None, clock=jobs.utcnow):
     with Session(jobs.resolve_engine(engine)) as session:
         jobs.lock_resource(session, key, jobs.stamp(clock()))
         manifest = session.get(UploadManifest, key)
-        if not manifest or manifest.job_id != job_id or manifest.state not in {"inflight", "unknown"}:
+        if (
+            not manifest
+            or manifest.job_id != job_id
+            or manifest.state not in {"inflight", "unknown"}
+        ):
             raise jobs.Conflict("Upload is not in flight")
         manifest.state = "unknown"
         session.commit()
@@ -206,15 +228,26 @@ def verify_upload(key, job_id, remote_bytes, *, engine=None, clock=jobs.utcnow):
     validate_key(key)
     if remote_bytes is not None and not isinstance(remote_bytes, bytes):
         raise ValueError("remote_bytes must be bytes or None")
-    digest = hashlib.sha256(remote_bytes).hexdigest() if remote_bytes is not None else None
+    digest = (
+        hashlib.sha256(remote_bytes).hexdigest()
+        if remote_bytes is not None and len(remote_bytes) <= 20_000_000
+        else None
+    )
     with Session(jobs.resolve_engine(engine)) as session:
         jobs.lock_resource(session, key, jobs.stamp(clock()))
         manifest = session.get(UploadManifest, key)
-        if not manifest or manifest.job_id != job_id or manifest.state not in {"inflight", "unknown", "verified"}:
+        if (
+            not manifest
+            or manifest.job_id != job_id
+            or manifest.state not in {"inflight", "unknown", "verified"}
+        ):
             raise jobs.Conflict("Upload was not admitted")
-        if remote_bytes is None or len(remote_bytes) != manifest.size_bytes or digest != manifest.sha256:
-            if manifest.state != "verified":
-                manifest.state = "unknown"
+        if (
+            remote_bytes is None
+            or len(remote_bytes) != manifest.size_bytes
+            or digest != manifest.sha256
+        ):
+            manifest.state = "unknown"
             session.commit()
             return False
         manifest.state = "verified"

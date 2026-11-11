@@ -8,7 +8,7 @@ from sqlalchemy import and_, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from gigamind.db.jobs import Job, ResourceJobState
+from gigamind.db.jobs import Job, ResourceJobState, UploadManifest
 
 
 def resolve_engine(engine):
@@ -100,6 +100,9 @@ class JobLease:
         )
         if not owner.rowcount:
             raise PermanentFailure("Job resource is no longer current")
+        manifest = session.get(UploadManifest, key)
+        if manifest is not None and manifest.state != "verified":
+            raise PermanentFailure("Upload bytes have not been verified")
         result = session.execute(
             update(Job)
             .where(

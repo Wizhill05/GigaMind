@@ -101,7 +101,7 @@ def request_delete(actor, key, engine=None):
     with Session(jobs.resolve_engine(engine), expire_on_commit=False) as session:
         owner = jobs.lock_resource(session, key, now)
         manifest = session.get(UploadManifest, key)
-        if manifest and manifest.state in {"inflight", "unknown"}:
+        if manifest and manifest.state not in {"prepared", "verified"}:
             raise HTTPException(409, "Upload outcome is unresolved")
         if referenced(session, key):
             raise HTTPException(
