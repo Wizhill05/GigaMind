@@ -1,7 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { X, Copy, Check, User, Bot, Trash2, Sparkles, RefreshCw } from 'lucide-react';
-import { Conversation } from '../../types';
-import { AgentBadge } from '../ui/Badge';
+import React, { useState, useEffect } from "react";
+import {
+  X,
+  Copy,
+  Check,
+  User,
+  Bot,
+  Trash2,
+  Sparkles,
+  RefreshCw,
+} from "lucide-react";
+import { Conversation } from "../../types";
+import { AgentBadge } from "../ui/Badge";
 
 interface TranscriptDrawerProps {
   conversation: Conversation | null;
@@ -11,19 +20,25 @@ interface TranscriptDrawerProps {
   onVectorize?: (id: string) => void;
 }
 
-export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation, onClose, onDelete, onVectorize, busy = false }) => {
+export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
+  conversation,
+  onClose,
+  onDelete,
+  onVectorize,
+  busy = false,
+}) => {
   const [copied, setCopied] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
 
   // Handle ESC key press
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && conversation && !isExiting) {
+      if (e.key === "Escape" && conversation && !isExiting) {
         handleAnimatedClose();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [conversation, isExiting, busy]);
 
   const handleAnimatedClose = () => {
@@ -39,7 +54,9 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
 
   const handleCopyTranscript = () => {
     const text = conversation.messages
-      ? conversation.messages.map((m) => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n')
+      ? conversation.messages
+          .map((m) => `[${m.role.toUpperCase()}]\n${m.content}`)
+          .join("\n\n---\n\n")
       : conversation.summary;
 
     navigator.clipboard.writeText(text);
@@ -51,13 +68,13 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
     <div
       onClick={handleAnimatedClose}
       className={`fixed inset-0 bg-[#0f0f0f]/85 backdrop-blur-md z-50 flex justify-end font-sans select-none transition-all duration-200 ${
-        isExiting ? 'animate-fade-out' : 'animate-fade-in'
+        isExiting ? "animate-fade-out" : "animate-fade-in"
       }`}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         className={`bg-[#181818] border-l border-[#262626] w-full max-w-2xl h-full flex flex-col shadow-2xl ${
-          isExiting ? 'animate-slide-out-right' : 'animate-slide-right'
+          isExiting ? "animate-slide-out-right" : "animate-slide-right"
         }`}
       >
         {/* DRAWER HEADER */}
@@ -68,11 +85,17 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
                 {conversation.platform}
               </span>
               <AgentBadge agent={conversation.source_agent} />
-              <span className="text-xs text-[#8a8f9e] font-mono">id: {conversation.id}</span>
+              <span className="text-xs text-[#8a8f9e] font-mono">
+                id: {conversation.id}
+              </span>
             </div>
 
-            <h2 className="text-base font-bold text-white tracking-tight">{conversation.title}</h2>
-            <p className="text-xs text-[#8a8f9e] leading-relaxed">{conversation.summary}</p>
+            <h2 className="text-base font-bold text-white tracking-tight">
+              {conversation.title}
+            </h2>
+            <p className="text-xs text-[#8a8f9e] leading-relaxed">
+              {conversation.summary}
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -82,13 +105,19 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
                 onClick={() => onVectorize(conversation.id)}
                 className={`p-2 border rounded-none transition-colors btn-press flex items-center gap-1 text-[11px] font-mono ${
                   conversation.is_vectorized
-                    ? 'bg-[#22c55e]/15 border-[#22c55e]/30 text-[#22c55e]'
-                    : 'bg-[#161616] border-[#333333] hover:border-[#ff6b00]/40 text-[#ff6b00]'
+                    ? "bg-[#22c55e]/15 border-[#22c55e]/30 text-[#22c55e]"
+                    : "bg-[#161616] border-[#333333] hover:border-[#ff6b00]/40 text-[#ff6b00]"
                 }`}
-                title={conversation.is_vectorized ? 'Vectorized (Click to re-vectorize)' : 'Generate Vector Embedding'}
+                title={
+                  conversation.is_vectorized
+                    ? "Vectorized (Click to re-vectorize)"
+                    : "Generate Vector Embedding"
+                }
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{conversation.is_vectorized ? 'Vectorized' : 'Vectorize'}</span>
+                <span>
+                  {conversation.is_vectorized ? "Vectorized" : "Vectorize"}
+                </span>
               </button>
             )}
 
@@ -108,7 +137,11 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
               className="p-2 bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#8a8f9e] hover:text-white rounded-none transition-colors btn-press"
               title="Copy Full Transcript"
             >
-              {copied ? <Check className="w-4 h-4 text-amber-400" /> : <Copy className="w-4 h-4" />}
+              {copied ? (
+                <Check className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
             </button>
 
             <button
@@ -130,21 +163,27 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
             </div>
           ) : (
             conversation.messages.map((msg, idx) => {
-              const isUser = msg.role === 'user';
+              const isUser = msg.role === "user";
               return (
                 <div
                   key={idx}
                   className={`p-4 rounded-none border transition-all ${
                     isUser
-                      ? 'bg-[#0f0f0f] border-[#262626] text-white hover:border-[#333333]'
-                      : 'bg-[#161616] border-[#333333] text-[#c1c5d0] hover:border-[#ff6b00]/30'
+                      ? "bg-[#0f0f0f] border-[#262626] text-white hover:border-[#333333]"
+                      : "bg-[#161616] border-[#333333] text-[#c1c5d0] hover:border-[#ff6b00]/30"
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-2 text-[11px] font-medium text-[#8a8f9e]">
-                    {isUser ? <User className="w-3.5 h-3.5 text-[#ff6b00]" /> : <Bot className="w-3.5 h-3.5 text-amber-400" />}
+                    {isUser ? (
+                      <User className="w-3.5 h-3.5 text-[#ff6b00]" />
+                    ) : (
+                      <Bot className="w-3.5 h-3.5 text-amber-400" />
+                    )}
                     <span className="capitalize">{msg.role}</span>
                   </div>
-                  <div className="whitespace-pre-wrap leading-relaxed font-sans text-xs">{msg.content}</div>
+                  <div className="whitespace-pre-wrap leading-relaxed font-sans text-xs">
+                    {msg.content}
+                  </div>
                 </div>
               );
             })

@@ -28,6 +28,7 @@ from gigamind.services.memory import (
     delete_memory,
     update_memory,
     get_conversations,
+    get_conversation,
     delete_profile_rule,
     get_stats,
     reset_all_memories,
@@ -548,6 +549,14 @@ def api_update_memory(id: str, req: UpdateMemoryRequest):
 @app.get("/api/v1/conversations", dependencies=[Depends(verify_auth)])
 def api_get_conversations(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100), platform: Optional[str] = None, source_agent: Optional[str] = None):
     return get_conversations(page=page, limit=limit, platform=platform, source_agent=source_agent)
+
+
+@app.get("/api/v1/conversations/{id}", dependencies=[Depends(verify_auth)])
+def api_get_conversation(id: str):
+    conversation = get_conversation(id)
+    if conversation is None:
+        raise HTTPException(404, "Conversation not found")
+    return {"conversation": conversation}
 
 
 @app.delete("/api/v1/conversations/{id}", dependencies=[Depends(verify_auth)])

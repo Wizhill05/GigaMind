@@ -31,7 +31,10 @@ import {
   backfillConversationVectors,
 } from "../../api";
 import { AgentBadge } from "../ui/Badge";
-import { useConversationMutation, type ConversationMutation } from "../../useConversationMutation";
+import {
+  useConversationMutation,
+  type ConversationMutation,
+} from "../../useConversationMutation";
 import { useToast } from "../ui/Toast";
 
 interface ConversationsTabProps {
@@ -46,7 +49,8 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
   onOpenTranscript,
   refreshVersion = 0,
   onMutation = () => {},
-  mutation, onList,
+  mutation,
+  onList,
 }) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [page, setPage] = useState(1);
@@ -74,7 +78,12 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const alive = useRef(true);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const localMutation = useConversationMutation();
   const guard = mutation ?? localMutation;
   const { busy, locked: busyRef } = guard;
@@ -200,7 +209,17 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
     onMutation();
   };
 
-  const runMutation = (action: (valid: () => boolean) => Promise<void>) => guard.run(valid => action(() => alive.current && valid()), error => { if (alive.current) toast(error instanceof Error ? error.message : "Request failed", "error"); });
+  const runMutation = (action: (valid: () => boolean) => Promise<void>) =>
+    guard.run(
+      (valid) => action(() => alive.current && valid()),
+      (error) => {
+        if (alive.current)
+          toast(
+            error instanceof Error ? error.message : "Request failed",
+            "error",
+          );
+      },
+    );
 
   const submitImport = async (selected: File) =>
     runMutation(async (valid) => {
@@ -225,7 +244,15 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
         setImportStatus(`Error: ${message}`);
         toast(message, "error");
       } finally {
-        if (valid()) setIsImporting(false);
+        if (alive.current) {
+          setIsImporting(false);
+          if (!valid()) {
+            setFile(null);
+            setImportStatus(
+              "Credentials changed. Refresh before importing again.",
+            );
+          }
+        }
       }
     });
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -267,7 +294,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
         toast(result.message, "success");
         changed();
       } finally {
-        if (valid()) setIsBackfilling(false);
+        if (alive.current) setIsBackfilling(false);
       }
     });
   };

@@ -1245,6 +1245,20 @@ def get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = 
             "pages": pages
         }
 
+def get_conversation(conv_id: str) -> Optional[Dict[str, Any]]:
+    with Session(engine) as session:
+        conv = session.get(ConversationItem, conv_id)
+        if conv is None:
+            return None
+        return {
+            "id": conv.id, "platform": conv.platform, "title": conv.title,
+            "summary": conv.summary, "source_agent": conv.source_agent or "user",
+            "messages": json.loads(conv.messages_json or "[]"),
+            "is_vectorized": bool(conv.embedding_json and conv.embedding_json != "[]"),
+            "created_at": conv.created_at,
+        }
+
+
 def delete_conversation(conv_id: str) -> bool:
     """Deletes a conversation transcript session by ID."""
     with Session(engine) as session:

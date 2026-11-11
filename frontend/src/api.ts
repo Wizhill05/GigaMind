@@ -188,6 +188,11 @@ const conversationMutationSchema = z.object({ success: z.literal(true), id: z.st
 const backfillSchema = z.object({ success: z.literal(true), message: z.string() });
 const importSchema = z.object({ success: z.literal(true), ingested: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(), pending_indexing: z.number().int().nonnegative(), total_processed: z.number().int().nonnegative(), message: z.string() });
 
+export async function fetchConversation(id: string, signal?: AbortSignal) {
+  const res = await checkedFetch(`/api/v1/conversations/${encodeURIComponent(id)}`, { headers: getHeaders(), signal });
+  return z.object({ conversation: conversationSchema }).parse(await res.json()).conversation;
+}
+
 export async function deleteConversation(id: string) {
   const res = await checkedFetch(`/api/v1/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: getHeaders() });
   return conversationMutationSchema.parse(await res.json());

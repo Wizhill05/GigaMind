@@ -1,35 +1,45 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Sidebar } from './components/Sidebar';
-import { Header } from './components/Header';
-import { TabType } from './components/NavigationTabs';
-import { AuthGate } from './components/AuthGate';
-import { OverviewTab } from './components/tabs/OverviewTab';
-import { MemoriesTab } from './components/tabs/MemoriesTab';
-import { FilesTab } from './components/tabs/FilesTab';
-import { ProfileRulesTab } from './components/tabs/ProfileRulesTab';
-import { ConversationsTab } from './components/tabs/ConversationsTab';
-import { VectorSearchLabTab } from './components/tabs/VectorSearchLabTab';
-import { ActivityTab } from './components/tabs/ActivityTab';
-import { ReviewTab } from './components/tabs/ReviewTab';
-import { KnowledgeTab } from './components/tabs/KnowledgeTab';
-import { ClientsTab } from './components/tabs/ClientsTab';
-import { JobsTab } from './components/tabs/JobsTab';
-import { SettingsTab } from './components/tabs/SettingsTab';
-import { MemoryModal } from './components/modals/MemoryModal';
-import { RuleModal } from './components/modals/RuleModal';
-import { TranscriptDrawer } from './components/modals/TranscriptDrawer';
-import { CommandPalette } from './components/CommandPalette';
-import { ToastProvider, useToast } from './components/ui/Toast';
-import { Stats, Memory, Conversation } from './types';
-import { useConversationMutation } from './useConversationMutation';
-import { ApiError, fetchStats, addMemory, updateMemory, setProfileRule, getApiKey, fetchConversations, deleteConversation, vectorizeConversation } from './api';
+import React, { useState, useEffect, useRef } from "react";
+import { Sidebar } from "./components/Sidebar";
+import { Header } from "./components/Header";
+import { TabType } from "./components/NavigationTabs";
+import { AuthGate } from "./components/AuthGate";
+import { OverviewTab } from "./components/tabs/OverviewTab";
+import { MemoriesTab } from "./components/tabs/MemoriesTab";
+import { FilesTab } from "./components/tabs/FilesTab";
+import { ProfileRulesTab } from "./components/tabs/ProfileRulesTab";
+import { ConversationsTab } from "./components/tabs/ConversationsTab";
+import { VectorSearchLabTab } from "./components/tabs/VectorSearchLabTab";
+import { ActivityTab } from "./components/tabs/ActivityTab";
+import { ReviewTab } from "./components/tabs/ReviewTab";
+import { KnowledgeTab } from "./components/tabs/KnowledgeTab";
+import { ClientsTab } from "./components/tabs/ClientsTab";
+import { JobsTab } from "./components/tabs/JobsTab";
+import { SettingsTab } from "./components/tabs/SettingsTab";
+import { MemoryModal } from "./components/modals/MemoryModal";
+import { RuleModal } from "./components/modals/RuleModal";
+import { TranscriptDrawer } from "./components/modals/TranscriptDrawer";
+import { CommandPalette } from "./components/CommandPalette";
+import { ToastProvider, useToast } from "./components/ui/Toast";
+import { Stats, Memory, Conversation } from "./types";
+import { useConversationMutation } from "./useConversationMutation";
+import {
+  ApiError,
+  fetchStats,
+  addMemory,
+  updateMemory,
+  setProfileRule,
+  getApiKey,
+  fetchConversation,
+  deleteConversation,
+  vectorizeConversation,
+} from "./api";
 
 export const AppContent: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [stats, setStats] = useState<Stats | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
-  const [authError, setAuthError] = useState('');
+  const [authError, setAuthError] = useState("");
   const [authPending, setAuthPending] = useState(false);
   const statsRequest = useRef<AbortController | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
@@ -39,7 +49,9 @@ export const AppContent: React.FC = () => {
   const [editingMemory, setEditingMemory] = useState<Memory | null>(null);
 
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
-  const [activeTranscript, setActiveTranscript] = useState<Conversation | null>(null);
+  const [activeTranscript, setActiveTranscript] = useState<Conversation | null>(
+    null,
+  );
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   const { toast } = useToast();
@@ -63,14 +75,23 @@ export const AppContent: React.FC = () => {
       setStats(data);
       setIsAuthenticated(true);
       setShowAuthGate(false);
-      setAuthError('');
+      setAuthError("");
     } catch (error) {
       if (controller.signal.aborted || getApiKey() !== key) return;
       setIsAuthenticated(false);
       setShowAuthGate(true);
-      setAuthError(error instanceof ApiError && error.status === 401 ? 'Invalid master key.' : error instanceof ApiError && error.status === 403 ? 'Dashboard access requires an admin credential.' : error instanceof Error ? error.message : 'Unable to connect.');
+      setAuthError(
+        error instanceof ApiError && error.status === 401
+          ? "Invalid master key."
+          : error instanceof ApiError && error.status === 403
+            ? "Dashboard access requires an admin credential."
+            : error instanceof Error
+              ? error.message
+              : "Unable to connect.",
+      );
     } finally {
-      if (!controller.signal.aborted && getApiKey() === key) setAuthPending(false);
+      if (!controller.signal.aborted && getApiKey() === key)
+        setAuthPending(false);
     }
   };
 
@@ -85,70 +106,101 @@ export const AppContent: React.FC = () => {
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (mutation.locked.current) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setIsCommandPaletteOpen((prev) => !prev);
       }
     };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
   }, []);
 
   // Memory modal handlers
   const handleOpenNewMemoryModal = () => {
+    if (mutation.locked.current) return;
     setEditingMemory(null);
     setIsMemoryModalOpen(true);
   };
 
   const handleOpenEditMemoryModal = (mem: Memory) => {
+    if (mutation.locked.current) return;
     setEditingMemory(mem);
     setIsMemoryModalOpen(true);
   };
 
-  const handleSaveMemory = async (data: { content: string; category: string; source_agent: string; tags: string[] }) => {
+  const handleSaveMemory = async (data: {
+    content: string;
+    category: string;
+    source_agent: string;
+    tags: string[];
+  }) => {
     if (editingMemory) {
-      const result = await updateMemory(editingMemory.id, { ...data, expected_revision: editingMemory.revision ?? undefined });
+      const result = await updateMemory(editingMemory.id, {
+        ...data,
+        expected_revision: editingMemory.revision ?? undefined,
+      });
       if (!result?.success) throw new Error("Memory update failed.");
-      toast(`Memory ${editingMemory.id} updated successfully`, 'success');
+      toast(`Memory ${editingMemory.id} updated successfully`, "success");
     } else {
       const result = await addMemory(data);
       if (!result?.success) throw new Error("Memory save failed.");
-      toast(`New memory saved to repository`, 'success');
+      toast(`New memory saved to repository`, "success");
     }
-    setRefreshVersion(v => v + 1);
+    setRefreshVersion((v) => v + 1);
     void loadStats();
   };
 
   // Rule modal handlers
-  const handleSaveRule = async (data: { key: string; value: string; category: string; source_agent: string }) => {
+  const handleSaveRule = async (data: {
+    key: string;
+    value: string;
+    category: string;
+    source_agent: string;
+  }) => {
     const result = await setProfileRule(data);
     if (!result?.success) throw new Error("Rule save failed.");
-    toast(`Profile rule '${data.key}' saved successfully`, 'success');
-    setRefreshVersion(v => v + 1);
+    toast(`Profile rule '${data.key}' saved successfully`, "success");
+    setRefreshVersion((v) => v + 1);
     void loadStats();
   };
 
-  const conversationChanged = () => { setRefreshVersion(v => v + 1); void loadStats(); };
-  const runTranscriptMutation = (action: (valid: () => boolean) => Promise<void>) => mutation.run(action, error => toast(error instanceof Error ? error.message : 'Request failed', 'error'));
+  const conversationChanged = () => {
+    setRefreshVersion((v) => v + 1);
+    void loadStats();
+  };
+  const runTranscriptMutation = (
+    action: (valid: () => boolean) => Promise<void>,
+  ) =>
+    mutation.run(action, (error) =>
+      toast(error instanceof Error ? error.message : "Request failed", "error"),
+    );
   const handleDeleteTranscript = (id: string) => {
-    if (mutation.locked.current || !window.confirm('Permanently delete conversation transcript from database?')) return;
-    void runTranscriptMutation(async valid => { await deleteConversation(id); if (!valid()) return; toast('Deleted conversation transcript', 'success'); setActiveTranscript(null); conversationChanged(); });
+    if (
+      mutation.locked.current ||
+      !window.confirm(
+        "Permanently delete conversation transcript from database?",
+      )
+    )
+      return;
+    void runTranscriptMutation(async (valid) => {
+      await deleteConversation(id);
+      if (!valid()) return;
+      toast("Deleted conversation transcript", "success");
+      setActiveTranscript(null);
+      conversationChanged();
+    });
   };
   const handleVectorizeTranscript = (id: string) => {
-    void runTranscriptMutation(async valid => {
+    void runTranscriptMutation(async (valid) => {
       await vectorizeConversation(id);
       if (!valid()) return;
       conversationChanged();
-      let page = 1;
-      while (valid()) {
-        const result = await fetchConversations(page, 100);
-        if (!valid()) return;
-        const updated = result.conversations.find(item => item.id === id);
-        if (updated) { setActiveTranscript(current => current?.id === id ? updated : current); break; }
-        if (page >= result.pages) break;
-        page++;
-      }
-      if (valid()) toast('Vectorization request completed', 'success');
+      const updated = await fetchConversation(id);
+      if (!valid()) return;
+      setActiveTranscript((current) =>
+        current?.id === id ? updated : current,
+      );
+      if (valid()) toast("Vectorization request completed", "success");
     });
   };
 
@@ -163,73 +215,127 @@ export const AppContent: React.FC = () => {
         />
       )}
 
-      {isAuthenticated && <>
-      {/* LEFT SIDEBAR NAVIGATION */}
-      <fieldset disabled={mutation.busy} className="contents"><Sidebar
-        activeTab={activeTab}
-        setActiveTab={(tab) => { if (!mutation.locked.current) setActiveTab(tab); }}
-        counts={{
-          memories: stats?.total_memories || 0,
-          files: stats?.total_storage_files || 0,
-          rules: stats?.total_profile_rules || 0,
-          transcripts: stats?.total_chat_logs || 0,
-        }}
-      />
-
-      </fieldset>
-      {/* MAIN RIGHT CANVAS */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        {/* TOP BREADCRUMB HEADER */}
-        <fieldset disabled={mutation.busy} className="contents"><Header
-          onRefresh={() => { setRefreshVersion(v => v + 1); void loadStats(); }}
-          isAuthenticated={isAuthenticated}
-          onOpenNewMemoryModal={handleOpenNewMemoryModal}
-          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-        />
-
-        </fieldset>
-        {/* SCROLLABLE MAIN CONTENT CANVAS WITH SMOOTH ANIMATED TAB TRANSITIONS */}
-        <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          <div key={activeTab} className="max-w-6xl mx-auto space-y-6 animate-slide-up">
-            {activeTab === 'overview' && (
-              <OverviewTab stats={stats} onNavigateTab={(tab) => setActiveTab(tab)} />
-            )}
-
-            {activeTab === 'memories' && (
-              <MemoriesTab
-                refreshVersion={refreshVersion}
-                onMutation={() => { setRefreshVersion(v => v + 1); void loadStats(); }}
-                onOpenNewModal={handleOpenNewMemoryModal}
-                onOpenEditModal={handleOpenEditMemoryModal}
+      {isAuthenticated && (
+        <>
+          {/* LEFT SIDEBAR NAVIGATION */}
+          <fieldset disabled={mutation.busy} className="contents">
+            <Sidebar
+              activeTab={activeTab}
+              setActiveTab={(tab) => {
+                if (!mutation.locked.current) setActiveTab(tab);
+              }}
+              counts={{
+                memories: stats?.total_memories || 0,
+                files: stats?.total_storage_files || 0,
+                rules: stats?.total_profile_rules || 0,
+                transcripts: stats?.total_chat_logs || 0,
+              }}
+            />
+          </fieldset>
+          {/* MAIN RIGHT CANVAS */}
+          <div className="flex-1 flex flex-col h-screen overflow-hidden">
+            {/* TOP BREADCRUMB HEADER */}
+            <fieldset disabled={mutation.busy} className="contents">
+              <Header
+                onRefresh={() => {
+                  if (mutation.locked.current) return;
+                  setRefreshVersion((v) => v + 1);
+                  void loadStats();
+                }}
+                isAuthenticated={isAuthenticated}
+                onOpenNewMemoryModal={handleOpenNewMemoryModal}
+                onOpenCommandPalette={() => {
+                  if (!mutation.locked.current) setIsCommandPaletteOpen(true);
+                }}
               />
-            )}
+            </fieldset>
+            {/* SCROLLABLE MAIN CONTENT CANVAS WITH SMOOTH ANIMATED TAB TRANSITIONS */}
+            <main className="flex-1 overflow-y-auto p-6 md:p-8">
+              <div
+                key={activeTab}
+                className="max-w-6xl mx-auto space-y-6 animate-slide-up"
+              >
+                {activeTab === "overview" && (
+                  <OverviewTab
+                    stats={stats}
+                    onNavigateTab={(tab) => {
+                      if (!mutation.locked.current) setActiveTab(tab);
+                    }}
+                  />
+                )}
 
-            {activeTab === 'activity' && <ActivityTab refreshVersion={refreshVersion} />}
+                {activeTab === "memories" && (
+                  <MemoriesTab
+                    refreshVersion={refreshVersion}
+                    onMutation={() => {
+                      setRefreshVersion((v) => v + 1);
+                      void loadStats();
+                    }}
+                    onOpenNewModal={handleOpenNewMemoryModal}
+                    onOpenEditModal={handleOpenEditMemoryModal}
+                  />
+                )}
 
-            {activeTab === 'review' && <ReviewTab refreshVersion={refreshVersion} onMutation={() => { setRefreshVersion(v => v + 1); void loadStats(); }} />}
-            {activeTab === 'knowledge' && <KnowledgeTab refreshVersion={refreshVersion} />}
+                {activeTab === "activity" && (
+                  <ActivityTab refreshVersion={refreshVersion} />
+                )}
 
-            {activeTab === 'files' && <FilesTab />}
+                {activeTab === "review" && (
+                  <ReviewTab
+                    refreshVersion={refreshVersion}
+                    onMutation={() => {
+                      setRefreshVersion((v) => v + 1);
+                      void loadStats();
+                    }}
+                  />
+                )}
+                {activeTab === "knowledge" && (
+                  <KnowledgeTab refreshVersion={refreshVersion} />
+                )}
 
-            {activeTab === 'rules' && (
-              <ProfileRulesTab refreshVersion={refreshVersion} onOpenNewRuleModal={() => setIsRuleModalOpen(true)} />
-            )}
+                {activeTab === "files" && <FilesTab />}
 
-            {activeTab === 'transcripts' && (
-              <ConversationsTab mutation={mutation} onList={(items) => setActiveTranscript(current => current ? items.find(item => item.id === current.id) ?? current : null)} onMutation={conversationChanged} refreshVersion={refreshVersion} onOpenTranscript={(conv) => { if (!mutation.locked.current) setActiveTranscript(conv); }} />
-            )}
+                {activeTab === "rules" && (
+                  <ProfileRulesTab
+                    refreshVersion={refreshVersion}
+                    onOpenNewRuleModal={() => setIsRuleModalOpen(true)}
+                  />
+                )}
 
-            {activeTab === 'vector-lab' && <VectorSearchLabTab />}
+                {activeTab === "transcripts" && (
+                  <ConversationsTab
+                    mutation={mutation}
+                    onList={(items) =>
+                      setActiveTranscript((current) =>
+                        current
+                          ? (items.find((item) => item.id === current.id) ??
+                            current)
+                          : null,
+                      )
+                    }
+                    onMutation={conversationChanged}
+                    refreshVersion={refreshVersion}
+                    onOpenTranscript={(conv) => {
+                      if (!mutation.locked.current) setActiveTranscript(conv);
+                    }}
+                  />
+                )}
 
-            {activeTab === 'clients' && <ClientsTab refreshVersion={refreshVersion} />}
-            {activeTab === 'jobs' && <JobsTab refreshVersion={refreshVersion} />}
+                {activeTab === "vector-lab" && <VectorSearchLabTab />}
 
-            {activeTab === 'settings' && <SettingsTab />}
+                {activeTab === "clients" && (
+                  <ClientsTab refreshVersion={refreshVersion} />
+                )}
+                {activeTab === "jobs" && (
+                  <JobsTab refreshVersion={refreshVersion} />
+                )}
+
+                {activeTab === "settings" && <SettingsTab />}
+              </div>
+            </main>
           </div>
-        </main>
-      </div>
-
-      </>}
+        </>
+      )}
       {/* MODALS & DRAWERS */}
       <MemoryModal
         isOpen={isMemoryModalOpen}
@@ -247,7 +353,9 @@ export const AppContent: React.FC = () => {
       <TranscriptDrawer
         busy={mutation.busy}
         conversation={activeTranscript}
-        onClose={() => { if (!mutation.locked.current) setActiveTranscript(null); }}
+        onClose={() => {
+          if (!mutation.locked.current) setActiveTranscript(null);
+        }}
         onDelete={handleDeleteTranscript}
         onVectorize={handleVectorizeTranscript}
       />
