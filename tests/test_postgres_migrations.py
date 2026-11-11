@@ -293,3 +293,105 @@ def test_native_memory_indexing_is_revision_consistent(postgres_engine, monkeypa
             ).scalar_one()
             is None
         )
+
+
+def test_native_file_publication_rolls_back_and_clears_vectors(
+    postgres_engine, monkeypatch
+):
+    from sqlalchemy.exc import DBAPIError
+    from gigamind.services import indexing
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    monkeypatch.setattr(indexing, "engine", postgres_engine)
+    monkeypatch.setattr(indexing, "is_postgres", True)
+    monkeypatch.setattr(indexing.embedding, "DEFAULT_DIM", 3)
+    monkeypatch.setattr(indexing, "generate_embedding", lambda **kw: [1.0, 2.0, 3.0])
+    migrations.migrate(postgres_engine)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE publication_probe (id INTEGER PRIMARY KEY, publications INTEGER NOT NULL)"
+            )
+        )
+        connection.execute(text("INSERT INTO publication_probe VALUES (1, 0)"))
+
+    def guard(session):
+        session.execute(
+            text("UPDATE publication_probe SET publications=publications+1 WHERE id=1")
+        )
+
+    original = indexing.index_file_content(
+        "native/key",
+        "source.txt",
+        b"original paragraph " * 300,
+        mime_type="text/plain",
+        publication_guard=guard,
+    )
+    assert original["status"] == "completed" and original["chunks_created"] > 1
+
+    def snapshot():
+        with postgres_engine.connect() as connection:
+            file = tuple(
+                connection.execute(
+                    text(
+                        "SELECT id, document_summary, total_chunks, indexing_status, embedding_vector::text FROM storage_files"
+                    )
+                ).one()
+            )
+            chunks = [
+                tuple(row)
+                for row in connection.execute(
+                    text(
+                        "SELECT id, file_id, content, embedding_vector::text FROM storage_chunks ORDER BY chunk_index"
+                    )
+                )
+            ]
+            count = connection.execute(
+                text("SELECT publications FROM publication_probe")
+            ).scalar_one()
+            return file, chunks, count
+
+    before = snapshot()
+    assert before[2] == 1 and len(before[1]) == original["chunks_created"]
+    assert all(
+        row[1] == original["file_id"] and row[-1] == "[1,2,3]" for row in before[1]
+    )
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("""CREATE FUNCTION deny_vector_publication() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'injected native vector failure'; RETURN NEW; END; $$""")
+        )
+        connection.execute(
+            text(
+                "CREATE TRIGGER publication_failure BEFORE UPDATE OF embedding_vector ON storage_chunks FOR EACH ROW EXECUTE FUNCTION deny_vector_publication()"
+            )
+        )
+    monkeypatch.setattr(indexing, "generate_embedding", lambda **kw: [3.0, 2.0, 1.0])
+    with pytest.raises(DBAPIError, match="injected native vector failure"):
+        indexing.index_file_content(
+            "native/key",
+            "source.txt",
+            b"replacement",
+            mime_type="text/plain",
+            publication_guard=guard,
+        )
+    assert snapshot() == before
+    with postgres_engine.begin() as connection:
+        connection.execute(text("DROP TRIGGER publication_failure ON storage_chunks"))
+    replaced = indexing.index_file_content(
+        "native/key",
+        "source.txt",
+        b"replacement",
+        mime_type="text/plain",
+        publication_guard=guard,
+    )
+    assert replaced["file_id"] == original["file_id"]
+    after = snapshot()
+    assert after[0][-1] == "[3,2,1]" and len(after[1]) == 1 and after[2] == 2
+    assert after[1][0][-1] == "[3,2,1]"
+    empty = indexing.index_file_content(
+        "native/key", "source.txt", b"", mime_type="text/plain", publication_guard=guard
+    )
+    assert empty["file_id"] == original["file_id"] and empty["status"] == "empty"
+    cleared = snapshot()
+    assert cleared[0][2:] == (0, "empty", None) and cleared[1] == [] and cleared[2] == 3

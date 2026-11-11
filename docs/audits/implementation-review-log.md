@@ -101,3 +101,9 @@ Parent verifier/resource/MCP run: 31 passed. External JWT resource authorization
 2026-11-11, review of incomplete queue correction a02869bb
 
 Read the draft job service/model/router, indexing publication diff and existing tests in its isolated worktree. Changes are still uncommitted and not integrated. Lease checks and native-vector writes now share a publication transaction in the draft, but the only two tests do not exercise them. Resource cancellation, mounted routes, bounded service inputs, concurrent claims and actual heartbeat/publication coverage remain missing. No queue functionality accepted. Split the queue core and file-publication verification into smaller independent units; preserve draft at t3-e3447d30.
+
+2026-11-11, parent full-diff review of file publication e911b82
+
+Read indexing changes and every new test. Parent SQLite run: 5 passed. Parent added native PostgreSQL/pgvector integration exercising real text parsing/chunking, multi-chunk publication, a PostgreSQL trigger that fails chunk-vector publication after parent-vector/metadata updates begin, rollback of both index writes and a guard-side counter, successful long-to-short replacement and empty replacement clearing native vectors. Combined publication/native suite: 12 passed, including seven native checks. Local Docker service stopped and removed after testing; no hosted database touched.
+
+Parent tightened vector input types to reject booleans, numeric strings and mappings, narrowed the SQLite rollback assertion to the actual SQL error, added per-case preservation assertions and formatted touched functions/tests. Final focused SQLite run: 5 passed. Publication hook/atomic write unit accepted. This does not complete job integration: actual JobLease cancellation/late-publication tests, latest-resource-job ownership and upload/delete/HTTP integration remain required after queue core returns.

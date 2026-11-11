@@ -15,9 +15,18 @@ from gigamind.services.storage import storage_service
 
 def _validate_vector(vector):
     try:
-        valid = (len(vector) == embedding.DEFAULT_DIM and embedding.DEFAULT_DIM > 0
-                 and all(math.isfinite(float(value)) for value in vector)
-                 and any(float(value) != 0 for value in vector))
+        valid = (
+            isinstance(vector, (list, tuple))
+            and len(vector) == embedding.DEFAULT_DIM
+            and embedding.DEFAULT_DIM > 0
+            and all(
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+                for value in vector
+            )
+            and any(float(value) != 0 for value in vector)
+        )
     except (TypeError, ValueError, OverflowError):
         valid = False
     if not valid:
@@ -51,7 +60,9 @@ def index_file_content(
         with Session(engine) as session:
             if publication_guard:
                 publication_guard(session)
-            existing = session.exec(select(StorageFileItem).where(StorageFileItem.key == file_key)).first()
+            existing = session.exec(
+                select(StorageFileItem).where(StorageFileItem.key == file_key)
+            ).first()
             old_chunks = session.exec(
                 select(StorageChunkItem).where(StorageChunkItem.file_key == file_key)
             ).all()
@@ -81,13 +92,15 @@ def index_file_content(
                     total_chunks=0,
                     indexing_status=status,
                     created_at=now_str,
-                    updated_at=now_str
+                    updated_at=now_str,
                 )
                 session.add(f_item)
             session.flush()
             if is_postgres:
                 session.exec(
-                    text("UPDATE storage_files SET embedding_vector = NULL WHERE id = :id"),
+                    text(
+                        "UPDATE storage_files SET embedding_vector = NULL WHERE id = :id"
+                    ),
                     params={"id": file_id},
                 )
             session.commit()
@@ -99,7 +112,7 @@ def index_file_content(
             "multimodal_type": multimodal_type,
             "status": status,
             "chunks_created": 0,
-            "extracted_length": 0
+            "extracted_length": 0,
         }
 
     # Generate semantic chunks with page / line tracking
@@ -107,11 +120,13 @@ def index_file_content(
 
     pages = parsed.get("pages", [])
     if parsed.get("format") == "image":
-        raw_chunks.append({
-            "content": parsed["text"],
-            "page_number": 1,
-            "image_base64": parsed.get("image_base64")
-        })
+        raw_chunks.append(
+            {
+                "content": parsed["text"],
+                "page_number": 1,
+                "image_base64": parsed.get("image_base64"),
+            }
+        )
     elif pages and len(pages) > 1:
         # Multi-page document (e.g. PDF): preserve page-level semantic cohesion
         for p in pages:
@@ -121,32 +136,27 @@ def index_file_content(
                 continue
             # If page text is within standard threshold (1500 chars), keep as 1 clean chunk
             if len(p_text) <= 1500:
-                raw_chunks.append({
-                    "content": p_text,
-                    "page_number": p_num
-                })
+                raw_chunks.append({"content": p_text, "page_number": p_num})
             else:
-                sub_chunks = chunk_text(p_text, chunk_size=1200, chunk_overlap=200, min_threshold=1500)
+                sub_chunks = chunk_text(
+                    p_text, chunk_size=1200, chunk_overlap=200, min_threshold=1500
+                )
                 for sc in sub_chunks:
-                    raw_chunks.append({
-                        "content": sc["content"],
-                        "page_number": p_num
-                    })
+                    raw_chunks.append({"content": sc["content"], "page_number": p_num})
     else:
         # Single page / code / markdown: dense semantic chunks (1200 chars)
-        sub_chunks = chunk_text(parsed["text"], chunk_size=1200, chunk_overlap=200, min_threshold=1500)
+        sub_chunks = chunk_text(
+            parsed["text"], chunk_size=1200, chunk_overlap=200, min_threshold=1500
+        )
         for sc in sub_chunks:
-            raw_chunks.append({
-                "content": sc["content"],
-                "page_number": 1
-            })
+            raw_chunks.append({"content": sc["content"], "page_number": 1})
 
     # 1. Compute Whole-Document Holistic Embedding with Gemini Embedding 2
     doc_summary_text = parsed["text"][:3000]
     doc_embedding = generate_embedding(
         text=f"Document title: {filename}\n{doc_summary_text}",
         inline_bytes=parsed.get("raw_bytes") or data,
-        mime_type=mime_type
+        mime_type=mime_type,
     )
     doc_embedding = _validate_vector(doc_embedding)
     total_chunks = len(raw_chunks)
@@ -158,7 +168,7 @@ def index_file_content(
         emb = generate_embedding(
             text=rc["content"],
             image_base64=rc.get("image_base64"),
-            mime_type=mime_type or "image/png"
+            mime_type=mime_type or "image/png",
         )
         emb = _validate_vector(emb)
         chunk_embeddings.append(emb)
@@ -172,7 +182,7 @@ def index_file_content(
             page_number=rc.get("page_number"),
             content=rc["content"],
             embedding_json=json.dumps(emb),
-            created_at=now_str
+            created_at=now_str,
         )
         chunk_records.append(chunk_item)
 
@@ -181,11 +191,15 @@ def index_file_content(
         if publication_guard:
             publication_guard(session)
         # Remove any old file record or chunks for this key
-        old_chunks = session.exec(select(StorageChunkItem).where(StorageChunkItem.file_key == file_key)).all()
+        old_chunks = session.exec(
+            select(StorageChunkItem).where(StorageChunkItem.file_key == file_key)
+        ).all()
         for oc in old_chunks:
             session.delete(oc)
 
-        existing_file = session.exec(select(StorageFileItem).where(StorageFileItem.key == file_key)).first()
+        existing_file = session.exec(
+            select(StorageFileItem).where(StorageFileItem.key == file_key)
+        ).first()
         if existing_file:
             existing_file.filename = filename
             existing_file.mime_type = mime_type or existing_file.mime_type
@@ -215,7 +229,7 @@ def index_file_content(
                 document_summary=parsed["text"][:350],
                 embedding_json=json.dumps(doc_embedding),
                 created_at=now_str,
-                updated_at=now_str
+                updated_at=now_str,
             )
             session.add(file_entity)
 
@@ -226,13 +240,17 @@ def index_file_content(
         if is_postgres:
             doc_vec_str = f"[{','.join(str(x) for x in doc_embedding)}]"
             session.exec(
-                text("UPDATE storage_files SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"),
+                text(
+                    "UPDATE storage_files SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"
+                ),
                 params={"vec": doc_vec_str, "id": file_id},
             )
             for chk, emb in zip(chunk_records, chunk_embeddings):
                 vec_str = f"[{','.join(str(x) for x in emb)}]"
                 session.exec(
-                    text("UPDATE storage_chunks SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"),
+                    text(
+                        "UPDATE storage_chunks SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"
+                    ),
                     params={"vec": vec_str, "id": chk.id},
                 )
         session.commit()
@@ -244,11 +262,13 @@ def index_file_content(
         "multimodal_type": multimodal_type,
         "status": "completed",
         "chunks_created": total_chunks,
-        "extracted_length": len(parsed["text"])
+        "extracted_length": len(parsed["text"]),
     }
 
 
-def reindex_storage_file_by_key(key: str, publication_guard=None) -> Optional[Dict[str, Any]]:
+def reindex_storage_file_by_key(
+    key: str, publication_guard=None
+) -> Optional[Dict[str, Any]]:
     """Downloads an existing file from R2 and executes full re-indexing."""
     if not storage_service.is_enabled():
         return None
@@ -258,17 +278,23 @@ def reindex_storage_file_by_key(key: str, publication_guard=None) -> Optional[Di
         return None
 
     filename = key.split("/")[-1]
-    return index_file_content(file_key=key, filename=filename, data=data, publication_guard=publication_guard)
+    return index_file_content(
+        file_key=key, filename=filename, data=data, publication_guard=publication_guard
+    )
 
 
 def delete_storage_file_index(key: str) -> bool:
     """Deletes index metadata and all associated vector chunks for an R2 key."""
     with Session(engine) as session:
-        chunks = session.exec(select(StorageChunkItem).where(StorageChunkItem.file_key == key)).all()
+        chunks = session.exec(
+            select(StorageChunkItem).where(StorageChunkItem.file_key == key)
+        ).all()
         for chk in chunks:
             session.delete(chk)
 
-        f_item = session.exec(select(StorageFileItem).where(StorageFileItem.key == key)).first()
+        f_item = session.exec(
+            select(StorageFileItem).where(StorageFileItem.key == key)
+        ).first()
         if f_item:
             session.delete(f_item)
 
