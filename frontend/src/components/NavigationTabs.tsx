@@ -1,7 +1,7 @@
 import React from 'react';
 import { LayoutDashboard, Database, HardDrive, Shield, MessageSquare, Sparkles, Settings } from 'lucide-react';
 
-export type TabType = 'overview' | 'memories' | 'files' | 'rules' | 'transcripts' | 'vector-lab' | 'settings';
+export type TabType = 'review' | 'overview' | 'memories' | 'files' | 'rules' | 'transcripts' | 'vector-lab' | 'settings';
 
 interface NavigationTabsProps {
   activeTab: TabType;
@@ -16,6 +16,7 @@ interface NavigationTabsProps {
 
 export const NavigationTabs: React.FC<NavigationTabsProps> = ({ activeTab, setActiveTab, counts }) => {
   const tabs = [
+    { id: 'review' as TabType, label: 'Review', icon: Shield },
     {
       id: 'overview' as TabType,
       label: 'Overview & Telemetry',

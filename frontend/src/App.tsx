@@ -9,6 +9,7 @@ import { FilesTab } from './components/tabs/FilesTab';
 import { ProfileRulesTab } from './components/tabs/ProfileRulesTab';
 import { ConversationsTab } from './components/tabs/ConversationsTab';
 import { VectorSearchLabTab } from './components/tabs/VectorSearchLabTab';
+import { ReviewTab } from './components/tabs/ReviewTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
 import { MemoryModal } from './components/modals/MemoryModal';
 import { RuleModal } from './components/modals/RuleModal';
@@ -180,6 +181,8 @@ export const AppContent: React.FC = () => {
                 onOpenEditModal={handleOpenEditMemoryModal}
               />
             )}
+
+            {activeTab === 'review' && <ReviewTab refreshVersion={refreshVersion} onMutation={() => { setRefreshVersion(v => v + 1); void loadStats(); }} />}
 
             {activeTab === 'files' && <FilesTab />}
 
