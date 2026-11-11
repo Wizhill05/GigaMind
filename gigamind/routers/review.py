@@ -1,6 +1,6 @@
 from typing import Optional, Literal
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt, ConfigDict
 from gigamind.security import Actor, get_actor
 from gigamind.services import trust, context
 
@@ -16,6 +16,11 @@ from gigamind.services.trust_schema import (
 
 def dump(obj):
     return obj.model_dump() if hasattr(obj, "model_dump") else obj.dict()
+
+
+class DeleteMemory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: StrictInt = Field(ge=1)
 
 
 @router.post("/proposals")
@@ -57,6 +62,11 @@ def memory(memory_id: str, actor: Actor = Depends(get_actor)):
 @router.post("/memories/{memory_id}/restore")
 def restore(memory_id: str, body: Restore, actor: Actor = Depends(get_actor)):
     return trust.restore_memory(actor, memory_id, **dump(body))
+
+
+@router.post("/memories/{memory_id}/delete")
+def delete(memory_id: str, body: DeleteMemory, actor: Actor = Depends(get_actor)):
+    return trust.delete_memory(actor, memory_id, **dump(body))
 
 
 @router.get("/activity")

@@ -397,6 +397,8 @@ def get_memory(actor, memory_id):
         if not m:
             fail(404, "Memory not found")
         access(actor, m.project_id)
+        if m.status == "deleted" and not actor.is_admin:
+            fail(404, "Memory not found")
         return {"memory": memory_dict(m)}
 
 
@@ -407,6 +409,8 @@ def get_history(actor, memory_id):
         if not m:
             fail(404, "Memory not found")
         access(actor, m.project_id)
+        if m.status == "deleted" and not actor.is_admin:
+            fail(404, "Memory not found")
         rows = s.exec(
             select(KnowledgeRevision)
             .where(KnowledgeRevision.memory_id == memory_id)
@@ -427,6 +431,33 @@ def get_history(actor, memory_id):
                 for r in rows
             ]
         }
+
+
+@concurrent_guard
+def delete_memory(actor, memory_id, *, expected_revision):
+    admin(actor)
+    if type(expected_revision) is not int or expected_revision < 1:
+        fail(422, "Invalid expected revision")
+    with Session(engine) as s:
+        m = s.get(AcceptedKnowledge, memory_id)
+        if not m:
+            fail(404, "Memory not found")
+        access(actor, m.project_id)
+        result = s.exec(
+            update(AcceptedKnowledge)
+            .where(AcceptedKnowledge.id == memory_id,
+                   AcceptedKnowledge.status == "accepted",
+                   AcceptedKnowledge.revision == expected_revision)
+            .values(status="deleted", revision=expected_revision + 1, updated_at=now())
+        )
+        if result.rowcount != 1:
+            fail(409, "Stale memory revision or memory is not accepted")
+        s.refresh(m)
+        snapshot(s, m, actor)
+        event(s, actor, m.project_id, "delete", m.id)
+        s.commit()
+        s.refresh(m)
+        return {"memory": memory_dict(m)}
 
 
 @concurrent_guard

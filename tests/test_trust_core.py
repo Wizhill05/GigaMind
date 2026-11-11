@@ -6,6 +6,7 @@ from gigamind.db.trust_models import initialize_trust_tables
 from gigamind.security import Actor, get_actor
 from gigamind.services import trust
 from gigamind.routers.review import router
+from gigamind.services import context
 
 
 @pytest.fixture
@@ -35,6 +36,83 @@ def error(code, fn, *args, **kwargs):
     with pytest.raises(HTTPException) as exc:
         fn(*args, **kwargs)
     assert exc.value.status_code == code
+
+
+def test_delete_persists_and_hides_content(setup):
+    admin, agent = setup
+    p = proposal(agent)
+    m = trust.resolve_proposal(admin, p['id'], action='approve', expected_revision=1)['memory']
+    error(403, trust.delete_memory, agent, m['id'], expected_revision=1)
+    deleted = trust.delete_memory(admin, m['id'], expected_revision=1)['memory']
+    assert (deleted['status'], deleted['revision'], deleted['content']) == ('deleted', 2, 'first')
+    trust.engine.dispose()
+    error(409, trust.delete_memory, admin, m['id'], expected_revision=1)
+    for fn in (trust.get_memory, trust.get_history, context.get_memory):
+        error(404, fn, agent, m['id'])
+    error(404, context.get_memory, admin, m['id'])
+    assert context.search_accepted(agent, 'first', 'a') == []
+    result = context.get_context(agent, 'first', 'a')
+    assert result['memories'] == [] and result['rules'] == []
+    assert [r['status'] for r in trust.get_history(admin, m['id'])['revisions']] == ['accepted', 'deleted']
+    error(403, trust.restore_memory, agent, m['id'], revision=1, expected_revision=2)
+    assert trust.restore_memory(admin, m['id'], revision=1, expected_revision=2)['memory']['status'] == 'accepted'
+
+
+def test_delete_restore_race(setup):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    admin, agent = setup
+    p = proposal(agent)
+    m = trust.resolve_proposal(admin, p['id'], action='approve', expected_revision=1)['memory']
+    barrier = Barrier(2)
+    def run(fn):
+        barrier.wait()
+        try:
+            fn()
+            return 200
+        except HTTPException as exc:
+            return exc.status_code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, [
+            lambda: trust.delete_memory(admin, m['id'], expected_revision=1),
+            lambda: trust.restore_memory(admin, m['id'], revision=1, expected_revision=1),
+        ]))
+    assert sorted(results) == [200, 409]
+    assert len(trust.get_history(admin, m['id'])['revisions']) == 2
+    events = trust.list_activity(admin)['events']
+    assert sum(e['action'] in ('delete', 'restore') for e in events) == 1
+
+
+def test_delete_and_approval_race_preserves_subject_uniqueness(setup):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from sqlmodel import Session, select
+    from gigamind.db.trust_models import AcceptedKnowledge
+    admin, agent = setup
+    first = proposal(agent)
+    memory = trust.resolve_proposal(admin, first['id'], action='approve', expected_revision=1)['memory']
+    second = proposal(agent, 'second', 'second')
+    barrier = Barrier(2)
+    def run(fn):
+        barrier.wait()
+        try:
+            fn()
+            return 200
+        except HTTPException as exc:
+            return exc.status_code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, [
+            lambda: trust.delete_memory(admin, memory['id'], expected_revision=1),
+            lambda: trust.resolve_proposal(admin, second['id'], action='approve', expected_revision=1),
+        ]))
+    assert results[0] == 200 and results[1] in (200, 409)
+    with Session(trust.engine) as session:
+        accepted = session.exec(select(AcceptedKnowledge).where(
+            AcceptedKnowledge.project_id == 'a', AcceptedKnowledge.subject == 'topic',
+            AcceptedKnowledge.status == 'accepted')).all()
+    assert len(accepted) <= 1
+    assert len(trust.get_history(admin, memory['id'])['revisions']) == 2
+    assert sum(e['action'] == 'delete' for e in trust.list_activity(admin)['events']) == 1
 
 
 def test_lifecycle(setup):

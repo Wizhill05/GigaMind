@@ -389,3 +389,28 @@ def test_identity_uses_current_key_and_expiry_on_every_request(server, tmp_path)
                     ).status_code == 401
 
     asyncio.run(exercise())
+
+
+def test_authenticated_delete(server):
+    admin = {"Authorization": "Bearer test-master-key"}
+    client = httpx.Client(base_url=server, headers=admin, trust_env=False)
+    created = client.post('/api/v1/admin/clients', json={
+        'name': 'delete-reader', 'scopes': ['memory:read', 'memory:approve'], 'project_ids': ['p']
+    }).json()
+    reader = {'Authorization': 'Bearer ' + created['token']}
+    p = client.post('/api/v1/review/proposals', json={
+        'content': 'purple delete', 'project_id': 'p', 'evidence': [], 'idempotency_key': 'delete-test'
+    }).json()['proposal']
+    m = client.post(f"/api/v1/review/proposals/{p['id']}/resolve", json={
+        'action': 'approve', 'expected_revision': 1
+    }).json()['memory']
+    path = f"/api/v1/review/memories/{m['id']}"
+    assert client.post(path + '/delete', headers=reader, json={'expected_revision': 1}).status_code == 403
+    assert client.post(path + '/delete', json={'expected_revision': '1'}).status_code == 422
+    assert client.post(path + '/delete', json={'expected_revision': 1}).status_code == 200
+    assert client.post(path + '/delete', json={'expected_revision': 1}).status_code == 409
+    assert client.get(path, headers=reader).status_code == 404
+    assert client.get(path + '/history', headers=reader).status_code == 404
+    assert len(client.get(path + '/history').json()['revisions']) == 2
+    assert client.get('/api/v1/review/search', headers=reader, params={'query': 'delete', 'project_id': 'p'}).json()['results'] == []
+    client.close()
