@@ -2,7 +2,7 @@ from typing import Optional, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from gigamind.security import Actor, get_actor
-from gigamind.services import trust
+from gigamind.services import trust, context
 
 router = APIRouter(prefix="/api/v1/review", tags=["review"])
 
@@ -68,3 +68,13 @@ def activity(
 ):
     """List visible activity; limit (1–100) and offset are optional."""
     return trust.list_activity(actor, project_id, limit=limit, offset=offset)
+
+
+@router.get("/search")
+def search(query: str, project_id: Optional[str] = None, limit: int = 5, actor: Actor = Depends(get_actor)):
+    return {"results": context.search_accepted(actor, query, project_id, limit)}
+
+
+@router.get("/context")
+def get_context(query: str, project_id: Optional[str] = None, token_budget: int = 4096, actor: Actor = Depends(get_actor)):
+    return context.get_context(actor, query, project_id, token_budget)
