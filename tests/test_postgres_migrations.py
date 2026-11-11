@@ -437,3 +437,41 @@ def test_native_queue_claims_and_lease_fencing(postgres_engine):
     assert not jobs.guarded(
         owner.id, owner.lease_token, {"state": "completed"}, engine=postgres_engine
     )
+
+
+def test_native_conversation_import_is_idempotent_and_unindexed(
+    postgres_engine, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from gigamind.services import memory
+
+    migrations.migrate(postgres_engine)
+    monkeypatch.setattr(memory, "engine", postgres_engine)
+    monkeypatch.setattr(
+        memory,
+        "generate_embedding",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("provider called")),
+    )
+    data = {
+        "id": "full-native-source-identifier",
+        "create_time": 1700000000,
+        "messages": [{"role": "user", "content": "preserve this source"}],
+    }
+    barrier = Barrier(2)
+
+    def run(_):
+        barrier.wait(timeout=5)
+        return memory.import_conversations_data(data)
+
+    with ThreadPoolExecutor(2) as executor:
+        results = list(executor.map(run, range(2)))
+    assert sum(r["ingested"] for r in results) == 1
+    assert sum(r["skipped"] for r in results) == 1
+    with postgres_engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT embedding_json, embedding_vector, created_at FROM conversations"
+            )
+        ).one()
+    assert tuple(row) == ("[]", None, "2023-11-14T22:13:20+00:00")

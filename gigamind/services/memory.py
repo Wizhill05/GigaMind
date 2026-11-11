@@ -700,37 +700,51 @@ def add_conversation_log(platform: str, title: str, summary: str, messages: List
         "created_at": now_str
     }
 
-def import_conversations_data(raw_data: Any, default_platform: Optional[str] = None) -> Dict[str, Any]:
+def import_conversations_data(
+    raw_data: Any, default_platform: Optional[str] = None
+) -> Dict[str, Any]:
     from gigamind.services.conversation_import import normalize_conversations
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    from sqlalchemy.dialects.postgresql import insert as postgres_insert
 
     conversations = normalize_conversations(raw_data, default_platform)
+    insert = postgres_insert if engine.dialect.name == "postgresql" else sqlite_insert
     ingested = skipped = 0
     with Session(engine) as session:
-        seen = set()
         for conv in conversations:
-            if conv["id"] in seen or session.get(ConversationItem, conv["id"]):
-                skipped += 1
-                continue
-            seen.add(conv["id"])
-            session.add(ConversationItem(
-                id=conv["id"], platform=conv["platform"], title=conv["title"],
-                summary=conv["summary"], source_agent=conv["source_agent"],
-                created_at=conv["created_at"], messages_json=json.dumps(conv["messages"], ensure_ascii=False),
-                embedding_json="[]",
-            ))
-            ingested += 1
+            result = session.execute(
+                insert(ConversationItem)
+                .values(
+                    id=conv["id"],
+                    platform=conv["platform"],
+                    title=conv["title"],
+                    summary=conv["summary"],
+                    source_agent=conv["source_agent"],
+                    created_at=conv["created_at"]
+                    or datetime.now(timezone.utc).isoformat(),
+                    messages_json=json.dumps(conv["messages"], ensure_ascii=False),
+                    embedding_json="[]",
+                )
+                .on_conflict_do_nothing(index_elements=["id"])
+            )
+            ingested += result.rowcount
+            skipped += 1 - result.rowcount
         session.commit()
     return {
-        "success": True, "ingested": ingested, "skipped": skipped,
+        "success": True,
+        "ingested": ingested,
+        "skipped": skipped,
+        "pending_indexing": ingested,
         "total_processed": len(conversations),
         "message": f"Imported {ingested} conversation(s); {skipped} duplicate(s) skipped. Indexing pending.",
     }
+
 
 def search_conversations(
     query: str,
     platform: Optional[str] = None,
     source_agent: Optional[str] = None,
-    limit: int = 5
+    limit: int = 5,
 ) -> List[Dict[str, Any]]:
     """
     Semantic vector search specifically across chat conversation transcripts.

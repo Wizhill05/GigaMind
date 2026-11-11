@@ -14,9 +14,10 @@ Reviewed and integrated foundations:
 Additional reviewed foundations:
 - Durable queue core with lease fencing, retry/reclaim and real indexing cancellation tests; native PostgreSQL claim/idempotency checks. Atomic file metadata/chunk/vector publication is verified with injected native failures.
 - Isolated synthetic demo CLI with 64 source memories, 15 conversations, scoped reviewed facts/rules and pending proposals; source indexes stay pending.
+- Canonical branch-aware CLI/REST source imports, atomic deduplication, complete text/role retention and no automatic promotion to facts or provider requirement. Segmentation/indexing and full provenance ledger remain unfinished.
 
 In flight:
-- Queue HTTP/worker startup integration, canonical branch-aware source imports and missing authentication/memory component scenarios. React auth/list implementation is intermediate pending those behavior checks.
+- Queue HTTP/worker startup integration, full-transcript lexical retrieval and missing authentication/memory component scenarios. React auth/list implementation is intermediate pending those behavior checks.
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.

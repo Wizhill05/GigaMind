@@ -487,12 +487,17 @@ def api_delete_profile_rule(id: str):
 @app.post("/api/v1/conversations/import_file", dependencies=[Depends(verify_auth)])
 async def api_import_conversations_file(file: UploadFile = File(...), platform: Optional[str] = None):
     """Uploads and batch-imports conversations.json from Claude, ChatGPT, or standard exports."""
+    from gigamind.services.conversation_import import MAX_BYTES
+
     try:
-        content = await file.read()
-        res = import_conversations_data(content, default_platform=platform)
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to import conversations file: {e}")
+        content = await file.read(MAX_BYTES + 1)
+        if len(content) > MAX_BYTES:
+            raise HTTPException(413, 'Conversation import exceeds size limit')
+        return await asyncio.to_thread(import_conversations_data, content, default_platform=platform)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)[:300]) from None
+    finally:
+        await file.close()
 
 @app.post("/api/v1/conversations/import_path", dependencies=[Depends(verify_auth)])
 def api_import_conversations_path(req: ImportConversationsPathRequest):
