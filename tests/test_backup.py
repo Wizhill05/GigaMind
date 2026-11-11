@@ -288,10 +288,14 @@ def test_service_workflows_survive_restore(tmp_path, monkeypatch):
     migrations.migrate(engine)
     with Session(engine) as session:
         session.add(
-            database.MemoryItem(id="m", content="hello", created_at="now", last_accessed="now")
+            database.MemoryItem(
+                id="m", content="hello", created_at="now", last_accessed="now"
+            )
         )
         session.add(
-            memory_index.MemoryIndexState(memory_id="m", revision=3, created_at="now", updated_at="now")
+            memory_index.MemoryIndexState(
+                memory_id="m", revision=3, created_at="now", updated_at="now"
+            )
         )
         session.commit()
     monkeypatch.setattr(security, "engine", engine)

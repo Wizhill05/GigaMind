@@ -29,8 +29,8 @@ Additional reviewed features:
 
 In review:
 - Scoped handoff/issue services, REST/MCP tools and context integration are integrated provisionally. Parent full-diff review and26 focused integrated checks pass; broader SDK/rollback/native coverage remains required.
-- Conversation list error/retry, cancellation and header refresh are implemented provisionally, with parent source-role/provenance corrections. Current frontend70 tests and production build pass. Conversation search/mutation reliability remains incomplete.
-- Local SQLite backup/new-path restore commands are integrated provisionally. Input checksum verification and actual trust/credential recovery checks are added. Deterministic overlapping-write and full service-workflow recovery checks are still required before acceptance. PostgreSQL and object recovery remain unfinished.
+- Conversation list error/retry, cancellation and header refresh are implemented provisionally, with parent source-role/provenance corrections. Current frontend72 tests and production build pass. Mutation error/import retry work is provisionally integrated, but search/deletion refresh, navigation locks and missing HTTP scenarios still require completion.
+- Local SQLite backup/new-path restore is reviewed and accepted, including input digest/WAL checks, observed concurrent write, actual credential/upload services and trust-history recovery. Parent59 focused checks pass. PostgreSQL and object recovery remain unfinished.
 
 Still required:
 - Approved records are available through scoped context/MCP tools and a dedicated Knowledge console. They remain separate from legacy MemoryItem storage; richer retrieval and clear source presentation remain required.
