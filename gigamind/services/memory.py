@@ -8,6 +8,7 @@ from sqlalchemy import func, update, delete
 from gigamind.db.database import engine, is_postgres, ProfileItem, MemoryItem, ConversationItem, TaskSessionItem, StorageFileItem, StorageChunkItem
 from gigamind.services.embedding import generate_embedding, cosine_similarity
 from gigamind.services import embedding as embedding_config
+from gigamind.services import file_lifecycle
 from gigamind.db.jobs import ResourceJobState  # Register job models before metadata initialization.
 from gigamind.db.memory_index import MemoryIndexState
 from fastapi import HTTPException
@@ -205,15 +206,13 @@ def search_memory(
                            1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
                     FROM storage_files
                     WHERE embedding_vector IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM resource_job_state r
+                                      WHERE r.key = storage_files.key AND r.deleted IS TRUE)
                     ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
                     LIMIT 30;
                     """
                     doc_rows = session.exec(text(sql_docs), params={"vec": vector_str}).all()
                     for dr in doc_rows:
-                        url = None
-                        if storage_service.is_enabled():
-                            url = storage_service.get_presigned_download_url(dr.key, filename=dr.filename)
-
                         distinct_files_map[dr.key] = {
                             "id": dr.id,
                             "file_id": dr.id,
@@ -227,7 +226,7 @@ def search_memory(
                             "chunk_index": 0,
                             "total_chunks": 1,
                             "matching_pages": [],
-                            "url": url or "",
+                            "url": "",
                             "source": "file",
                             "category": "file"
                         }
@@ -238,6 +237,8 @@ def search_memory(
                            1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
                     FROM storage_chunks
                     WHERE embedding_vector IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM resource_job_state r
+                                      WHERE r.key = storage_chunks.file_key AND r.deleted IS TRUE)
                     ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
                     LIMIT 60;
                     """
@@ -246,10 +247,6 @@ def search_memory(
                         fkey = cr.file_key
                         chunk_score = float(cr.vector_score or 0.0)
                         if fkey not in distinct_files_map:
-                            url = None
-                            if storage_service.is_enabled():
-                                url = storage_service.get_presigned_download_url(fkey, filename=cr.filename)
-
                             distinct_files_map[fkey] = {
                                 "id": cr.id,
                                 "file_id": cr.file_id,
@@ -261,7 +258,7 @@ def search_memory(
                                 "total_chunks": cr.total_chunks,
                                 "score": chunk_score,
                                 "matching_pages": [cr.page_number] if cr.page_number is not None else [],
-                                "url": url or "",
+                                "url": "",
                                 "source": "file",
                                 "category": "file"
                             }
@@ -279,12 +276,19 @@ def search_memory(
                             if cr.page_number is not None and cr.page_number not in target["matching_pages"]:
                                 target["matching_pages"].append(cr.page_number)
                 except Exception as pg_hier_err:
+                    if getattr(getattr(pg_hier_err, "orig", None), "pgcode", None) == "42P01":
+                        raise
                     print(f"pgvector hierarchical search note: {pg_hier_err}")
                     session.rollback()
 
             # Fallback SQLite candidate scanner
             if not distinct_files_map:
-                s_files = session.exec(select(StorageFileItem).limit(40)).all()
+                s_files = session.exec(select(StorageFileItem).where(
+                    ~select(ResourceJobState.key).where(
+                        ResourceJobState.key == StorageFileItem.key,
+                        ResourceJobState.deleted.is_(True),
+                    ).exists()
+                ).limit(40)).all()
                 for sf in s_files:
                     f_score = 0.0
                     try:
@@ -298,9 +302,6 @@ def search_memory(
                         f_score += (kw_hits / len(query_keywords)) * 0.3
 
                     if f_score > 0.05:
-                        url = None
-                        if storage_service.is_enabled():
-                            url = storage_service.get_presigned_download_url(sf.key, filename=sf.filename)
                         distinct_files_map[sf.key] = {
                             "id": sf.id,
                             "file_id": sf.id,
@@ -308,13 +309,28 @@ def search_memory(
                             "filename": sf.filename,
                             "content": sf.document_summary or f"[{sf.filename}]",
                             "score": round(f_score, 4),
-                            "url": url or "",
+                            "url": "",
                             "matching_pages": [],
                             "source": "file",
                             "category": "file"
                         }
 
             candidates.extend(distinct_files_map.values())
+    admitted = []
+    for candidate in candidates:
+        if candidate.get("source") == "file":
+            try:
+                with file_lifecycle.active_access(candidate["file_key"], engine):
+                    if storage_service.is_enabled():
+                        candidate["url"] = storage_service.get_presigned_download_url(
+                            candidate["file_key"], filename=candidate.get("filename")
+                        ) or ""
+            except HTTPException as exc:
+                if exc.status_code == 409:
+                    continue
+                raise
+        admitted.append(candidate)
+    candidates = admitted
     # Sort all candidates by initial score
     candidates.sort(key=lambda x: x["score"], reverse=True)
     top_candidates = candidates[:50]
