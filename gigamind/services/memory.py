@@ -1,5 +1,6 @@
 import json
 import math
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -81,13 +82,18 @@ def search_memory(
     if scope_clean not in ("all", "memories", "files"):
         scope_clean = "all"
 
-    query_vector = generate_embedding(
-        text=query if query else None,
-        image_base64=query_image_base64,
-        mime_type="image/png"
-    )
-    query_lower = (query or "").lower()
-    query_keywords = [k for k in re_words if len(k) > 2] if (re_words := query_lower.split()) else []
+    query_vector = None
+    try:
+        vector = generate_embedding(text=query if query else None, image_base64=query_image_base64)
+        query_vector = embedding_config._response_vector({"embedding": {"values": vector}})
+    except embedding_config.EmbeddingUnavailable:
+        if query_image_base64:
+            raise
+    except ValueError as exc:
+        if query_image_base64 or str(exc) != "Invalid embedding response":
+            raise
+
+    query_keywords = list(dict.fromkeys(re.findall(r"\w+", (query or "").casefold())))
 
     candidates: List[Dict[str, Any]] = []
 
@@ -97,7 +103,7 @@ def search_memory(
         # ====================================================
         if scope_clean in ("all", "memories"):
             raw_mem_candidates: List[Dict[str, Any]] = []
-            if is_postgres:
+            if is_postgres and query_vector is not None:
                 try:
                     vector_str = f"[{','.join(str(x) for x in query_vector)}]"
                     sql = """
@@ -124,11 +130,11 @@ def search_memory(
                             "tags": json.loads(r.tags_json or "[]"),
                             "attachments": _hydrate_attachments(r.attachments_json),
                             "score": float(r.vector_score or 0.0),
-                            "vector_score": float(r.vector_score or 0.0)
+                            "vector_score": float(r.vector_score or 0.0),
+                            "retrieval_method": "vector"
                         })
-                except Exception as pg_err:
-                    print(f"pgvector query note: {pg_err}")
-                    session.rollback()
+                except Exception:
+                    raise
 
             # Keyword scan for memories
             mem_stmt = select(MemoryItem)
@@ -139,12 +145,12 @@ def search_memory(
             keyword_memories = session.exec(mem_stmt).all()
             for mem in keyword_memories:
                 kw_score = 0.0
-                mem_lower = mem.content.lower()
+                mem_lower = mem.content.casefold()
                 kw_hits = sum(1 for kw in query_keywords if kw in mem_lower)
                 if query_keywords:
                     kw_score = (kw_hits / len(query_keywords)) * 0.4
 
-                if kw_score > 0.1:
+                if kw_score > 0:
                     raw_mem_candidates.append({
                         "id": mem.id,
                         "source": "memory",
@@ -156,14 +162,16 @@ def search_memory(
                         "total_chunks": mem.total_chunks,
                         "tags": json.loads(mem.tags_json or "[]"),
                         "attachments": _hydrate_attachments(mem.attachments_json, mem.media_url, mem.media_type),
-                        "score": round(kw_score, 4)
+                        "score": round(kw_score, 4),
+                        "retrieval_method": "lexical"
                     })
 
             # Deduplicate memory chunks by parent memory
             distinct_mem_map: Dict[str, Dict[str, Any]] = {}
             for mc in raw_mem_candidates:
                 pkey = mc.get("parent_id") or mc.get("id")
-                if pkey not in distinct_mem_map or mc["score"] > distinct_mem_map[pkey]["score"]:
+                previous = distinct_mem_map.get(pkey)
+                if previous is None or (-mc["score"], str(mc["id"])) < (-previous["score"], str(previous["id"])):
                     distinct_mem_map[pkey] = mc
 
             candidates.extend(distinct_mem_map.values())
@@ -176,27 +184,28 @@ def search_memory(
                 profile_stmt = profile_stmt.where(ProfileItem.source_agent == source_agent)
             profiles = session.exec(profile_stmt).all()
             for prof in profiles:
-                p_text = f"{prof.key}: {prof.value}".lower()
+                p_text = f"{prof.key}: {prof.value}".casefold()
                 p_score = 0.0
                 for kw in query_keywords:
                     if kw in p_text:
                         p_score += 0.4
 
-                if p_score > 0.1:
+                if p_score > 0:
                     candidates.append({
                         "id": prof.id,
                         "source": "profile",
                         "content": f"[PROFILE RULE] {prof.key} = {prof.value}",
                         "category": prof.category,
                         "source_agent": getattr(prof, "source_agent", "user") or "user",
-                        "score": round(p_score, 4)
+                        "score": round(p_score, 4),
+                        "retrieval_method": "lexical"
                     })
         # ====================================================
         # 2. VECTORIZED OBJECT STORAGE SCAN (if scope: all | files)
         # ====================================================
         if scope_clean in ("all", "files"):
             distinct_files_map: Dict[str, Dict[str, Any]] = {}
-            if is_postgres:
+            if is_postgres and query_vector is not None:
                 try:
                     vector_str = f"[{','.join(str(x) for x in query_vector)}]"
 
@@ -275,11 +284,8 @@ def search_memory(
                                 target["page_number"] = cr.page_number
                             if cr.page_number is not None and cr.page_number not in target["matching_pages"]:
                                 target["matching_pages"].append(cr.page_number)
-                except Exception as pg_hier_err:
-                    if getattr(getattr(pg_hier_err, "orig", None), "pgcode", None) == "42P01":
-                        raise
-                    print(f"pgvector hierarchical search note: {pg_hier_err}")
-                    session.rollback()
+                except Exception:
+                    raise
 
             # Fallback SQLite candidate scanner
             if not distinct_files_map:
@@ -291,10 +297,12 @@ def search_memory(
                 ).limit(40)).all()
                 for sf in s_files:
                     f_score = 0.0
+                    file_vector_score = 0.0
                     try:
                         sf_vec = json.loads(sf.embedding_json)
-                        f_score += cosine_similarity(query_vector, sf_vec) * 0.7
-                    except Exception:
+                        file_vector_score = cosine_similarity(query_vector or [], sf_vec)
+                        f_score += file_vector_score * 0.7
+                    except (ValueError, TypeError, OverflowError):
                         pass
                     sf_lower = sf.filename.lower() + " " + (sf.document_summary or "").lower()
                     kw_hits = sum(1 for kw in query_keywords if kw in sf_lower)
@@ -309,6 +317,8 @@ def search_memory(
                             "filename": sf.filename,
                             "content": sf.document_summary or f"[{sf.filename}]",
                             "score": round(f_score, 4),
+                            "retrieval_method": "lexical+vector" if file_vector_score and kw_hits else "vector" if file_vector_score else "lexical",
+                            "vector_score": file_vector_score if file_vector_score else None,
                             "url": "",
                             "matching_pages": [],
                             "source": "file",
@@ -332,12 +342,13 @@ def search_memory(
         admitted.append(candidate)
     candidates = admitted
     # Sort all candidates by initial score
-    candidates.sort(key=lambda x: x["score"], reverse=True)
+    candidates.sort(key=lambda x: (-x["score"], str(x.get("source", "")), str(x["id"])))
     top_candidates = candidates[:50]
 
     # ====================================================
     # STAGE 2: CROSS-ENCODER NEURAL RERANK PASS
     # ====================================================
+    original_scores = {(c["source"], c["id"]): c.get("vector_score") for c in top_candidates}
     reranked_results = rerank_candidates(query=query or "visual and multimodal search", candidates=top_candidates, top_n=limit)
 
     final_output = []
@@ -387,6 +398,13 @@ def search_memory(
                     "total": item.get("total_chunks", 1)
                 }
 
+        method = item.get("retrieval_method", "vector")
+        res_item["retrieval_method"] = method
+        actual_vector_score = original_scores.get((src, item["id"]))
+        if actual_vector_score is None:
+            res_item.pop("vector_score", None)
+        else:
+            res_item["vector_score"] = actual_vector_score
         final_output.append(res_item)
 
     return final_output

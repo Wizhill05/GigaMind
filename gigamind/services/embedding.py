@@ -36,6 +36,10 @@ def _get_api_keys() -> List[str]:
     return keys
 
 
+class EmbeddingUnavailable(RuntimeError):
+    """The embedding provider could not return a usable vector."""
+
+
 class GeminiKeyPool:
     """
     Thread-safe Round-Robin API Key Pool with automated cooldown tracking
@@ -50,7 +54,7 @@ class GeminiKeyPool:
     def get_next_key(self) -> str:
         keys = _get_api_keys()
         if not keys:
-            raise RuntimeError(
+            raise EmbeddingUnavailable(
                 "GEMINI_API_KEY environment variable is required. "
                 'You can provide multiple comma-separated keys (e.g. GEMINI_API_KEY="key1,key2,key3").'
             )
@@ -189,7 +193,7 @@ def generate_embedding(
         raise ValueError("Embedding input is empty")
     keys = _get_api_keys()
     if not keys:
-        raise RuntimeError("GEMINI_API_KEY environment variable is required.")
+        raise EmbeddingUnavailable("GEMINI_API_KEY environment variable is required.")
     payload = {
         "model": MODEL_NAME,
         "content": {"parts": parts},
@@ -215,22 +219,25 @@ def generate_embedding(
             exc.close()
             alternate_key = code == 403 and len(keys) > 1
             if code != 429 and not alternate_key and not 500 <= code <= 599:
-                raise RuntimeError(
+                error_type = RuntimeError if code in (401, 403) else EmbeddingUnavailable
+                raise error_type(
                     f"Gemini embedding request failed (HTTP {code})"
                 ) from None
+            if alternate_key and attempt == max_attempts - 1:
+                raise RuntimeError("Gemini embedding request failed (HTTP 403)") from None
             if code == 429 or alternate_key:
                 key_pool.mark_rate_limited(active_key)
             if attempt < max_attempts - 1 and len(keys) == 1:
                 time.sleep(min(2**attempt, 5))
         except (ValueError, TypeError, OverflowError, UnicodeError):
             # Malformed successful responses are not useful retry candidates.
-            raise RuntimeError(
+            raise EmbeddingUnavailable(
                 "Gemini embedding returned an invalid response"
             ) from None
-        except Exception:
+        except (urllib.error.URLError, OSError):
             if attempt < max_attempts - 1:
                 time.sleep(min(2**attempt, 5))
-    raise RuntimeError("Gemini embedding request failed after retries")
+    raise EmbeddingUnavailable("Gemini embedding request failed after retries")
 
 
 def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
