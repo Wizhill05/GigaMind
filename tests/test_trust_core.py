@@ -1,8 +1,3 @@
-import os
-
-os.environ["PYTHON_DOTENV_DISABLED"] = "1"
-os.environ["DATABASE_URL"] = ""
-os.environ["DB_PATH"] = "/tmp/gigamind-trust-import-unused.db"
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
