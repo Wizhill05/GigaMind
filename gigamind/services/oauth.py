@@ -92,7 +92,11 @@ def load_oauth_config():
     ]
     if not any(values):
         return None
-    return OAuthConfig(*values, allow_loopback_http=os.getenv("OAUTH_ALLOW_LOOPBACK_HTTP", "").lower() == "true")
+    return OAuthConfig(
+        *values,
+        allow_loopback_http=os.getenv("OAUTH_ALLOW_LOOPBACK_HTTP", "").lower()
+        == "true",
+    )
 
 
 @dataclass(frozen=True)
@@ -243,9 +247,37 @@ def resource_config():
         return None
     try:
         url = urlsplit(origin)
-        loopback = url.hostname == "localhost" or (url.hostname and _is_loopback(url.hostname))
-        production = os.getenv("ENVIRONMENT", "development").lower() in ("prod", "production") or bool(os.getenv("RENDER"))
-        if (not url.hostname or url.username is not None or url.password is not None or url.path or url.query or url.fragment or url.port == 0 or not (url.scheme == "https" or (url.scheme == "http" and loopback and config.allow_loopback_http and not production))):
+        loopback = url.hostname == "localhost" or (
+            url.hostname and _is_loopback(url.hostname)
+        )
+        production = os.getenv("ENVIRONMENT", "development").strip().lower() in (
+            "prod",
+            "production",
+        ) or bool(os.getenv("RENDER"))
+        if (
+            not origin
+            or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in origin)
+            or "?" in origin
+            or "#" in origin
+            or '"' in origin
+            or "\\" in origin
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.path
+            or url.query
+            or url.fragment
+            or url.port == 0
+            or not (
+                url.scheme == "https"
+                or (
+                    url.scheme == "http"
+                    and loopback
+                    and config.allow_loopback_http
+                    and not production
+                )
+            )
+        ):
             raise ValueError
     except ValueError:
         raise ValueError("Invalid GIGAMIND_PUBLIC_URL") from None

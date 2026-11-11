@@ -91,3 +91,13 @@ Verifier: read all code, signer/local-server tests and dependency change. Parent
 2026-11-11, parent full-diff review of review-screen correction f8bccce
 
 Read all three changed source/test files. Accepted the edited-content conflict preview, abort guards, explicit supersession, draft-preserving retries, local list refresh and restore refresh. Parent fixed a server/client normalization mismatch that prevented approving whitespace-padded drafts, added a regression, debounced previews and made preview loading visible even when there are no conflicts. Disabled retry controls during mutations and strengthened the delayed-preview test to wait until the old request actually starts before changing drafts. Parent frontend verification: 18 tests passed; production build passed with dependency annotation warnings. Generated dist restored. Broader frontend error handling and approved/legacy memory presentation remain tracked separately.
+
+2026-11-11, parent full-diff review of OAuth binding/discovery f70b140
+
+Read all eight changed files, including verifier configuration, per-request actor mapping, MCP challenge forwarding and binding APIs. Parent added actual SDK integration with generated RSA keys and a local JWKS server, proving project A retrieval/context, global and project B denial, scope intersection, admin denial and immediate binding revocation. Tests exercise the real verifier and transport without real issuer credentials. Parent isolated the binding HTTP test database, added HTTP admin/pagination checks, bounded binding lists and bearer lengths, fixed non-ASCII bearer strings causing hmac TypeError, tightened canonical resource-origin validation and formatted the new authentication code.
+
+Parent verifier/resource/MCP run: 31 passed. External JWT resource authorization accepted with documented operator configuration. This does not provision an authorization server or prove interoperability with a particular hosted provider. Credential expiry/last-use and operator UI remain outstanding.
+
+2026-11-11, review of incomplete queue correction a02869bb
+
+Read the draft job service/model/router, indexing publication diff and existing tests in its isolated worktree. Changes are still uncommitted and not integrated. Lease checks and native-vector writes now share a publication transaction in the draft, but the only two tests do not exercise them. Resource cancellation, mounted routes, bounded service inputs, concurrent claims and actual heartbeat/publication coverage remain missing. No queue functionality accepted. Split the queue core and file-publication verification into smaller independent units; preserve draft at t3-e3447d30.
