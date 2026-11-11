@@ -33,7 +33,7 @@ export interface ProfileRule {
 }
 
 export interface ConversationMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: string;
   content: string;
 }
 

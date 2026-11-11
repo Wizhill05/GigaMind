@@ -162,13 +162,16 @@ export async function deleteProfileRule(id: string): Promise<boolean> {
 }
 
 const conversationSchema = z.object({
-  id: z.string(), platform: z.string(), title: z.string(), summary: z.string(),
+  id: z.string().min(1), platform: z.string(), title: z.string(), summary: z.string(),
   source_agent: z.string(), created_at: z.string(), is_vectorized: z.boolean().optional(),
-  messages: z.array(z.object({ role: z.enum(['user', 'assistant', 'system']), content: z.string() })),
+  messages: z.array(z.object({
+    role: z.string().min(1), content: z.string(), id: z.string().optional(),
+    created_at: z.union([z.string(), z.number().finite()]).optional(),
+  }).passthrough()),
 });
 const conversationListSchema = z.object({
-  conversations: z.array(conversationSchema), total: z.number(), total_vectorized: z.number(),
-  page: z.number(), pages: z.number(),
+  conversations: z.array(conversationSchema), total: z.number().int().nonnegative(), total_vectorized: z.number().int().nonnegative(),
+  page: z.number().int().positive(), pages: z.number().int().nonnegative(),
 });
 
 export async function fetchConversations(
