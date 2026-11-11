@@ -56,3 +56,8 @@ class Resolution(StrippedModel):
 class Restore(StrippedModel):
     revision: int = Field(ge=1)
     expected_revision: int = Field(ge=1)
+
+
+class ApprovalPreview(StrippedModel):
+    content: str = Field(min_length=1, max_length=50000)
+    expected_revision: int = Field(ge=1)

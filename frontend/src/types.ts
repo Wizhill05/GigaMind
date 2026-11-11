@@ -11,6 +11,7 @@ export interface MemoryAttachment {
 
 export interface Memory {
   id: string;
+  revision?: number | null;
   content: string;
   category: string;
   source_agent: SourceAgent;

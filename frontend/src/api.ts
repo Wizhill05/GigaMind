@@ -77,7 +77,7 @@ export async function addMemory(data: {
 
 export async function updateMemory(
   id: string,
-  data: { content?: string; category?: string; source_agent?: string; tags?: string[]; attachments?: MemoryAttachment[] }
+  data: { content?: string; category?: string; source_agent?: string; tags?: string[]; attachments?: MemoryAttachment[]; expected_revision?: number }
 ): Promise<{ success: boolean; memory?: Memory } | null> {
     const res = await checkedFetch(`/api/v1/memories/${id}`, {
       method: 'PUT',

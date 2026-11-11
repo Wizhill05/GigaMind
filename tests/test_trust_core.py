@@ -382,3 +382,42 @@ def test_validation_normalization_and_global_visibility(setup):
             evidence=evidence,
             idempotency_key="invalid",
         )
+
+
+def test_preview_tracks_edited_text_without_resolving(setup):
+    from sqlmodel import Session
+    from gigamind.db.trust_models import MemoryProposal
+
+    admin, agent = setup
+    first = proposal(agent)
+    accepted = trust.resolve_proposal(
+        admin, first["id"], action="approve", expected_revision=1
+    )["memory"]
+    second = proposal(agent, key="preview", content="different")
+    changed = trust.preview_proposal(
+        admin, second["id"], content="first", expected_revision=1
+    )
+    assert changed["conflicts"] == []
+    changed = trust.preview_proposal(
+        admin, second["id"], content="different", expected_revision=1
+    )
+    assert [record["id"] for record in changed["conflicts"]] == [accepted["id"]]
+    error(
+        403,
+        trust.preview_proposal,
+        agent,
+        second["id"],
+        content="different",
+        expected_revision=1,
+    )
+    error(
+        409,
+        trust.preview_proposal,
+        admin,
+        second["id"],
+        content="different",
+        expected_revision=2,
+    )
+    with Session(trust.engine) as session:
+        stored = session.get(MemoryProposal, second["id"])
+        assert stored.status == "proposed" and stored.revision == 1

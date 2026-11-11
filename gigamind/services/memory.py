@@ -380,13 +380,21 @@ def _now():
 
 def _memory_response(item, state):
     return {
-        "id": item.id, "content": item.content, "category": item.category,
-        "media_type": item.media_type, "media_url": item.media_url,
-        "source_agent": item.source_agent or "user", "parent_id": item.parent_id,
-        "chunk_index": item.chunk_index, "total_chunks": item.total_chunks,
+        "id": item.id,
+        "content": item.content,
+        "category": item.category,
+        "media_type": item.media_type,
+        "media_url": item.media_url,
+        "source_agent": item.source_agent or "user",
+        "parent_id": item.parent_id,
+        "chunk_index": item.chunk_index,
+        "total_chunks": item.total_chunks,
         "tags": json.loads(item.tags_json or "[]"),
-        "attachments": _hydrate_attachments(item.attachments_json, item.media_url, item.media_type),
-        "created_at": item.created_at, "last_accessed": item.last_accessed,
+        "attachments": _hydrate_attachments(
+            item.attachments_json, item.media_url, item.media_type
+        ),
+        "created_at": item.created_at,
+        "last_accessed": item.last_accessed,
         "revision": state.revision if state else None,
         "index_status": state.index_status if state else "pending",
         "index_error": state.index_error if state else None,
@@ -398,22 +406,39 @@ def _memory_response(item, state):
 
 def _index_memory(memory_id, revision, content):
     try:
-        chunks = chunk_text(content, chunk_size=500, chunk_overlap=100, min_threshold=600)
+        chunks = chunk_text(
+            content, chunk_size=500, chunk_overlap=100, min_threshold=600
+        )
         parts = [c["content"] for c in chunks] if len(chunks) > 1 else [content]
         model, dimension = embedding_config.MODEL_NAME, embedding_config.DEFAULT_DIM
-        if not isinstance(model, str) or not model.strip() or not isinstance(dimension, int) or dimension <= 0:
+        if (
+            not isinstance(model, str)
+            or not model.strip()
+            or not isinstance(dimension, int)
+            or dimension <= 0
+        ):
             raise ValueError("Invalid embedding configuration")
         vectors = []
         for part in parts:
             vector = generate_embedding(part)
-            if len(vector) != dimension or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in vector):
+            if len(vector) != dimension or any(
+                isinstance(v, bool)
+                or not isinstance(v, (int, float))
+                or not math.isfinite(v)
+                for v in vector
+            ):
                 raise ValueError("Invalid embedding vector")
             vectors.append(vector)
         with Session(engine) as session:
             # This conditional write locks the state row until vectors and completion commit.
-            result = session.exec(update(MemoryIndexState).where(
-                MemoryIndexState.memory_id == memory_id, MemoryIndexState.revision == revision
-            ).values(updated_at=_now()))
+            result = session.exec(
+                update(MemoryIndexState)
+                .where(
+                    MemoryIndexState.memory_id == memory_id,
+                    MemoryIndexState.revision == revision,
+                )
+                .values(updated_at=_now())
+            )
             if result.rowcount != 1:
                 session.rollback()
                 return
@@ -424,16 +449,30 @@ def _index_memory(memory_id, revision, content):
             session.exec(delete(MemoryItem).where(MemoryItem.parent_id == memory_id))
             item.embedding_json = "[]"
             if is_postgres:
-                session.exec(text("UPDATE memories SET embedding_vector = NULL WHERE id = :id"), params={"id": memory_id})
+                session.exec(
+                    text("UPDATE memories SET embedding_vector = NULL WHERE id = :id"),
+                    params={"id": memory_id},
+                )
             targets = []
             if len(chunks) > 1:
                 item.total_chunks = len(chunks)
                 for chunk, vector in zip(chunks, vectors):
-                    child = MemoryItem(id=f"{memory_id}_chk_{chunk['chunk_index']}", content=chunk["content"],
-                        category=item.category, media_type=item.media_type, media_url=item.media_url,
-                        source_agent=item.source_agent, tags_json=item.tags_json, attachments_json=item.attachments_json,
-                        embedding_json=json.dumps(vector), parent_id=memory_id, chunk_index=chunk["chunk_index"],
-                        total_chunks=len(chunks), created_at=item.created_at, last_accessed=item.last_accessed)
+                    child = MemoryItem(
+                        id=f"{memory_id}_chk_{chunk['chunk_index']}",
+                        content=chunk["content"],
+                        category=item.category,
+                        media_type=item.media_type,
+                        media_url=item.media_url,
+                        source_agent=item.source_agent,
+                        tags_json=item.tags_json,
+                        attachments_json=item.attachments_json,
+                        embedding_json=json.dumps(vector),
+                        parent_id=memory_id,
+                        chunk_index=chunk["chunk_index"],
+                        total_chunks=len(chunks),
+                        created_at=item.created_at,
+                        last_accessed=item.last_accessed,
+                    )
                     session.add(child)
                     targets.append((child.id, vector))
             else:
@@ -443,43 +482,131 @@ def _index_memory(memory_id, revision, content):
             session.flush()
             if is_postgres:
                 for target_id, vector in targets:
-                    session.exec(text("UPDATE memories SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"),
-                                 params={"vec": json.dumps(vector), "id": target_id})
-            session.exec(update(MemoryIndexState).where(MemoryIndexState.memory_id == memory_id).values(
-                index_status="completed", index_error=None, indexed_revision=revision,
-                embedding_model=model, embedding_dimension=dimension, updated_at=_now()))
+                    session.exec(
+                        text(
+                            "UPDATE memories SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"
+                        ),
+                        params={"vec": json.dumps(vector), "id": target_id},
+                    )
+            session.exec(
+                update(MemoryIndexState)
+                .where(MemoryIndexState.memory_id == memory_id)
+                .values(
+                    index_status="completed",
+                    index_error=None,
+                    indexed_revision=revision,
+                    embedding_model=model,
+                    embedding_dimension=dimension,
+                    updated_at=_now(),
+                )
+            )
             session.commit()
     except Exception:
         with Session(engine) as session:
-            session.exec(update(MemoryIndexState).where(
-                MemoryIndexState.memory_id == memory_id, MemoryIndexState.revision == revision
-            ).values(index_status="failed", index_error="Embedding failed. Check provider configuration and retry.", updated_at=_now()))
+            session.exec(
+                update(MemoryIndexState)
+                .where(
+                    MemoryIndexState.memory_id == memory_id,
+                    MemoryIndexState.revision == revision,
+                    MemoryIndexState.index_status != "completed",
+                )
+                .values(
+                    index_status="failed",
+                    index_error="Embedding failed. Check provider configuration and retry.",
+                    updated_at=_now(),
+                )
+            )
             session.commit()
 
 
-def add_memory(content: str, category: str = "general", source_agent: str = "user",
-               tags: Optional[List[str]] = None, attachments: Optional[List[Dict[str, Any]]] = None,
-               file_keys: Optional[List[str]] = None, media_url: Optional[str] = None,
-               media_type: Optional[str] = None) -> Dict[str, Any]:
+def _register_attachment_metadata(session, attachments, source_agent, timestamp):
+    for attachment in attachments:
+        key = attachment.get("key")
+        if not isinstance(key, str) or not key:
+            continue
+        session.exec(
+            text("""INSERT INTO storage_files
+            (id, key, filename, mime_type, multimodal_type, size_bytes, source_agent,
+             extracted_text_length, total_chunks, indexing_status, embedding_json, created_at, updated_at)
+            VALUES (:id, :key, :filename, :mime_type, 'text', :size, :source_agent,
+                    0, 0, 'pending', '[]', :created_at, :updated_at)
+            ON CONFLICT (key) DO NOTHING"""),
+            params={
+                "id": f"file_{uuid.uuid4().hex}",
+                "key": key,
+                "filename": attachment.get("filename")
+                or key.split("/")[-1]
+                or "attachment",
+                "mime_type": attachment.get("mime_type") or "application/octet-stream",
+                "size": attachment.get("size_bytes", 0),
+                "source_agent": source_agent or "user",
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            },
+        )
+
+
+def add_memory(
+    content: str,
+    category: str = "general",
+    source_agent: str = "user",
+    tags: Optional[List[str]] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None,
+    file_keys: Optional[List[str]] = None,
+    media_url: Optional[str] = None,
+    media_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    if not isinstance(content, str) or not content.strip() or len(content) > 50000:
+        raise HTTPException(422, "Memory content must contain 1 to 50000 characters")
     now = _now()
     memory_id = f"mem_{uuid.uuid4().hex[:12]}"
     resolved = list(attachments or [])
     for key in file_keys or []:
         if key and isinstance(key, str):
-            resolved.append({"key": key, "filename": key.split("/")[-1], "mime_type": "application/octet-stream", "size_bytes": 0, "created_at": now})
+            resolved.append(
+                {
+                    "key": key,
+                    "filename": key.split("/")[-1],
+                    "mime_type": "application/octet-stream",
+                    "size_bytes": 0,
+                    "created_at": now,
+                }
+            )
     if media_url and not resolved:
-        resolved.append({"key": media_url, "filename": media_url.split("/")[-1] or "attachment", "mime_type": media_type or "application/octet-stream", "size_bytes": 0, "created_at": now})
+        resolved.append(
+            {
+                "key": media_url,
+                "filename": media_url.split("/")[-1] or "attachment",
+                "mime_type": media_type or "application/octet-stream",
+                "size_bytes": 0,
+                "created_at": now,
+            }
+        )
     with Session(engine) as session:
-        session.add(MemoryItem(id=memory_id, content=content, category=category, source_agent=source_agent or "user",
-            media_type=media_type or "text", media_url=media_url, tags_json=json.dumps(tags or []),
-            attachments_json=json.dumps(resolved), created_at=now, last_accessed=now))
-        session.add(MemoryIndexState(memory_id=memory_id, created_at=now, updated_at=now))
+        session.add(
+            MemoryItem(
+                id=memory_id,
+                content=content,
+                category=category,
+                source_agent=source_agent or "user",
+                media_type=media_type or "text",
+                media_url=media_url,
+                tags_json=json.dumps(tags or []),
+                attachments_json=json.dumps(resolved),
+                created_at=now,
+                last_accessed=now,
+            )
+        )
+        session.add(
+            MemoryIndexState(memory_id=memory_id, created_at=now, updated_at=now)
+        )
+        _register_attachment_metadata(session, resolved, source_agent, now)
         session.commit()
     _index_memory(memory_id, 1, content)
     with Session(engine) as session:
         item = session.get(MemoryItem, memory_id)
         if not item:
-            return {"id": memory_id}
+            raise HTTPException(409, "Memory was deleted while indexing")
         response = _memory_response(item, session.get(MemoryIndexState, memory_id))
         response["chunks_created"] = item.total_chunks or 1
         return response
@@ -834,7 +961,14 @@ def backfill_conversation_vectors() -> int:
             count += 1
     return count
 
-def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None, source_agent: Optional[str] = None, q: Optional[str] = None, project_id: Optional[str] = None) -> Dict[str, Any]:
+def get_memories(
+    page: int = 1,
+    limit: int = 20,
+    category: Optional[str] = None,
+    source_agent: Optional[str] = None,
+    q: Optional[str] = None,
+    project_id: Optional[str] = None,
+) -> Dict[str, Any]:
     page = max(1, page)
     limit = max(1, min(limit, 100))
     with Session(engine) as session:
@@ -851,9 +985,14 @@ def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None,
         total = session.exec(select(func.count()).select_from(stmt.subquery())).one()
 
         offset = (page - 1) * limit
-        items = session.exec(stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)).all()
+        items = session.exec(
+            stmt.order_by(MemoryItem.created_at.desc()).offset(offset).limit(limit)
+        ).all()
 
-        res_memories = [_memory_response(mem, session.get(MemoryIndexState, mem.id)) for mem in items]
+        res_memories = [
+            _memory_response(mem, session.get(MemoryIndexState, mem.id))
+            for mem in items
+        ]
 
         pages = (total + limit - 1) // limit if limit > 0 else 1
         return {
@@ -861,15 +1000,22 @@ def get_memories(page: int = 1, limit: int = 20, category: Optional[str] = None,
             "total": total,
             "page": page,
             "limit": limit,
-            "pages": pages
+            "pages": pages,
         }
+
 
 def delete_memory(memory_id: str) -> bool:
     with Session(engine) as session:
-        items = session.exec(select(MemoryItem).where((MemoryItem.id == memory_id) | (MemoryItem.parent_id == memory_id))).all()
+        items = session.exec(
+            select(MemoryItem).where(
+                (MemoryItem.id == memory_id) | (MemoryItem.parent_id == memory_id)
+            )
+        ).all()
         if not items:
             return False
-        session.exec(delete(MemoryIndexState).where(MemoryIndexState.memory_id == memory_id))
+        session.exec(
+            delete(MemoryIndexState).where(MemoryIndexState.memory_id == memory_id)
+        )
         for item in items:
             session.delete(item)
         session.commit()
@@ -886,37 +1032,74 @@ def reset_all_memories() -> int:
         session.commit()
         return count
 
+
 def export_all_memories() -> List[Dict[str, Any]]:
     with Session(engine) as session:
-        mems = session.exec(select(MemoryItem).order_by(MemoryItem.created_at.desc())).all()
-        return [_memory_response(m, session.get(MemoryIndexState, m.parent_id or m.id)) for m in mems]
+        mems = session.exec(
+            select(MemoryItem).order_by(MemoryItem.created_at.desc())
+        ).all()
+        return [
+            _memory_response(m, session.get(MemoryIndexState, m.parent_id or m.id))
+            for m in mems
+        ]
 
 
-def update_memory(memory_id: str, content: Optional[str] = None, category: Optional[str] = None,
-                  source_agent: Optional[str] = None, tags: Optional[List[str]] = None,
-                  attachments: Optional[List[Dict[str, Any]]] = None, *,
-                  expected_revision: Optional[int] = None) -> Optional[Dict[str, Any]]:
+def update_memory(
+    memory_id: str,
+    content: Optional[str] = None,
+    category: Optional[str] = None,
+    source_agent: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None,
+    *,
+    expected_revision: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    if content is not None and (
+        not isinstance(content, str) or not content.strip() or len(content) > 50000
+    ):
+        raise HTTPException(422, "Memory content must contain 1 to 50000 characters")
     with Session(engine) as session:
         item = session.get(MemoryItem, memory_id)
         if not item or item.parent_id is not None:
             return None
         state = session.get(MemoryIndexState, memory_id)
         if state is None:
-            state = MemoryIndexState(memory_id=memory_id, revision=0, created_at=_now(), updated_at=_now())
-            session.add(state)
-            session.flush()
+            timestamp = _now()
+            session.exec(
+                text("""INSERT INTO memory_index_state
+                (memory_id, revision, index_status, created_at, updated_at)
+                VALUES (:id, 0, 'pending', :created_at, :updated_at)
+                ON CONFLICT (memory_id) DO NOTHING"""),
+                params={
+                    "id": memory_id,
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                },
+            )
+            state = session.get(MemoryIndexState, memory_id)
         old_revision = state.revision
         if expected_revision is not None and expected_revision != old_revision:
             raise HTTPException(status_code=409, detail="Memory revision conflict")
         needs_index = content is not None or state.index_status == "pending"
         values = {"updated_at": _now(), "revision": old_revision + 1}
         if needs_index:
-            values.update(index_status="pending", index_error=None,
-                          indexed_revision=None, embedding_model=None, embedding_dimension=None)
+            values.update(
+                index_status="pending",
+                index_error=None,
+                indexed_revision=None,
+                embedding_model=None,
+                embedding_dimension=None,
+            )
         elif state.index_status == "completed":
             values["indexed_revision"] = old_revision + 1
-        result = session.exec(update(MemoryIndexState).where(MemoryIndexState.memory_id == memory_id,
-                              MemoryIndexState.revision == old_revision).values(**values))
+        result = session.exec(
+            update(MemoryIndexState)
+            .where(
+                MemoryIndexState.memory_id == memory_id,
+                MemoryIndexState.revision == old_revision,
+            )
+            .values(**values)
+        )
         if result.rowcount != 1:
             session.rollback()
             raise HTTPException(status_code=409, detail="Memory revision conflict")
@@ -926,22 +1109,40 @@ def update_memory(memory_id: str, content: Optional[str] = None, category: Optio
             item.total_chunks = None
             session.exec(delete(MemoryItem).where(MemoryItem.parent_id == memory_id))
             if is_postgres:
-                session.exec(text("UPDATE memories SET embedding_vector = NULL WHERE id = :id"), params={"id": memory_id})
-        children = session.exec(select(MemoryItem).where(MemoryItem.parent_id == memory_id)).all()
+                session.exec(
+                    text("UPDATE memories SET embedding_vector = NULL WHERE id = :id"),
+                    params={"id": memory_id},
+                )
+        children = session.exec(
+            select(MemoryItem).where(MemoryItem.parent_id == memory_id)
+        ).all()
         for target in [item, *children]:
-            if category is not None: target.category = category
-            if source_agent is not None: target.source_agent = source_agent
-            if tags is not None: target.tags_json = json.dumps(tags)
-            if attachments is not None: target.attachments_json = json.dumps(attachments)
+            if category is not None:
+                target.category = category
+            if source_agent is not None:
+                target.source_agent = source_agent
+            if tags is not None:
+                target.tags_json = json.dumps(tags)
+            if attachments is not None:
+                target.attachments_json = json.dumps(attachments)
             session.add(target)
         item.last_accessed = _now()
+        if attachments is not None:
+            _register_attachment_metadata(
+                session, attachments, item.source_agent, item.last_accessed
+            )
         source_content = item.content
         session.commit()
     if needs_index:
         _index_memory(memory_id, old_revision + 1, source_content)
     with Session(engine) as session:
         item = session.get(MemoryItem, memory_id)
-        return _memory_response(item, session.get(MemoryIndexState, memory_id)) if item else None
+        return (
+            _memory_response(item, session.get(MemoryIndexState, memory_id))
+            if item
+            else None
+        )
+
 
 def get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = None, source_agent: Optional[str] = None) -> Dict[str, Any]:
     with Session(engine) as session:

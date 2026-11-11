@@ -213,3 +213,83 @@ def test_native_approval_race_preserves_one_active_fact(postgres_engine, monkeyp
         assert sorted(
             proposal.status for proposal in session.exec(select(MemoryProposal)).all()
         ) == ["accepted", "proposed"]
+
+
+def test_native_memory_indexing_is_revision_consistent(postgres_engine, monkeypatch):
+    from fastapi import HTTPException
+    from sqlmodel import Session, select
+    from gigamind.services import memory
+    from gigamind.db.database import MemoryItem
+    from gigamind.db.memory_index import MemoryIndexState
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    monkeypatch.setattr(memory, "engine", postgres_engine)
+    monkeypatch.setattr(memory, "is_postgres", True)
+    monkeypatch.setattr(memory.embedding_config, "DEFAULT_DIM", 3)
+    calls = []
+    monkeypatch.setattr(
+        memory,
+        "generate_embedding",
+        lambda source: calls.append(source) or [1.0, 0.0, 0.0],
+    )
+    migrations.migrate(postgres_engine)
+    saved = memory.add_memory(
+        "original long source " * 100, attachments=[{"key": "native/shared.pdf"}]
+    )
+    assert saved["index_status"] == "completed", saved
+    assert len(calls) == saved["total_chunks"] > 1
+    with postgres_engine.connect() as connection:
+        rows = (
+            connection.execute(
+                text(
+                    "SELECT vector_dims(embedding_vector) FROM memories WHERE parent_id=:id"
+                ),
+                {"id": saved["id"]},
+            )
+            .scalars()
+            .all()
+        )
+        assert rows and all(dimension == 3 for dimension in rows)
+    updated = memory.update_memory(
+        saved["id"], content="replacement", expected_revision=1
+    )
+    assert updated["index_status"] == "completed"
+    assert updated["indexed_revision"] == updated["revision"] == 2
+    with postgres_engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("SELECT COUNT(*) FROM memories WHERE parent_id=:id"),
+                {"id": saved["id"]},
+            ).scalar_one()
+            == 0
+        )
+        assert (
+            connection.execute(
+                text("SELECT vector_dims(embedding_vector) FROM memories WHERE id=:id"),
+                {"id": saved["id"]},
+            ).scalar_one()
+            == 3
+        )
+    with pytest.raises(HTTPException) as stale:
+        memory.update_memory(saved["id"], content="stale", expected_revision=1)
+    assert stale.value.status_code == 409
+    monkeypatch.setattr(
+        memory,
+        "generate_embedding",
+        lambda source: (_ for _ in ()).throw(RuntimeError("provider unavailable")),
+    )
+    failed = memory.update_memory(
+        saved["id"], content="new durable source", expected_revision=2
+    )
+    assert failed["index_status"] == "failed"
+    with Session(postgres_engine) as session:
+        assert session.get(MemoryItem, saved["id"]).content == "new durable source"
+        assert session.get(MemoryIndexState, saved["id"]).indexed_revision is None
+    with postgres_engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("SELECT embedding_vector FROM memories WHERE id=:id"),
+                {"id": saved["id"]},
+            ).scalar_one()
+            is None
+        )

@@ -136,6 +136,7 @@ class SetProfileRuleRequest(BaseModel):
     source_agent: str = Field("user", description="Source agent or tool setting this rule (e.g. claude, gpt, gemini, user)")
 
 class UpdateMemoryRequest(BaseModel):
+    expected_revision: Optional[int] = Field(None, ge=1)
     content: Optional[str] = Field(None, description="Fact or memory content")
     category: Optional[str] = Field(None, description="Memory category")
     source_agent: Optional[str] = Field(None, description="Source agent or tool (e.g. claude, gpt, gemini, user)")
@@ -446,7 +447,8 @@ def api_update_memory(id: str, req: UpdateMemoryRequest):
         category=req.category,
         source_agent=req.source_agent,
         tags=req.tags,
-        attachments=req.attachments
+        attachments=req.attachments,
+        expected_revision=req.expected_revision
     )
     if not updated:
         raise HTTPException(status_code=404, detail=f"Memory '{id}' not found")

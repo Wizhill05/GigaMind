@@ -6,7 +6,12 @@ from fastapi import HTTPException
 from sqlalchemy import update, func
 from sqlalchemy.exc import IntegrityError, OperationalError
 from pydantic import ValidationError
-from gigamind.services.trust_schema import Proposal, Resolution, Restore
+from gigamind.services.trust_schema import (
+    Proposal,
+    Resolution,
+    Restore,
+    ApprovalPreview,
+)
 from sqlmodel import Session, select
 from gigamind.db.database import engine
 from gigamind.db.trust_models import (
@@ -244,6 +249,30 @@ def list_proposals(actor, project_id=None, *, limit=100, offset=0):
             d["conflicts"] = [x.id for x in conflicts(s, d, d["content"])]
             result.append(d)
         return {"proposals": result, "total": total}
+
+
+def preview_proposal(actor, proposal_id, *, content, expected_revision):
+    admin(actor)
+    values = validate(
+        ApprovalPreview, content=content, expected_revision=expected_revision
+    )
+    with Session(engine) as session:
+        proposal = session.get(MemoryProposal, proposal_id)
+        if proposal is None:
+            fail(404, "Proposal not found")
+        access(actor, proposal.project_id)
+        if (
+            proposal.status != "proposed"
+            or proposal.revision != values["expected_revision"]
+        ):
+            fail(409, "Stale proposal revision")
+        records = conflicts(session, proposal_dict(proposal), values["content"])
+        return {
+            "proposal_id": proposal.id,
+            "revision": proposal.revision,
+            "content": values["content"],
+            "conflicts": [memory_dict(record) for record in records],
+        }
 
 
 @concurrent_guard

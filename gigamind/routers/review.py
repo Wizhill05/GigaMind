@@ -6,7 +6,12 @@ from gigamind.services import trust
 
 router = APIRouter(prefix="/api/v1/review", tags=["review"])
 
-from gigamind.services.trust_schema import Proposal, Resolution, Restore
+from gigamind.services.trust_schema import (
+    Proposal,
+    Resolution,
+    Restore,
+    ApprovalPreview,
+)
 
 
 def dump(obj):
@@ -32,6 +37,11 @@ def proposals(
 @router.post("/proposals/{proposal_id}/resolve")
 def resolve(proposal_id: str, body: Resolution, actor: Actor = Depends(get_actor)):
     return trust.resolve_proposal(actor, proposal_id, **dump(body))
+
+
+@router.post("/proposals/{proposal_id}/preview")
+def preview(proposal_id: str, body: ApprovalPreview, actor: Actor = Depends(get_actor)):
+    return trust.preview_proposal(actor, proposal_id, **dump(body))
 
 
 @router.get("/memories/{memory_id}/history")

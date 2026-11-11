@@ -87,7 +87,7 @@ export const AppContent: React.FC = () => {
 
   const handleSaveMemory = async (data: { content: string; category: string; source_agent: string; tags: string[] }) => {
     if (editingMemory) {
-      const result = await updateMemory(editingMemory.id, data);
+      const result = await updateMemory(editingMemory.id, { ...data, expected_revision: editingMemory.revision ?? undefined });
       if (!result?.success) throw new Error("Memory update failed.");
       toast(`Memory ${editingMemory.id} updated successfully`, 'success');
     } else {
