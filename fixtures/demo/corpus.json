@@ -1,11 +1,50 @@
 {
   "origin": "SYNTHETIC DEMO: fictional assistant data, not user preferences",
-  "projects": ["demo-orchard", "demo-harbor", "demo-observatory"],
-  "topics": ["planning", "release", "research", "budget", "design", "testing", "meeting", "documentation"],
+  "projects": [
+    "demo-orchard",
+    "demo-harbor",
+    "demo-observatory"
+  ],
+  "topics": [
+    "planning",
+    "release",
+    "research",
+    "budget",
+    "design",
+    "testing",
+    "meeting",
+    "documentation"
+  ],
   "queries": [
-    {"project": "demo-orchard", "query": "launch cadence", "contains": "weekly"},
-    {"project": "demo-harbor", "query": "launch cadence", "contains": "monthly"},
-    {"project": null, "query": "response format", "contains": "concise"},
-    {"project": "demo-orchard", "query": "quartzplatypus", "contains": null}
-  ]
+    {
+      "project": "demo-orchard",
+      "query": "launch cadence",
+      "contains": "weekly"
+    },
+    {
+      "project": "demo-harbor",
+      "query": "launch cadence",
+      "contains": "monthly"
+    },
+    {
+      "project": null,
+      "query": "response format",
+      "contains": "concise"
+    },
+    {
+      "project": "demo-orchard",
+      "query": "quartzplatypus",
+      "contains": null
+    }
+  ],
+  "notes": {
+    "planning": "Milestone {index} for {project} depends on finishing the prototype review before implementation starts.",
+    "release": "Release {index} for {project} uses a staging checklist and a rollback rehearsal before the fictional Tuesday deployment.",
+    "research": "Experiment {index} for {project} compares lexical retrieval with a labeled list of expected facts; results still need review.",
+    "budget": "Budget note {index} for {project} reserves fictional credits for a test environment and requires approval before external spending.",
+    "design": "Design review {index} for {project} requires keyboard navigation, visible save failures, and a clear empty state.",
+    "testing": "Test plan {index} for {project} covers expired credentials, interrupted imports, and isolation between fictional projects.",
+    "meeting": "Meeting {index} for {project} ends with a written decision, an owner, and an unresolved-question list.",
+    "documentation": "Guide {index} for {project} must describe setup, local backup recovery, and what to do when indexing fails."
+  }
 }
