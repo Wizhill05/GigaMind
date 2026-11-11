@@ -26,7 +26,11 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  useEffect(() => { const timer = setTimeout(() => { setPage(1); setDebouncedSearch(searchFilter); }, 400); return () => clearTimeout(timer); }, [searchFilter]);
+  useEffect(() => {
+    if (searchFilter === debouncedSearch) return;
+    const timer = setTimeout(() => { setPage(1); setDebouncedSearch(searchFilter); }, 400);
+    return () => clearTimeout(timer);
+  }, [searchFilter, debouncedSearch]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [activeSubTab, setActiveSubTab] = useState<'memories' | 'files'>('memories');
@@ -79,7 +83,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
       const ok = await deleteMemory(id);
       if (ok) {
         toast(`Memory ${id} deleted successfully`, 'success');
-        if (page > 1 && memories.length === 1) setPage(value => value - 1);
+        if (page > 1 && memories.length === 1) setPage(value => Math.max(1, value - 1));
         else setReload(value => value + 1);
         onMutation();
       }

@@ -11,8 +11,12 @@ Reviewed and integrated foundations:
 - Source-first legacy memory indexing, revision-safe chunk/vector replacement, failed-provider source retention and revision checks through REST/React edits.
 - React auth gating, awaited saves/draft retention, filtered refresh, dialog focus and visible settings export/reset errors. Proposal inbox/revision review with edited-content conflict previews, explicit supersession, retry and restore behavior; 18 focused frontend tests pass.
 
+Additional reviewed foundations:
+- Durable queue core with lease fencing, retry/reclaim and real indexing cancellation tests; native PostgreSQL claim/idempotency checks. Atomic file metadata/chunk/vector publication is verified with injected native failures.
+- Isolated synthetic demo CLI with 64 source memories, 15 conversations, scoped reviewed facts/rules and pending proposals; source indexes stay pending.
+
 In flight:
-- Durable queue core, file-index publication safety and isolated representative demo data. Prior queue drafts remain unaccepted.
+- Queue HTTP/worker startup integration, canonical branch-aware source imports and missing authentication/memory component scenarios. React auth/list implementation is intermediate pending those behavior checks.
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.

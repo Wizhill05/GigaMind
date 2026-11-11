@@ -14,6 +14,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice,
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (pending) return;
     if (keyInput.trim()) {
       setApiKey(keyInput.trim());
       onAuthenticate();
@@ -43,6 +44,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice,
             <input
               id="master-key"
               type="password"
+              disabled={pending}
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
               placeholder="Enter GIGAMIND_API_KEY..."
