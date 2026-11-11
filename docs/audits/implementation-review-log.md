@@ -49,3 +49,9 @@ Read all changes including shared schemas. Parent verified shared /tmp/gigamind-
 Trust correction accepted after parent changes: explicit IF NOT EXISTS index DDL upgrades existing tables without relying on SQLite expression-index reflection; validated normalized resolution/restoration inputs are actually used; non-concurrency OperationalError is no longer mislabeled 409; sources reformatted for readability. Added real restore-versus-approval races for both project and global scope, idempotent-create race with one event, old-index upgrade checks, normalized inputs and global/activity visibility tests. Parent trust+MCP run: 11 passed. These are SQLite behavior tests plus PostgreSQL DDL compilation, not live PostgreSQL integration.
 
 Reviewed small uncommitted stats patch from de6805ae and integrated only SQL aggregates/logical-parent counts and bounded service pagination. Added a persistent logical-memory count/list regression test; parent test passed. Source-first indexing/migrations/retrieval remain outstanding, now split into separate units. Trust router/context integration and remaining product work remain outstanding.
+
+2026-11-11, resume after provider usage limits
+
+The latest frontend focus/export/reset diff (2b0ccd4) was reviewed in full on 2026-11-10. Parent reran 8 frontend tests and production build successfully. Router integration is now committed: review API mounted, trust tables/index initialized and exact accepted-memory endpoint added. Parent full-app HTTP probe verified scoped proposal creation, denied agent approval, admin approval, memory retrieval and revision history. Generated frontend build changes restored; source remains authoritative.
+
+Migration and source-index workers failed from provider quota while holding unfinished drafts. Preserve those worktrees and resume the actual changes in fresh isolated tasks; no draft is accepted as complete. All original roadmap requirements and review/fix obligations remain in scope.

@@ -37,10 +37,13 @@ from gigamind.services.memory import (
 from gigamind.security import Actor, ClientCredential, SCOPES, create_client, get_actor, public_client, require_scope
 from gigamind.db.database import engine
 from sqlmodel import Session, select
+from gigamind.db.trust_models import initialize_trust_tables
+from gigamind.routers.review import router as review_router
 
 # Initialize DB
 init_db()
 ClientCredential.__table__.create(engine, checkfirst=True)
+initialize_trust_tables(engine)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -54,6 +57,7 @@ app = FastAPI(
     version="1.0.0",
     openapi_url="/openapi.json"
 )
+app.include_router(review_router)
 
 class MCPMiddleware:
     def __init__(self, app):

@@ -39,6 +39,11 @@ def history(memory_id: str, actor: Actor = Depends(get_actor)):
     return trust.get_history(actor, memory_id)
 
 
+@router.get("/memories/{memory_id}")
+def memory(memory_id: str, actor: Actor = Depends(get_actor)):
+    return trust.get_memory(actor, memory_id)
+
+
 @router.post("/memories/{memory_id}/restore")
 def restore(memory_id: str, body: Restore, actor: Actor = Depends(get_actor)):
     return trust.restore_memory(actor, memory_id, **dump(body))
