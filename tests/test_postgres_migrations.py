@@ -1204,3 +1204,83 @@ def test_native_v2_upload_manifest_upgrade_and_single_admission(
     with Session(postgres_engine) as session:
         with pytest.raises(jobs.PermanentFailure, match="not been verified"):
             jobs.JobLease(claimed.id, claimed.lease_token).publication_guard(session)
+
+
+def test_native_delete_cannot_be_reclassified_by_stale_approval(
+    postgres_engine, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from fastapi import HTTPException
+    from sqlmodel import Session
+    from gigamind.db.trust_models import MemoryProposal
+    from gigamind.security import Actor
+    from gigamind.services import trust, context
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    monkeypatch.setattr(trust, "engine", postgres_engine)
+    migrations.migrate(postgres_engine)
+    admin = Actor("admin", set(), None, True)
+    reader = Actor("reader", {"memory:read"}, {"p"})
+    p = trust.create_proposal(
+        admin,
+        content="first",
+        subject="topic",
+        project_id="p",
+        evidence=[],
+        idempotency_key="first",
+    )["proposal"]
+    memory = trust.resolve_proposal(
+        admin, p["id"], action="approve", expected_revision=1
+    )["memory"]
+    second = trust.create_proposal(
+        admin,
+        content="second",
+        subject="topic",
+        project_id="p",
+        evidence=[],
+        idempotency_key="second",
+    )["proposal"]
+    captured, release = Event(), Event()
+    conflicts = trust.conflicts
+
+    def pause_conflicts(*args, **kwargs):
+        result = conflicts(*args, **kwargs)
+        captured.set()
+        assert release.wait(5)
+        return result
+
+    monkeypatch.setattr(trust, "conflicts", pause_conflicts)
+    with ThreadPoolExecutor(1) as pool:
+        approval = pool.submit(
+            trust.resolve_proposal,
+            admin,
+            second["id"],
+            action="approve",
+            expected_revision=1,
+            supersedes=[memory["id"]],
+        )
+        assert captured.wait(5)
+        try:
+            trust.delete_memory(admin, memory["id"], expected_revision=1)
+        finally:
+            release.set()
+        with pytest.raises(HTTPException) as stale:
+            approval.result(timeout=10)
+        assert stale.value.status_code == 409
+    with Session(postgres_engine) as session:
+        pending = session.get(MemoryProposal, second["id"])
+        assert pending.status == "proposed" and pending.revision == 1
+    for retrieve in (trust.get_memory, trust.get_history, context.get_memory):
+        with pytest.raises(HTTPException) as hidden:
+            retrieve(reader, memory["id"])
+        assert hidden.value.status_code == 404
+    assert [
+        r["status"] for r in trust.get_history(admin, memory["id"])["revisions"]
+    ] == ["accepted", "deleted"]
+    assert (
+        len(
+            [e for e in trust.list_activity(admin)["events"] if e["action"] == "delete"]
+        )
+        == 1
+    )

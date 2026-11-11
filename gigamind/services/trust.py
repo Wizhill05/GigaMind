@@ -81,7 +81,7 @@ def validate(model, **values):
         raise HTTPException(422, detail=exc.errors(include_context=False)) from exc
 
 
-def event(s, actor, project, action, target):
+def event(s, actor, project, action, target, revision=1):
     t = now()
     s.add(
         ActivityEvent(
@@ -90,6 +90,7 @@ def event(s, actor, project, action, target):
             writer_id=actor.id,
             action=action,
             target_id=target,
+            revision=revision,
             created_at=t,
             updated_at=t,
         )
@@ -322,10 +323,21 @@ def resolve_proposal(
         if result.rowcount != 1:
             fail(409, "Stale proposal revision")
         for old in found:
-            old.status = "superseded"
-            old.revision += 1
-            old.updated_at = t
-            s.add(old)
+            previous_revision = old.revision
+            changed = s.exec(
+                update(AcceptedKnowledge)
+                .where(
+                    AcceptedKnowledge.id == old.id,
+                    AcceptedKnowledge.status == "accepted",
+                    AcceptedKnowledge.revision == previous_revision,
+                )
+                .values(
+                    status="superseded", revision=previous_revision + 1, updated_at=t
+                )
+            )
+            if changed.rowcount != 1:
+                fail(409, "Conflicting knowledge changed; reload proposal")
+            s.refresh(old)
             snapshot(s, old, actor)
         s.flush()
         memory = None
@@ -438,25 +450,31 @@ def delete_memory(actor, memory_id, *, expected_revision):
     admin(actor)
     if type(expected_revision) is not int or expected_revision < 1:
         fail(422, "Invalid expected revision")
-    with Session(engine) as s:
+    with Session(engine, expire_on_commit=False) as s:
         m = s.get(AcceptedKnowledge, memory_id)
         if not m:
             fail(404, "Memory not found")
         access(actor, m.project_id)
         result = s.exec(
             update(AcceptedKnowledge)
-            .where(AcceptedKnowledge.id == memory_id,
-                   AcceptedKnowledge.status == "accepted",
-                   AcceptedKnowledge.revision == expected_revision)
-            .values(status="deleted", revision=expected_revision + 1, updated_at=now())
+            .where(
+                AcceptedKnowledge.id == memory_id,
+                AcceptedKnowledge.status == "accepted",
+                AcceptedKnowledge.revision == expected_revision,
+            )
+            .values(
+                status="deleted",
+                revision=expected_revision + 1,
+                updated_at=now(),
+                writer_id=actor.id,
+            )
         )
         if result.rowcount != 1:
             fail(409, "Stale memory revision or memory is not accepted")
         s.refresh(m)
         snapshot(s, m, actor)
-        event(s, actor, m.project_id, "delete", m.id)
+        event(s, actor, m.project_id, "delete", m.id, revision=m.revision)
         s.commit()
-        s.refresh(m)
         return {"memory": memory_dict(m)}
 
 

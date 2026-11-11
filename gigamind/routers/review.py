@@ -81,10 +81,20 @@ def activity(
 
 
 @router.get("/search")
-def search(query: str, project_id: Optional[str] = None, limit: int = 5, actor: Actor = Depends(get_actor)):
+def search(
+    query: str,
+    project_id: Optional[str] = None,
+    limit: int = 5,
+    actor: Actor = Depends(get_actor),
+):
     return {"results": context.search_accepted(actor, query, project_id, limit)}
 
 
 @router.get("/context")
-def get_context(query: str, project_id: Optional[str] = None, token_budget: int = 4096, actor: Actor = Depends(get_actor)):
+def get_context(
+    query: str,
+    project_id: Optional[str] = None,
+    token_budget: int = 4096,
+    actor: Actor = Depends(get_actor),
+):
     return context.get_context(actor, query, project_id, token_budget)

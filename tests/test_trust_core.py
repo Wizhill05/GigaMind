@@ -41,46 +41,72 @@ def error(code, fn, *args, **kwargs):
 def test_delete_persists_and_hides_content(setup):
     admin, agent = setup
     p = proposal(agent)
-    m = trust.resolve_proposal(admin, p['id'], action='approve', expected_revision=1)['memory']
-    error(403, trust.delete_memory, agent, m['id'], expected_revision=1)
-    deleted = trust.delete_memory(admin, m['id'], expected_revision=1)['memory']
-    assert (deleted['status'], deleted['revision'], deleted['content']) == ('deleted', 2, 'first')
+    m = trust.resolve_proposal(admin, p["id"], action="approve", expected_revision=1)[
+        "memory"
+    ]
+    error(403, trust.delete_memory, agent, m["id"], expected_revision=1)
+    deleted = trust.delete_memory(admin, m["id"], expected_revision=1)["memory"]
+    assert (deleted["status"], deleted["revision"], deleted["content"]) == (
+        "deleted",
+        2,
+        "first",
+    )
     trust.engine.dispose()
-    error(409, trust.delete_memory, admin, m['id'], expected_revision=1)
+    error(409, trust.delete_memory, admin, m["id"], expected_revision=1)
     for fn in (trust.get_memory, trust.get_history, context.get_memory):
-        error(404, fn, agent, m['id'])
-    error(404, context.get_memory, admin, m['id'])
-    assert context.search_accepted(agent, 'first', 'a') == []
-    result = context.get_context(agent, 'first', 'a')
-    assert result['memories'] == [] and result['rules'] == []
-    assert [r['status'] for r in trust.get_history(admin, m['id'])['revisions']] == ['accepted', 'deleted']
-    error(403, trust.restore_memory, agent, m['id'], revision=1, expected_revision=2)
-    assert trust.restore_memory(admin, m['id'], revision=1, expected_revision=2)['memory']['status'] == 'accepted'
+        error(404, fn, agent, m["id"])
+    error(404, context.get_memory, admin, m["id"])
+    assert context.search_accepted(agent, "first", "a") == []
+    result = context.get_context(agent, "first", "a")
+    assert result["memories"] == [] and result["rules"] == []
+    assert [r["status"] for r in trust.get_history(admin, m["id"])["revisions"]] == [
+        "accepted",
+        "deleted",
+    ]
+    error(403, trust.restore_memory, agent, m["id"], revision=1, expected_revision=2)
+    assert (
+        trust.restore_memory(admin, m["id"], revision=1, expected_revision=2)["memory"][
+            "status"
+        ]
+        == "accepted"
+    )
 
 
 def test_delete_restore_race(setup):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
+
     admin, agent = setup
     p = proposal(agent)
-    m = trust.resolve_proposal(admin, p['id'], action='approve', expected_revision=1)['memory']
+    m = trust.resolve_proposal(admin, p["id"], action="approve", expected_revision=1)[
+        "memory"
+    ]
     barrier = Barrier(2)
+
     def run(fn):
-        barrier.wait()
+        barrier.wait(timeout=5)
         try:
             fn()
             return 200
         except HTTPException as exc:
             return exc.status_code
+
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(run, [
-            lambda: trust.delete_memory(admin, m['id'], expected_revision=1),
-            lambda: trust.restore_memory(admin, m['id'], revision=1, expected_revision=1),
-        ]))
+        results = list(
+            pool.map(
+                run,
+                [
+                    lambda: trust.delete_memory(admin, m["id"], expected_revision=1),
+                    lambda: trust.restore_memory(
+                        admin, m["id"], revision=1, expected_revision=1
+                    ),
+                ],
+            )
+        )
     assert sorted(results) == [200, 409]
-    assert len(trust.get_history(admin, m['id'])['revisions']) == 2
-    events = trust.list_activity(admin)['events']
-    assert sum(e['action'] in ('delete', 'restore') for e in events) == 1
+    assert len(trust.get_history(admin, m["id"])["revisions"]) == 2
+    events = trust.list_activity(admin)["events"]
+    assert sum(e["action"] in ("delete", "restore") for e in events) == 1
 
 
 def test_delete_and_approval_race_preserves_subject_uniqueness(setup):
@@ -88,31 +114,51 @@ def test_delete_and_approval_race_preserves_subject_uniqueness(setup):
     from threading import Barrier
     from sqlmodel import Session, select
     from gigamind.db.trust_models import AcceptedKnowledge
+
     admin, agent = setup
     first = proposal(agent)
-    memory = trust.resolve_proposal(admin, first['id'], action='approve', expected_revision=1)['memory']
-    second = proposal(agent, 'second', 'second')
+    memory = trust.resolve_proposal(
+        admin, first["id"], action="approve", expected_revision=1
+    )["memory"]
+    second = proposal(agent, "second", "second")
     barrier = Barrier(2)
+
     def run(fn):
-        barrier.wait()
+        barrier.wait(timeout=5)
         try:
             fn()
             return 200
         except HTTPException as exc:
             return exc.status_code
+
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(run, [
-            lambda: trust.delete_memory(admin, memory['id'], expected_revision=1),
-            lambda: trust.resolve_proposal(admin, second['id'], action='approve', expected_revision=1),
-        ]))
+        results = list(
+            pool.map(
+                run,
+                [
+                    lambda: trust.delete_memory(
+                        admin, memory["id"], expected_revision=1
+                    ),
+                    lambda: trust.resolve_proposal(
+                        admin, second["id"], action="approve", expected_revision=1
+                    ),
+                ],
+            )
+        )
     assert results[0] == 200 and results[1] in (200, 409)
     with Session(trust.engine) as session:
-        accepted = session.exec(select(AcceptedKnowledge).where(
-            AcceptedKnowledge.project_id == 'a', AcceptedKnowledge.subject == 'topic',
-            AcceptedKnowledge.status == 'accepted')).all()
+        accepted = session.exec(
+            select(AcceptedKnowledge).where(
+                AcceptedKnowledge.project_id == "a",
+                AcceptedKnowledge.subject == "topic",
+                AcceptedKnowledge.status == "accepted",
+            )
+        ).all()
     assert len(accepted) <= 1
-    assert len(trust.get_history(admin, memory['id'])['revisions']) == 2
-    assert sum(e['action'] == 'delete' for e in trust.list_activity(admin)['events']) == 1
+    assert len(trust.get_history(admin, memory["id"])["revisions"]) == 2
+    assert (
+        sum(e["action"] == "delete" for e in trust.list_activity(admin)["events"]) == 1
+    )
 
 
 def test_lifecycle(setup):
@@ -494,3 +540,74 @@ def test_preview_tracks_edited_text_without_resolving(setup):
     with Session(trust.engine) as session:
         stored = session.get(MemoryProposal, second["id"])
         assert stored.status == "proposed" and stored.revision == 1
+
+
+def test_approval_cannot_reclassify_a_deleted_conflict(setup, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from sqlmodel import Session
+    from gigamind.db.trust_models import MemoryProposal
+
+    admin, agent = setup
+    first = proposal(agent)
+    memory = trust.resolve_proposal(
+        admin, first["id"], action="approve", expected_revision=1
+    )["memory"]
+    second = proposal(agent, "second", "second")
+    captured, release = Event(), Event()
+    conflicts = trust.conflicts
+
+    def pause_after_conflict_read(*args, **kwargs):
+        result = conflicts(*args, **kwargs)
+        captured.set()
+        assert release.wait(5), "test failed to release conflict scan"
+        return result
+
+    monkeypatch.setattr(trust, "conflicts", pause_after_conflict_read)
+    with ThreadPoolExecutor(1) as pool:
+        approval = pool.submit(
+            trust.resolve_proposal,
+            admin,
+            second["id"],
+            action="approve",
+            expected_revision=1,
+            supersedes=[memory["id"]],
+        )
+        assert captured.wait(5)
+        deleter = Actor("deleting-admin", set(), None, True)
+        try:
+            trust.delete_memory(deleter, memory["id"], expected_revision=1)
+        finally:
+            release.set()
+        error(409, approval.result, timeout=10)
+    assert trust.get_memory(admin, memory["id"])["memory"]["status"] == "deleted"
+    error(404, trust.get_memory, agent, memory["id"])
+    history = trust.get_history(admin, memory["id"])["revisions"]
+    assert [r["status"] for r in history] == ["accepted", "deleted"]
+    assert history[-1]["writer_id"] == "deleting-admin"
+    events = [
+        e for e in trust.list_activity(admin)["events"] if e["action"] == "delete"
+    ]
+    assert [(e["revision"], e["writer_id"]) for e in events] == [(2, "deleting-admin")]
+    with Session(trust.engine) as session:
+        pending = session.get(MemoryProposal, second["id"])
+        assert pending.status == "proposed" and pending.revision == 1
+
+
+def test_delete_rollback_keeps_source_revision_and_activity(setup, monkeypatch):
+    admin, agent = setup
+    p = proposal(agent)
+    memory = trust.resolve_proposal(
+        admin, p["id"], action="approve", expected_revision=1
+    )["memory"]
+    before_events = trust.list_activity(admin)["events"]
+
+    def fail_snapshot(*args):
+        raise RuntimeError("audit storage failed")
+
+    monkeypatch.setattr(trust, "snapshot", fail_snapshot)
+    with pytest.raises(RuntimeError, match="audit storage failed"):
+        trust.delete_memory(admin, memory["id"], expected_revision=1)
+    assert trust.get_memory(agent, memory["id"])["memory"] == memory
+    assert len(trust.get_history(admin, memory["id"])["revisions"]) == 1
+    assert trust.list_activity(admin)["events"] == before_events

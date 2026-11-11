@@ -393,24 +393,105 @@ def test_identity_uses_current_key_and_expiry_on_every_request(server, tmp_path)
 
 def test_authenticated_delete(server):
     admin = {"Authorization": "Bearer test-master-key"}
-    client = httpx.Client(base_url=server, headers=admin, trust_env=False)
-    created = client.post('/api/v1/admin/clients', json={
-        'name': 'delete-reader', 'scopes': ['memory:read', 'memory:approve'], 'project_ids': ['p']
-    }).json()
-    reader = {'Authorization': 'Bearer ' + created['token']}
-    p = client.post('/api/v1/review/proposals', json={
-        'content': 'purple delete', 'project_id': 'p', 'evidence': [], 'idempotency_key': 'delete-test'
-    }).json()['proposal']
-    m = client.post(f"/api/v1/review/proposals/{p['id']}/resolve", json={
-        'action': 'approve', 'expected_revision': 1
-    }).json()['memory']
-    path = f"/api/v1/review/memories/{m['id']}"
-    assert client.post(path + '/delete', headers=reader, json={'expected_revision': 1}).status_code == 403
-    assert client.post(path + '/delete', json={'expected_revision': '1'}).status_code == 422
-    assert client.post(path + '/delete', json={'expected_revision': 1}).status_code == 200
-    assert client.post(path + '/delete', json={'expected_revision': 1}).status_code == 409
-    assert client.get(path, headers=reader).status_code == 404
-    assert client.get(path + '/history', headers=reader).status_code == 404
-    assert len(client.get(path + '/history').json()['revisions']) == 2
-    assert client.get('/api/v1/review/search', headers=reader, params={'query': 'delete', 'project_id': 'p'}).json()['results'] == []
-    client.close()
+    with httpx.Client(base_url=server, headers=admin, trust_env=False) as client:
+        created = client.post(
+            "/api/v1/admin/clients",
+            json={
+                "name": "delete-reader",
+                "scopes": ["memory:read", "memory:approve", "memory:delete"],
+                "project_ids": ["p"],
+            },
+        ).json()
+        reader = {"Authorization": "Bearer " + created["token"]}
+        proposed = client.post(
+            "/api/v1/review/proposals",
+            json={
+                "content": "sensitive lavender setting",
+                "project_id": "p",
+                "evidence": [],
+                "idempotency_key": "delete-sdk",
+            },
+        ).json()["proposal"]
+        memory = client.post(
+            f"/api/v1/review/proposals/{proposed['id']}/resolve",
+            json={"action": "approve", "expected_revision": 1},
+        ).json()["memory"]
+        path = f"/api/v1/review/memories/{memory['id']}"
+        assert (
+            client.post(
+                path + "/delete", headers=reader, json={"expected_revision": 1}
+            ).status_code
+            == 403
+        )
+        for payload in (
+            {"expected_revision": "1"},
+            {"expected_revision": True},
+            {"expected_revision": 0},
+            {"expected_revision": 1, "extra": 1},
+        ):
+            assert client.post(path + "/delete", json=payload).status_code == 422
+
+        async def exercise():
+            async with httpx.AsyncClient(headers=reader, trust_env=False) as transport:
+                async with streamable_http_client(
+                    server + "/mcp", http_client=transport
+                ) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        before = await session.call_tool(
+                            "get_memory", {"memory_id": memory["id"]}
+                        )
+                        assert (
+                            before.structuredContent["memory"]["content"]
+                            == memory["content"]
+                        )
+                        deleted = client.post(
+                            path + "/delete", json={"expected_revision": 1}
+                        )
+                        assert deleted.status_code == 200, deleted.text
+                        assert deleted.json()["memory"]["revision"] == 2
+                        assert (
+                            client.post(
+                                path + "/delete", json={"expected_revision": 1}
+                            ).status_code
+                            == 409
+                        )
+                        exact = await session.call_tool(
+                            "get_memory", {"memory_id": memory["id"]}
+                        )
+                        assert exact.isError and memory["content"] not in str(exact)
+                        found = await session.call_tool(
+                            "search_memory", {"query": "lavender", "project_id": "p"}
+                        )
+                        assert found.structuredContent["results"] == []
+                        context = await session.call_tool(
+                            "get_context", {"query": "lavender", "project_id": "p"}
+                        )
+                        assert context.structuredContent["memories"] == []
+                        assert memory["content"] not in str(context.structuredContent)
+            async with httpx.AsyncClient(headers=admin, trust_env=False) as transport:
+                async with streamable_http_client(
+                    server + "/mcp", http_client=transport
+                ) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        assert (
+                            await session.call_tool(
+                                "get_memory", {"memory_id": memory["id"]}
+                            )
+                        ).isError
+
+        asyncio.run(exercise())
+        assert client.get(path, headers=reader).status_code == 404
+        assert client.get(path + "/history", headers=reader).status_code == 404
+        assert (
+            client.post(
+                path + "/restore",
+                headers=reader,
+                json={"revision": 1, "expected_revision": 2},
+            ).status_code
+            == 403
+        )
+        history = client.get(path + "/history").json()["revisions"]
+        assert [revision["status"] for revision in history] == ["accepted", "deleted"]
+        assert client.get(path).json()["memory"]["content"] == memory["content"]

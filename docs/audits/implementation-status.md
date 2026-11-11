@@ -27,7 +27,7 @@ In flight:
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.
-- Handoffs, issue reporting, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD.
+- Handoffs, issue reporting, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD. Approved-record deletion, read redaction and admin audit/restore are implemented with stale-supersession protection.
 - External-provider interoperability acceptance and decoded-file upload bounds. Global encoded-body limits including MCP are implemented. Credential expiry/last-use/rotation are implemented; credential console is implemented. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Automatic upload/import indexing jobs and UI progress/retries; live-provider multimodal/token acceptance and truthful source state. Durable file reindex/deletion and reference-safe shared-attachment GC are implemented.
