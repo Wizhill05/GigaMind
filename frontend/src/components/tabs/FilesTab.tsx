@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from "react";
 import {
   FileText,
   Upload,
@@ -16,9 +16,9 @@ import {
   FileCheck,
   HardDrive,
   ImageIcon,
-  Image as LucideImage
-} from 'lucide-react';
-import { StorageFile, StorageChunk } from '../../types';
+  Image as LucideImage,
+} from "lucide-react";
+import { StorageFile, StorageChunk } from "../../types";
 import {
   getApiKey,
   FileSearchResult,
@@ -27,34 +27,44 @@ import {
   uploadFile,
   deleteStorageFile,
   reindexStorageFile,
-  fetchFileChunks
-} from '../../api';
-import { useToast } from '../ui/Toast';
+  fetchFileChunks,
+} from "../../api";
+import { useToast } from "../ui/Toast";
 
-export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: number }> = ({ onMutation, refreshVersion }) => {
+export const FilesTab: React.FC<{
+  onMutation?: () => void;
+  refreshVersion?: number;
+}> = ({ onMutation, refreshVersion }) => {
   const [files, setFiles] = useState<StorageFile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [filterText, setFilterText] = useState<string>('');
+  const [filterText, setFilterText] = useState<string>("");
 
   // Semantic File Search state
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [searchImageBase64, setSearchImageBase64] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchImageBase64, setSearchImageBase64] = useState<string | null>(
+    null,
+  );
   const [searchImageName, setSearchImageName] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
-  const [searchResults, setSearchResults] = useState<FileSearchResult[] | null>(null);
+  const [searchResults, setSearchResults] = useState<FileSearchResult[] | null>(
+    null,
+  );
   // Selected file for viewing chunks in modal
-  const [selectedFileForChunks, setSelectedFileForChunks] = useState<StorageFile | null>(null);
+  const [selectedFileForChunks, setSelectedFileForChunks] =
+    useState<StorageFile | null>(null);
   const [fileChunks, setFileChunks] = useState<StorageChunk[]>([]);
   const [isLoadingChunks, setIsLoadingChunks] = useState<boolean>(false);
 
   // Re-indexing state tracking
-  const [reindexingKeys, setReindexingKeys] = useState<Record<string, boolean>>({});
+  const [reindexingKeys, setReindexingKeys] = useState<Record<string, boolean>>(
+    {},
+  );
 
   const { toast } = useToast();
 
-  const [listError, setListError] = useState('');
-  const [chunkError, setChunkError] = useState('');
+  const [listError, setListError] = useState("");
+  const [chunkError, setChunkError] = useState("");
   const listRequest = useRef<AbortController | null>(null);
   const chunkRequest = useRef<AbortController | null>(null);
   const alive = useRef(false);
@@ -64,15 +74,23 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
     const controller = new AbortController();
     listRequest.current = controller;
     const key = getApiKey();
-    setIsLoading(true); setListError('');
+    setIsLoading(true);
+    setListError("");
     try {
       const res = await fetchIndexedFiles(100, controller.signal);
-      if (!controller.signal.aborted && alive.current && getApiKey() === key) setFiles(res.files);
+      if (!controller.signal.aborted && alive.current && getApiKey() === key)
+        setFiles(res.files);
     } catch (error) {
-      if (!controller.signal.aborted && alive.current && getApiKey() === key) setListError(error instanceof Error ? error.message : 'Could not load files');
+      if (!controller.signal.aborted && alive.current && getApiKey() === key)
+        setListError(
+          error instanceof Error ? error.message : "Could not load files",
+        );
     } finally {
       if (!controller.signal.aborted && alive.current) {
-        if (getApiKey() !== key) { setFiles([]); setListError('Credentials changed. Retry to load files.'); }
+        if (getApiKey() !== key) {
+          setFiles([]);
+          setListError("Credentials changed. Retry to load files.");
+        }
         setIsLoading(false);
       }
     }
@@ -80,7 +98,10 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
   useEffect(() => {
     alive.current = true;
     void loadFiles();
-    return () => { alive.current = false; listRequest.current?.abort(); };
+    return () => {
+      alive.current = false;
+      listRequest.current?.abort();
+    };
   }, [refreshVersion]);
 
   useEffect(() => () => chunkRequest.current?.abort(), []);
@@ -88,57 +109,92 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
   const searchRequest = useRef<AbortController | null>(null);
   const imageReader = useRef<FileReader | null>(null);
   const activeSearch = useRef(false);
-  const currentSearch = useRef({ query: searchQuery, image: searchImageBase64 });
-  currentSearch.current = { query: searchQuery, image: searchImageBase64 };
-  const [searchError, setSearchError] = useState('');
+  const [searchError, setSearchError] = useState("");
+  const [searchVersion, setSearchVersion] = useState(0);
   const invalidateSearch = () => {
+    activeSearch.current = false;
     searchRequest.current?.abort();
     searchRequest.current = null;
     setIsSearching(false);
     setSearchResults(null);
-    setSearchError('');
+    setSearchError("");
   };
   const runSearch = async (query: string, image: string | null) => {
     invalidateSearch();
-    if (!query.trim() && !image) { activeSearch.current = false; return; }
+    if (!query.trim() && !image) {
+      activeSearch.current = false;
+      return;
+    }
     activeSearch.current = true;
     const controller = new AbortController();
     searchRequest.current = controller;
     const key = getApiKey();
     setIsSearching(true);
     try {
-      const results = await searchFiles(query.trim() || undefined, 10, image || undefined, controller.signal);
-      if (!controller.signal.aborted && alive.current && getApiKey() === key) setSearchResults(results);
+      const results = await searchFiles(
+        query.trim() || undefined,
+        10,
+        image || undefined,
+        controller.signal,
+      );
+      if (!controller.signal.aborted && alive.current && getApiKey() === key)
+        setSearchResults(results);
     } catch (error) {
-      if (!controller.signal.aborted && alive.current && getApiKey() === key) setSearchError(error instanceof Error ? error.message : 'Search failed');
+      if (!controller.signal.aborted && alive.current && getApiKey() === key)
+        setSearchError(
+          error instanceof Error ? error.message : "Search failed",
+        );
     } finally {
       if (!controller.signal.aborted && alive.current) {
-        if (getApiKey() !== key) setSearchError('Credentials changed. Retry search.');
+        if (getApiKey() !== key)
+          setSearchError("Credentials changed. Retry search.");
         setIsSearching(false);
       }
     }
   };
-  const handleSearch = (e?: React.FormEvent) => { e?.preventDefault(); void runSearch(searchQuery, searchImageBase64); };
+  const handleSearch = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    void runSearch(searchQuery, searchImageBase64);
+  };
   useEffect(() => {
     if (activeSearch.current) void runSearch(searchQuery, searchImageBase64);
-    return () => { searchRequest.current?.abort(); imageReader.current?.abort(); imageReader.current = null; };
-  }, [refreshVersion]);
+    return () => {
+      searchRequest.current?.abort();
+      imageReader.current?.abort();
+      imageReader.current = null;
+    };
+  }, [refreshVersion, searchVersion]);
 
   const handleImageQueryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     imageReader.current?.abort();
     invalidateSearch();
-    setSearchImageBase64(null); setSearchImageName(null);
+    setSearchImageBase64(null);
+    setSearchImageName(null);
     const reader = new FileReader();
+    const credential = getApiKey();
     imageReader.current = reader;
     reader.onload = () => {
-      if (!alive.current || imageReader.current !== reader || typeof reader.result !== 'string') return;
-      const b64 = reader.result.split(',')[1];
-      if (b64) { setSearchImageBase64(b64); setSearchImageName(file.name); }
+      if (
+        !alive.current ||
+        imageReader.current !== reader ||
+        typeof reader.result !== "string"
+      )
+        return;
+      if (getApiKey() !== credential) {
+        imageReader.current = null;
+        setSearchError("Credentials changed. Choose the image again.");
+        return;
+      }
+      const b64 = reader.result.split(",")[1];
+      if (b64) {
+        setSearchImageBase64(b64);
+        setSearchImageName(file.name);
+      }
     };
     reader.readAsDataURL(file);
-    e.target.value = '';
+    e.target.value = "";
   };
 
   // Handle direct file upload
@@ -151,79 +207,138 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
 
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
-      toast(`Uploading ${file.name}...`, 'info');
-      const res = await uploadFile(file, 'files');
+      toast(`Uploading ${file.name}...`, "info");
+      const res = await uploadFile(file, "files");
       if (res.success) {
         successCount++;
       } else {
-        toast(`Upload failed for ${file.name}: ${res.error || 'Unknown error'}`, 'error');
+        toast(
+          `Upload failed for ${file.name}: ${res.error || "Unknown error"}`,
+          "error",
+        );
       }
     }
 
     setIsUploading(false);
-    e.target.value = '';
+    e.target.value = "";
 
     if (successCount > 0) {
-      toast(`Uploaded ${successCount} file(s). Vector indexing queued in background.`, 'success');
+      toast(
+        `Uploaded ${successCount} file(s). Vector indexing queued in background.`,
+        "success",
+      );
       void loadFiles();
       onMutation?.();
     }
   };
 
-  const handleMutation = async (file: StorageFile, action: 'delete' | 'index') => {
+  const handleMutation = async (
+    file: StorageFile,
+    action: "delete" | "index",
+  ) => {
     if (mutations.current.has(file.key)) return;
-    if (action === 'delete' && !window.confirm(`Delete ${file.filename} and its vector chunks?`)) return;
+    if (
+      action === "delete" &&
+      !window.confirm(`Delete ${file.filename} and its vector chunks?`)
+    )
+      return;
     mutations.current.add(file.key);
     const credential = getApiKey();
-    setReindexingKeys(prev => ({ ...prev, [file.key]: true }));
+    setReindexingKeys((prev) => ({ ...prev, [file.key]: true }));
     try {
-      if (action === 'delete') {
+      if (action === "delete") {
         const result = await deleteStorageFile(file.key);
         if (!alive.current || getApiKey() !== credential) return;
-        toast(`Cleanup ${result.cleanup} for ${file.filename} (job ${result.job_id}, ${result.state}). See Jobs.`, 'success');
+        toast(
+          `Cleanup ${result.cleanup} for ${file.filename} (job ${result.job_id}, ${result.state}). See Jobs.`,
+          "success",
+        );
       } else {
         const result = await reindexStorageFile(file.key);
         if (!alive.current || getApiKey() !== credential) return;
-        toast(`Indexing queued for ${file.filename} (job ${result.job_id}, ${result.state}). See Jobs.`, 'success');
+        toast(
+          `Indexing queued for ${file.filename} (job ${result.job_id}, ${result.state}). See Jobs.`,
+          "success",
+        );
       }
-      void loadFiles(); if (activeSearch.current) void runSearch(currentSearch.current.query, currentSearch.current.image); onMutation?.();
+      void loadFiles();
+      if (activeSearch.current) {
+        searchRequest.current?.abort();
+        setSearchResults(null);
+        setSearchVersion((value) => value + 1);
+      }
+      onMutation?.();
     } catch (error) {
-      if (alive.current && getApiKey() === credential) toast(error instanceof Error ? error.message : 'File action failed', 'error');
+      if (alive.current && getApiKey() === credential)
+        toast(
+          error instanceof Error ? error.message : "File action failed",
+          "error",
+        );
     } finally {
       mutations.current.delete(file.key);
-      if (alive.current) setReindexingKeys(prev => ({ ...prev, [file.key]: false }));
+      if (alive.current)
+        setReindexingKeys((prev) => ({ ...prev, [file.key]: false }));
     }
   };
-  const handleDelete = (file: StorageFile) => void handleMutation(file, 'delete');
-  const handleReindex = (file: StorageFile) => void handleMutation(file, 'index');
+  const handleDelete = (file: StorageFile) =>
+    void handleMutation(file, "delete");
+  const handleReindex = (file: StorageFile) =>
+    void handleMutation(file, "index");
   const handleOpenChunksModal = async (file: StorageFile) => {
     chunkRequest.current?.abort();
-    const controller = new AbortController(); chunkRequest.current = controller;
+    const controller = new AbortController();
+    chunkRequest.current = controller;
     const credential = getApiKey();
-    setSelectedFileForChunks(file); setFileChunks([]); setChunkError(''); setIsLoadingChunks(true);
+    setSelectedFileForChunks(file);
+    setFileChunks([]);
+    setChunkError("");
+    setIsLoadingChunks(true);
     try {
       const res = await fetchFileChunks(file.key, controller.signal);
-      if (!controller.signal.aborted && alive.current && getApiKey() === credential) setFileChunks(res.chunks);
+      if (
+        !controller.signal.aborted &&
+        alive.current &&
+        getApiKey() === credential
+      )
+        setFileChunks(res.chunks);
     } catch (error) {
-      if (!controller.signal.aborted && alive.current && getApiKey() === credential) setChunkError(error instanceof Error ? error.message : 'Could not load chunks');
+      if (
+        !controller.signal.aborted &&
+        alive.current &&
+        getApiKey() === credential
+      )
+        setChunkError(
+          error instanceof Error ? error.message : "Could not load chunks",
+        );
     } finally {
       if (!controller.signal.aborted && alive.current) {
-        if (getApiKey() !== credential) { setFileChunks([]); setChunkError('Credentials changed. Retry to load chunks.'); }
+        if (getApiKey() !== credential) {
+          setFileChunks([]);
+          setChunkError("Credentials changed. Retry to load chunks.");
+        }
         setIsLoadingChunks(false);
       }
     }
   };
 
   // Filtered files list
-  const filteredFiles = files.filter(f =>
-    f.filename.toLowerCase().includes(filterText.toLowerCase()) ||
-    f.key.toLowerCase().includes(filterText.toLowerCase()) ||
-    (f.mime_type && f.mime_type.toLowerCase().includes(filterText.toLowerCase()))
+  const filteredFiles = files.filter(
+    (f) =>
+      f.filename.toLowerCase().includes(filterText.toLowerCase()) ||
+      f.key.toLowerCase().includes(filterText.toLowerCase()) ||
+      (f.mime_type &&
+        f.mime_type.toLowerCase().includes(filterText.toLowerCase())),
   );
 
   // Storage Stats Summary
-  const totalChunksCount = files.reduce((acc, f) => acc + (f.total_chunks || 0), 0);
-  const totalExtractedLength = files.reduce((acc, f) => acc + (f.extracted_text_length || 0), 0);
+  const totalChunksCount = files.reduce(
+    (acc, f) => acc + (f.total_chunks || 0),
+    0,
+  );
+  const totalExtractedLength = files.reduce(
+    (acc, f) => acc + (f.extracted_text_length || 0),
+    0,
+  );
 
   return (
     <div className="space-y-6 font-sans text-xs">
@@ -235,9 +350,12 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
               <HardDrive className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-white tracking-tight">R2 Object Storage & Vectorized Files</h2>
+              <h2 className="text-sm font-semibold text-white tracking-tight">
+                R2 Object Storage & Vectorized Files
+              </h2>
               <p className="text-xs text-[#8a8f9e]">
-                Direct semantic search, chunk inspection, and zero-egress document management.
+                Direct semantic search, chunk inspection, and zero-egress
+                document management.
               </p>
             </div>
           </div>
@@ -249,13 +367,17 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
             disabled={isLoading}
             className="px-3 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-white border border-[#333333] transition-colors flex items-center gap-1.5 font-mono text-[11px]"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`}
+            />
             <span>Refresh</span>
           </button>
 
           <label className="px-3.5 py-1.5 bg-[#ff6b00] hover:bg-[#e05e00] text-white font-medium border border-[#ff6b00] transition-colors flex items-center gap-1.5 cursor-pointer font-sans text-xs shadow-sm shadow-[#ff6b00]/20">
             <Upload className="w-3.5 h-3.5" />
-            <span>{isUploading ? 'Uploading...' : 'Upload & Vectorize Document'}</span>
+            <span>
+              {isUploading ? "Uploading..." : "Upload & Vectorize Document"}
+            </span>
             <input
               type="file"
               multiple
@@ -271,31 +393,48 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-[#141414] border border-[#262626] p-4 rounded-none">
           <div className="flex items-center justify-between text-[#8a8f9e] mb-1">
-            <span className="font-mono text-[11px] uppercase tracking-wider">Total Documents</span>
+            <span className="font-mono text-[11px] uppercase tracking-wider">
+              Total Documents
+            </span>
             <FileText className="w-4 h-4 text-[#ff6b00]" />
           </div>
-          <div className="text-xl font-bold text-white font-mono">{files.length}</div>
-          <p className="text-[11px] text-[#8a8f9e] mt-1">Stored in Cloudflare R2 bucket</p>
+          <div className="text-xl font-bold text-white font-mono">
+            {files.length}
+          </div>
+          <p className="text-[11px] text-[#8a8f9e] mt-1">
+            Stored in Cloudflare R2 bucket
+          </p>
         </div>
 
         <div className="bg-[#141414] border border-[#262626] p-4 rounded-none">
           <div className="flex items-center justify-between text-[#8a8f9e] mb-1">
-            <span className="font-mono text-[11px] uppercase tracking-wider">Vector Chunks in Neon</span>
+            <span className="font-mono text-[11px] uppercase tracking-wider">
+              Vector Chunks in Neon
+            </span>
             <Layers className="w-4 h-4 text-[#22c55e]" />
           </div>
-          <div className="text-xl font-bold text-white font-mono">{totalChunksCount}</div>
-          <p className="text-[11px] text-[#8a8f9e] mt-1">pgvector HNSW 768-dim embeddings</p>
+          <div className="text-xl font-bold text-white font-mono">
+            {totalChunksCount}
+          </div>
+          <p className="text-[11px] text-[#8a8f9e] mt-1">
+            pgvector HNSW 768-dim embeddings
+          </p>
         </div>
 
         <div className="bg-[#141414] border border-[#262626] p-4 rounded-none">
           <div className="flex items-center justify-between text-[#8a8f9e] mb-1">
-            <span className="font-mono text-[11px] uppercase tracking-wider">Extracted Text</span>
+            <span className="font-mono text-[11px] uppercase tracking-wider">
+              Extracted Text
+            </span>
             <FileCode className="w-4 h-4 text-[#00f2fe]" />
           </div>
           <div className="text-xl font-bold text-white font-mono">
-            {(totalExtractedLength / 1000).toFixed(1)}k <span className="text-xs text-[#8a8f9e] font-normal">chars</span>
+            {(totalExtractedLength / 1000).toFixed(1)}k{" "}
+            <span className="text-xs text-[#8a8f9e] font-normal">chars</span>
           </div>
-          <p className="text-[11px] text-[#8a8f9e] mt-1">Parsed PDFs, Markdown, and Code</p>
+          <p className="text-[11px] text-[#8a8f9e] mt-1">
+            Parsed PDFs, Markdown, and Code
+          </p>
         </div>
       </div>
 
@@ -308,7 +447,8 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
               Direct File Semantic Search
             </h3>
             <p className="text-[11px] text-[#8a8f9e]">
-              Search specifically inside all uploaded PDF pages, markdown documents, and code files.
+              Search specifically inside all uploaded PDF pages, markdown
+              documents, and code files.
             </p>
           </div>
         </div>
@@ -320,7 +460,12 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
               <input
                 type="text"
                 value={searchQuery}
-                onChange={e => { imageReader.current?.abort(); imageReader.current = null; invalidateSearch(); setSearchQuery(e.target.value); }}
+                onChange={(e) => {
+                  imageReader.current?.abort();
+                  imageReader.current = null;
+                  invalidateSearch();
+                  setSearchQuery(e.target.value);
+                }}
                 placeholder="Search concepts inside PDF papers, algorithms, or code files (e.g. QAOA 128 qubits, transmon fidelity)..."
                 className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-2.5 pl-10 text-white placeholder-[#8a8f9e] outline-none font-sans text-xs"
               />
@@ -329,27 +474,46 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
             <label
               className={`px-3 py-2 border transition-colors flex items-center gap-1.5 cursor-pointer font-mono text-[11px] ${
                 searchImageBase64
-                  ? 'bg-[#22c55e]/15 border-[#22c55e]/40 text-[#22c55e]'
-                  : 'bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border-[#262626]'
+                  ? "bg-[#22c55e]/15 border-[#22c55e]/40 text-[#22c55e]"
+                  : "bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border-[#262626]"
               }`}
               title="Attach Image / Screenshot for Visual Similarity Search"
             >
               <ImageIcon className="w-3.5 h-3.5" />
-              <span>{searchImageBase64 ? 'Image Attached' : 'Visual Search'}</span>
-              <input type="file" accept="image/*" className="hidden" onChange={handleImageQueryUpload} />
+              <span>
+                {searchImageBase64 ? "Image Attached" : "Visual Search"}
+              </span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageQueryUpload}
+              />
             </label>
 
             <button
               type="submit"
               className="px-4 py-2 bg-[#ff6b00] hover:bg-[#e05e00] text-white font-medium transition-colors flex items-center gap-1.5 font-sans text-xs"
             >
-              {isSearching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+              {isSearching ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Search className="w-3.5 h-3.5" />
+              )}
               <span>Search Files</span>
             </button>
             {(searchResults !== null || searchImageBase64) && (
               <button
                 type="button"
-                onClick={() => { imageReader.current?.abort(); imageReader.current = null; invalidateSearch(); activeSearch.current = false; setSearchQuery(''); setSearchImageBase64(null); setSearchImageName(null); }}
+                onClick={() => {
+                  imageReader.current?.abort();
+                  imageReader.current = null;
+                  invalidateSearch();
+                  activeSearch.current = false;
+                  setSearchQuery("");
+                  setSearchImageBase64(null);
+                  setSearchImageName(null);
+                }}
                 className="px-3 py-2 bg-[#1f1f1f] hover:bg-[#282828] text-[#8a8f9e] hover:text-white border border-[#333333] transition-colors"
               >
                 Clear
@@ -360,10 +524,18 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
           {searchImageName && (
             <div className="flex items-center gap-2 text-[11px] font-mono bg-[#1a1a1a] p-1.5 px-3 border border-[#262626] text-[#86efac]">
               <ImageIcon className="w-3 h-3" />
-              <span>Query Image: <strong>{searchImageName}</strong></span>
+              <span>
+                Query Image: <strong>{searchImageName}</strong>
+              </span>
               <button
                 type="button"
-                onClick={() => { imageReader.current?.abort(); imageReader.current = null; invalidateSearch(); setSearchImageBase64(null); setSearchImageName(null); }}
+                onClick={() => {
+                  imageReader.current?.abort();
+                  imageReader.current = null;
+                  invalidateSearch();
+                  setSearchImageBase64(null);
+                  setSearchImageName(null);
+                }}
                 className="ml-auto text-[#8a8f9e] hover:text-white"
               >
                 <X className="w-3 h-3" />
@@ -372,27 +544,40 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
           )}
         </form>
 
-        {searchError && <div role="alert">Search failed: {searchError} <button type="button" onClick={() => handleSearch()}>Retry</button></div>}
+        {searchError && (
+          <div role="alert">
+            Search failed: {searchError}{" "}
+            <button type="button" onClick={() => handleSearch()}>
+              Retry
+            </button>
+          </div>
+        )}
         {/* SEARCH RESULTS PREVIEW */}
         {searchResults !== null && (
           <div className="mt-4 space-y-3 pt-3 border-t border-[#262626]">
             <div className="text-[11px] font-mono text-[#8a8f9e] flex items-center justify-between">
-              <span>Found {searchResults.length} matching document chunk(s)</span>
+              <span>
+                Found {searchResults.length} matching document chunk(s)
+              </span>
             </div>
 
             {searchResults.length === 0 ? (
               <div className="p-4 text-center text-[#8a8f9e] bg-[#0f0f0f] border border-[#262626]">
-                No matching file chunks found. Try uploading relevant documents or rephrasing your search query.
+                No matching file chunks found. Try uploading relevant documents
+                or rephrasing your search query.
               </div>
             ) : (
               <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
                 {searchResults.map((res, idx) => (
-                  <div key={idx} className="bg-[#0f0f0f] border border-[#262626] hover:border-[#333333] p-3.5 transition-colors space-y-2">
+                  <div
+                    key={idx}
+                    className="bg-[#0f0f0f] border border-[#262626] hover:border-[#333333] p-3.5 transition-colors space-y-2"
+                  >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <span className="px-2 py-0.5 bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/30 text-[10px] font-mono font-semibold flex items-center gap-1">
                           <FileText className="w-3 h-3" />
-                          {res.citation || res.filename || 'File'}
+                          {res.citation || res.filename || "File"}
                         </span>
                         <span className="text-[10px] font-mono text-[#8a8f9e]">
                           Score: {res.score}
@@ -412,7 +597,17 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
                       )}
                     </div>
 
-                    <div className="text-[#8a8f9e]">Source: {res.source}{res.file_key && ` · ${res.file_key}`}{res.page_number != null && ` · Page ${res.page_number}`}{res.chunk_index != null && ` · Chunk ${res.chunk_index + 1}${res.total_chunks != null ? ` / ${res.total_chunks}` : ''}`}{res.vector_score != null && ` · Vector score: ${res.vector_score}`}{res.rerank_score != null && ` · Rerank score: ${res.rerank_score}`}</div>
+                    <div className="text-[#8a8f9e]">
+                      Source: {res.source}
+                      {res.file_key && ` · ${res.file_key}`}
+                      {res.page_number != null && ` · Page ${res.page_number}`}
+                      {res.chunk_index != null &&
+                        ` · Chunk ${res.chunk_index + 1}${res.total_chunks != null ? ` / ${res.total_chunks}` : ""}`}
+                      {res.vector_score != null &&
+                        ` · Vector score: ${res.vector_score}`}
+                      {res.rerank_score != null &&
+                        ` · Rerank score: ${res.rerank_score}`}
+                    </div>
                     <p className="text-white text-xs leading-relaxed font-sans whitespace-pre-wrap bg-[#141414] p-2.5 border border-[#1f1f1f]">
                       {res.content}
                     </p>
@@ -429,7 +624,9 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
         {/* FILTER BAR */}
         <div className="p-4 border-b border-[#262626] bg-[#161616] flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-white uppercase text-[11px] font-mono">Indexed Files Repository</span>
+            <span className="font-semibold text-white uppercase text-[11px] font-mono">
+              Indexed Files Repository
+            </span>
             <span className="px-1.5 py-0.5 bg-[#262626] text-[#8a8f9e] font-mono text-[10px]">
               {filteredFiles.length} file(s)
             </span>
@@ -440,7 +637,7 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
             <input
               type="text"
               value={filterText}
-              onChange={e => setFilterText(e.target.value)}
+              onChange={(e) => setFilterText(e.target.value)}
               placeholder="Filter by filename or MIME..."
               className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] p-1.5 pl-8 text-white placeholder-[#8a8f9e] outline-none font-sans text-xs"
             />
@@ -454,13 +651,16 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
             <p>Loading files...</p>
           </div>
         ) : listError ? (
-          <div role="alert" className="p-4 text-red-400">{listError} <button onClick={() => void loadFiles()}>Retry</button></div>
+          <div role="alert" className="p-4 text-red-400">
+            {listError} <button onClick={() => void loadFiles()}>Retry</button>
+          </div>
         ) : filteredFiles.length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e] space-y-3">
             <HardDrive className="w-8 h-8 mx-auto text-[#444444]" />
             <p className="text-white font-medium">No files uploaded yet</p>
             <p className="text-xs max-w-md mx-auto">
-              Upload PDF research papers, Markdown notes, or code repositories to enable direct semantic vector retrieval.
+              Upload PDF research papers, Markdown notes, or code repositories
+              to enable direct semantic vector retrieval.
             </p>
           </div>
         ) : (
@@ -480,45 +680,63 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
                 {filteredFiles.map((file) => {
                   const isReindexing = reindexingKeys[file.key];
                   return (
-                    <tr key={file.id || file.key} className="hover:bg-[#181818] transition-colors">
+                    <tr
+                      key={file.id || file.key}
+                      className="hover:bg-[#181818] transition-colors"
+                    >
                       <td className="p-3 pl-4">
                         <div className="flex items-center gap-2.5">
-                          {file.multimodal_type === 'image' && file.url ? (
-                            <img src={file.url} alt={file.filename} className="w-7 h-7 object-cover border border-[#333333] flex-shrink-0" />
+                          {file.multimodal_type === "image" && file.url ? (
+                            <img
+                              src={file.url}
+                              alt={file.filename}
+                              className="w-7 h-7 object-cover border border-[#333333] flex-shrink-0"
+                            />
                           ) : (
                             <FileText className="w-4 h-4 text-[#ff6b00] flex-shrink-0" />
                           )}
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-white tracking-tight">{file.filename}</span>
-                              <span className={`px-1.5 py-0.2 text-[9px] font-mono font-bold uppercase rounded-none border ${
-                                file.multimodal_type === 'pdf' ? 'bg-[#00f2fe]/10 text-[#00f2fe] border-[#00f2fe]/30' :
-                                file.multimodal_type === 'image' ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30' :
-                                file.multimodal_type === 'code' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' :
-                                'bg-[#262626] text-[#8a8f9e] border-[#333333]'
-                              }`}>
-                                {file.multimodal_type || 'text'}
+                              <span className="font-medium text-white tracking-tight">
+                                {file.filename}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.2 text-[9px] font-mono font-bold uppercase rounded-none border ${
+                                  file.multimodal_type === "pdf"
+                                    ? "bg-[#00f2fe]/10 text-[#00f2fe] border-[#00f2fe]/30"
+                                    : file.multimodal_type === "image"
+                                      ? "bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/30"
+                                      : file.multimodal_type === "code"
+                                        ? "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                        : "bg-[#262626] text-[#8a8f9e] border-[#333333]"
+                                }`}
+                              >
+                                {file.multimodal_type || "text"}
                               </span>
                             </div>
-                            <div className="text-[10px] font-mono text-[#8a8f9e] truncate max-w-xs">{file.key}</div>
+                            <div className="text-[10px] font-mono text-[#8a8f9e] truncate max-w-xs">
+                              {file.key}
+                            </div>
                           </div>
                         </div>
                       </td>
 
                       <td className="p-3">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-semibold rounded-none ${
-                          file.indexing_status === 'completed'
-                            ? 'bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/30'
-                            : file.indexing_status === 'pending'
-                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse'
-                            : 'bg-[#262626] text-[#8a8f9e] border border-[#333333]'
-                        }`}>
-                          {file.indexing_status === 'completed' ? (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-mono font-semibold rounded-none ${
+                            file.indexing_status === "completed"
+                              ? "bg-[#22c55e]/10 text-[#22c55e] border border-[#22c55e]/30"
+                              : file.indexing_status === "pending"
+                                ? "bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse"
+                                : "bg-[#262626] text-[#8a8f9e] border border-[#333333]"
+                          }`}
+                        >
+                          {file.indexing_status === "completed" ? (
                             <CheckCircle2 className="w-3 h-3" />
                           ) : (
                             <Clock className="w-3 h-3" />
                           )}
-                          {file.indexing_status || 'completed'}
+                          {file.indexing_status || "completed"}
                         </span>
                       </td>
 
@@ -529,11 +747,15 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
                       </td>
 
                       <td className="p-3 font-mono text-[#8a8f9e]">
-                        {file.extracted_text_length ? `${(file.extracted_text_length / 1000).toFixed(1)}k chars` : '—'}
+                        {file.extracted_text_length
+                          ? `${(file.extracted_text_length / 1000).toFixed(1)}k chars`
+                          : "—"}
                       </td>
 
                       <td className="p-3 font-mono text-[#8a8f9e] text-[11px]">
-                        {file.created_at ? new Date(file.created_at).toLocaleDateString() : '—'}
+                        {file.created_at
+                          ? new Date(file.created_at).toLocaleDateString()
+                          : "—"}
                       </td>
 
                       <td className="p-3 text-right pr-4">
@@ -564,7 +786,9 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
                             className="p-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-[#22c55e] border border-[#333333] transition-colors"
                             title="Re-Index Vectors"
                           >
-                            <RefreshCw className={`w-3.5 h-3.5 ${isReindexing ? 'animate-spin text-[#22c55e]' : ''}`} />
+                            <RefreshCw
+                              className={`w-3.5 h-3.5 ${isReindexing ? "animate-spin text-[#22c55e]" : ""}`}
+                            />
                           </button>
 
                           <button
@@ -595,14 +819,19 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
               <div className="flex items-center gap-2.5">
                 <FileText className="w-4 h-4 text-[#ff6b00]" />
                 <div>
-                  <h3 className="text-sm font-semibold text-white">{selectedFileForChunks.filename}</h3>
+                  <h3 className="text-sm font-semibold text-white">
+                    {selectedFileForChunks.filename}
+                  </h3>
                   <p className="text-[11px] font-mono text-[#8a8f9e]">
                     {fileChunks.length} indexed chunks
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => { chunkRequest.current?.abort(); setSelectedFileForChunks(null); }}
+                onClick={() => {
+                  chunkRequest.current?.abort();
+                  setSelectedFileForChunks(null);
+                }}
                 className="p-1 text-[#8a8f9e] hover:text-white hover:bg-[#222222] transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -617,20 +846,38 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
                   <span>Loading semantic chunks...</span>
                 </div>
               ) : chunkError ? (
-                <div role="alert" className="p-4 text-red-400">{chunkError} <button onClick={() => void handleOpenChunksModal(selectedFileForChunks)}>Retry</button></div>
+                <div role="alert" className="p-4 text-red-400">
+                  {chunkError}{" "}
+                  <button
+                    onClick={() =>
+                      void handleOpenChunksModal(selectedFileForChunks)
+                    }
+                  >
+                    Retry
+                  </button>
+                </div>
               ) : fileChunks.length === 0 ? (
                 <div className="p-8 text-center text-[#8a8f9e]">
-                  No vector chunks found for this file. It may be a non-text binary or still undergoing indexing.
+                  No vector chunks found for this file. It may be a non-text
+                  binary or still undergoing indexing.
                 </div>
               ) : (
                 fileChunks.map((chunk, idx) => (
-                  <div key={chunk.id || idx} className="bg-[#0f0f0f] border border-[#262626] p-3.5 space-y-2">
+                  <div
+                    key={chunk.id || idx}
+                    className="bg-[#0f0f0f] border border-[#262626] p-3.5 space-y-2"
+                  >
                     <div className="flex items-center justify-between text-[11px] font-mono">
                       <span className="px-2 py-0.5 bg-[#262626] text-[#c1c5d0] border border-[#333333]">
                         Chunk {chunk.chunk_index + 1} of {chunk.total_chunks}
-                        {chunk.page_number !== undefined && chunk.page_number !== null ? ` (Page ${chunk.page_number})` : ''}
+                        {chunk.page_number !== undefined &&
+                        chunk.page_number !== null
+                          ? ` (Page ${chunk.page_number})`
+                          : ""}
                       </span>
-                      <span className="text-[#8a8f9e]">{chunk.content.length} chars</span>
+                      <span className="text-[#8a8f9e]">
+                        {chunk.content.length} chars
+                      </span>
                     </div>
                     <p className="text-white text-xs leading-relaxed font-sans whitespace-pre-wrap bg-[#141414] p-2.5 border border-[#1f1f1f]">
                       {chunk.content}
@@ -643,7 +890,10 @@ export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: numb
             {/* MODAL FOOTER */}
             <div className="p-3 border-t border-[#262626] bg-[#111111] flex justify-end">
               <button
-                onClick={() => { chunkRequest.current?.abort(); setSelectedFileForChunks(null); }}
+                onClick={() => {
+                  chunkRequest.current?.abort();
+                  setSelectedFileForChunks(null);
+                }}
                 className="px-4 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-white border border-[#333333] transition-colors font-sans text-xs"
               >
                 Close

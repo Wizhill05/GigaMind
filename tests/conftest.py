@@ -22,6 +22,8 @@ for _name in list(os.environ):
         os.environ.pop(_name, None)
 
 os.environ.pop("GIGAMIND_PUBLIC_URL", None)
+for _name in ("GIGAMIND_STATIC_DIST", "GIGAMIND_DEMO_ENV_DIR", "VITE_SYNTHETIC_DEMO"):
+    os.environ.pop(_name, None)
 for _name in list(os.environ):
     if _name.lower() in {"http_proxy", "https_proxy", "all_proxy", "no_proxy"}:
         os.environ.pop(_name, None)
