@@ -12,8 +12,9 @@ from sqlmodel import SQLModel
 
 from gigamind.db import trust_models  # register trust tables
 from gigamind.db.jobs import UploadManifest
+from gigamind.db.coordination import Handoff, MemoryIssue
 
-VERSION = 3
+VERSION = 4
 LEGACY_COLUMNS = {
     "memories": {
         "media_type": "TEXT DEFAULT 'text'",
@@ -263,6 +264,9 @@ def migrate(engine):
                         )
             if version < 3:
                 UploadManifest.__table__.create(conn, checkfirst=True)
+            if version < 4:
+                Handoff.__table__.create(conn, checkfirst=True)
+                MemoryIssue.__table__.create(conn, checkfirst=True)
             if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),

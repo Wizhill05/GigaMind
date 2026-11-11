@@ -10,7 +10,8 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import Tool
 
 from gigamind.security import get_actor
-from gigamind.services import context, trust
+from gigamind.services import context, trust, coordination
+from gigamind.services.coordination_schema import HandoffInput, IssueInput
 from gigamind.services.trust_schema import Proposal
 from gigamind.services.memory import get_profile_rules
 
@@ -120,6 +121,8 @@ async def list_tools():
                 ["rules", "memories", "citations", "handoff"],
             ),
         ),
+        Tool(name="save_handoff", description="Save an agent report, not approved knowledge.", inputSchema=HandoffInput.model_json_schema(), outputSchema=result("handoff", "object")),
+        Tool(name="report_memory_issue", description="Report a concern about accepted knowledge.", inputSchema=IssueInput.model_json_schema(), outputSchema=result("issue", "object")),
         Tool(
             name="propose_memory",
             description="Propose evidence-backed knowledge for review.",
@@ -148,6 +151,10 @@ async def call_tool(name, arguments):
             return {"status": "online"}
         return {"rules": await asyncio.to_thread(get_profile_rules)}
     try:
+        if name == "save_handoff":
+            return await asyncio.to_thread(coordination.save_handoff, actor, **arguments)
+        if name == "report_memory_issue":
+            return await asyncio.to_thread(coordination.report_memory_issue, actor, **arguments)
         if name == "get_memory":
             return await asyncio.to_thread(
                 context.get_memory, actor, arguments["memory_id"]

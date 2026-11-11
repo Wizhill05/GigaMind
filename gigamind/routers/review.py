@@ -112,3 +112,30 @@ def get_context(
     actor: Actor = Depends(get_actor),
 ):
     return context.get_context(actor, query, project_id, token_budget)
+
+from gigamind.services import coordination
+from gigamind.services.coordination_schema import HandoffInput, IssueInput, IssueResolution
+
+@router.post('/handoffs')
+def save_handoff(body: HandoffInput, actor: Actor = Depends(get_actor)):
+    return coordination.save_handoff(actor, **dump(body))
+
+@router.get('/handoffs/latest')
+def latest_handoff(project_id: Optional[str] = None, actor: Actor = Depends(get_actor)):
+    return coordination.latest_handoff(actor, project_id)
+
+@router.get('/handoffs')
+def handoffs(project_id: Optional[str] = None, limit: int = 20, offset: int = 0, actor: Actor = Depends(get_actor)):
+    return coordination.list_handoffs(actor, project_id, limit, offset)
+
+@router.post('/issues')
+def report_issue(body: IssueInput, actor: Actor = Depends(get_actor)):
+    return coordination.report_memory_issue(actor, **dump(body))
+
+@router.get('/issues')
+def issues(project_id: Optional[str] = None, limit: int = 20, offset: int = 0, actor: Actor = Depends(get_actor)):
+    return coordination.list_issues(actor, project_id, limit, offset)
+
+@router.post('/issues/{issue_id}/resolve')
+def resolve_issue(issue_id: str, body: IssueResolution, actor: Actor = Depends(get_actor)):
+    return coordination.resolve_issue(actor, issue_id, **dump(body))
