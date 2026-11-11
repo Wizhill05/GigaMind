@@ -58,11 +58,12 @@ def main():
     }
     print(f"Synthetic demo runtime: {path}\nAdmin key file: {keyfile}", flush=True)
     child = None
+    stop_signal = None
 
     def stop(signum, _frame):
-        if child and child.poll() is None:
-            os.killpg(child.pid, signal.SIGTERM)
-        raise SystemExit(128 + signum)
+        nonlocal stop_signal
+        if stop_signal is None:
+            stop_signal = signum
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -96,14 +97,36 @@ def main():
                 ROOT,
             ),
         ]:
+            if stop_signal is not None:
+                return 128 + stop_signal
             child = subprocess.Popen(cmd, cwd=cwd, env=env, start_new_session=True)
-            code = child.wait()
+            while stop_signal is None:
+                try:
+                    code = child.wait(timeout=0.1)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+            if stop_signal is not None:
+                return 128 + stop_signal
+            child = None
             if code:
                 return code
         return 0
     finally:
-        if child and child.poll() is None:
-            os.killpg(child.pid, signal.SIGTERM)
+        if child is not None:
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                child.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+            # A descendant may outlive the group leader.
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             child.wait()
 
 
