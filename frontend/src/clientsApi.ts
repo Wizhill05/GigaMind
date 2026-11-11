@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ApiError, getApiKey } from "./api";
 
 const client = z.object({
-  id: z.string(),
+  id: z.string().min(1),
   name: z.string(),
   scopes: z.array(z.string()),
   project_ids: z.array(z.string()),
@@ -10,10 +10,10 @@ const client = z.object({
   created_at: z.string().nullable(),
   expires_at: z.string().nullable(),
   last_used_at: z.string().nullable(),
-  revision: z.number(),
+  revision: z.number().int().nonnegative(),
 });
 export type Client = z.infer<typeof client>;
-const issued = z.object({ client, token: z.string() });
+const issued = z.object({ client, token: z.string().min(1) });
 async function request<T>(
   path: string,
   schema: z.ZodType<T>,

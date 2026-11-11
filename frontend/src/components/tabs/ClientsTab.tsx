@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Client,
   createClient,
@@ -36,6 +36,8 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
   ]);
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+  const [copyStatus, setCopyStatus] = useState("");
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState<{
     action: "rotate" | "revoke";
@@ -59,6 +61,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
   const refresh = () => setReload((n) => n + 1);
   async function create(event: React.FormEvent) {
     event.preventDefault();
+    if (inFlight.current || token || confirmation) return;
     const ids = projects
       .split(",")
       .map((p) => p.trim())
@@ -76,6 +79,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
       );
       return;
     }
+    inFlight.current = true;
     setBusy(true);
     setError("");
     try {
@@ -91,11 +95,13 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
     } catch (e) {
       setError(message(e));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
   async function confirmAction() {
-    if (!confirmation) return;
+    if (!confirmation || inFlight.current || token) return;
+    inFlight.current = true;
     setBusy(true);
     setError("");
     try {
@@ -111,6 +117,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
     } catch (e) {
       setError(message(e));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -118,7 +125,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
     <section className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-xl font-semibold">Clients</h1>
-        <button className={button} onClick={refresh}>
+        <button className={button} disabled={busy} onClick={refresh}>
           Refresh
         </button>
       </div>
@@ -131,33 +138,35 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
           <div className="flex gap-2">
             <button
               className={button}
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(token)
-                  .catch(() =>
-                    setError(
-                      "Unable to copy token. Select it and copy manually.",
-                    ),
-                  )
-              }
+              onClick={async () => {
+                try {
+                  if (!navigator.clipboard?.writeText) throw new Error();
+                  await navigator.clipboard.writeText(token);
+                  setCopyStatus("Token copied.");
+                } catch {
+                  setCopyStatus("Unable to copy token. Select it and copy manually.");
+                }
+              }}
             >
               Copy token
             </button>
-            <button className={button} onClick={() => setToken(null)}>
+            <button className={button} onClick={() => { setToken(null); setCopyStatus(""); }}>
               Dismiss token
             </button>
           </div>
+          {copyStatus && <p role="status">{copyStatus}</p>}
         </div>
       )}
       {error && (
         <div role="alert" className="text-red-400">
           {error}{" "}
-          <button className="underline" onClick={refresh}>
+          <button className="underline" disabled={busy} onClick={() => { setConfirmation(null); refresh(); }}>
             Reload clients
           </button>
         </div>
       )}
       <form onSubmit={create} className="border border-[#333] p-4 space-y-4">
+        <fieldset disabled={busy || confirmation !== null} className="space-y-4">
         <h2 className="font-semibold">Create client</h2>
         <label className="block text-sm">
           Name
@@ -208,7 +217,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
             onChange={(e) => setExpiry(e.target.value)}
           />
         </label>
-        <button className={button} disabled={busy || token !== null}>
+        <button className={button} disabled={busy || token !== null || confirmation !== null}>
           Create client
         </button>
         {token && (
@@ -216,11 +225,12 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
             Dismiss the current token before issuing another.
           </p>
         )}
+        </fieldset>
       </form>
       {confirmation && (
         <div
           className="border border-orange-500 p-4 space-y-3"
-          role="alertdialog"
+          role="region"
           aria-label={`Confirm ${confirmation.action}`}
         >
           <p>
@@ -233,7 +243,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
             <button
               className={button}
               disabled={
-                busy || (confirmation.action === "rotate" && token !== null)
+                busy || token !== null
               }
               onClick={() => void confirmAction()}
             >
@@ -253,7 +263,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
       {list.kind === "error" && (
         <div role="alert">
           {list.message}{" "}
-          <button className="underline" onClick={refresh}>
+          <button className="underline" disabled={busy} onClick={refresh}>
             Retry
           </button>
         </div>
@@ -285,7 +295,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
                 <div className="flex gap-2">
                   <button
                     className={button}
-                    disabled={busy || client.revoked || token !== null}
+                    disabled={busy || client.revoked || token !== null || confirmation !== null}
                     onClick={() =>
                       setConfirmation({ action: "rotate", client })
                     }
@@ -294,7 +304,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
                   </button>
                   <button
                     className={button}
-                    disabled={busy || client.revoked}
+                    disabled={busy || client.revoked || confirmation !== null}
                     onClick={() =>
                       setConfirmation({ action: "revoke", client })
                     }
@@ -308,7 +318,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
           <div className="flex gap-3 items-center">
             <button
               className={button}
-              disabled={page === 0}
+              disabled={busy || confirmation !== null || page === 0}
               onClick={() => setPage((p) => p - 1)}
             >
               Previous
@@ -316,7 +326,7 @@ export function ClientsTab({ refreshVersion }: { refreshVersion: number }) {
             <span>Page {page + 1}</span>
             <button
               className={button}
-              disabled={list.clients.length < 20}
+              disabled={busy || confirmation !== null || list.clients.length < 20}
               onClick={() => setPage((p) => p + 1)}
             >
               Next
