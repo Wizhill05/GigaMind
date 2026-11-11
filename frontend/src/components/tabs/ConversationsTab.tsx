@@ -31,18 +31,22 @@ import {
   backfillConversationVectors,
 } from "../../api";
 import { AgentBadge } from "../ui/Badge";
+import { useConversationMutation, type ConversationMutation } from "../../useConversationMutation";
 import { useToast } from "../ui/Toast";
 
 interface ConversationsTabProps {
   onOpenTranscript: (conv: Conversation) => void;
   refreshVersion?: number;
   onMutation?: () => void;
+  mutation?: ConversationMutation;
+  onList?: (conversations: Conversation[]) => void;
 }
 
 export const ConversationsTab: React.FC<ConversationsTabProps> = ({
   onOpenTranscript,
   refreshVersion = 0,
   onMutation = () => {},
+  mutation, onList,
 }) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [page, setPage] = useState(1);
@@ -69,8 +73,11 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
   const [importPlatform, setImportPlatform] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const localMutation = useConversationMutation();
+  const guard = mutation ?? localMutation;
+  const { busy, locked: busyRef } = guard;
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
@@ -101,6 +108,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
         return;
       }
       setConversations(res.conversations);
+      onList?.(res.conversations);
       setTotalPages(res.pages || 1);
       setTotalCount(res.total);
       setTotalVectorized(res.total_vectorized);
@@ -192,22 +200,10 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
     onMutation();
   };
 
-  const runMutation = async (action: () => Promise<void>) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      await action();
-    } catch (error) {
-      toast(error instanceof Error ? error.message : "Request failed", "error");
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
+  const runMutation = (action: (valid: () => boolean) => Promise<void>) => guard.run(valid => action(() => alive.current && valid()), error => { if (alive.current) toast(error instanceof Error ? error.message : "Request failed", "error"); });
 
   const submitImport = async (selected: File) =>
-    runMutation(async () => {
+    runMutation(async (valid) => {
       setIsImporting(true);
       setImportStatus(`Uploading ${selected.name}...`);
       try {
@@ -215,6 +211,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
           selected,
           importPlatform || undefined,
         );
+        if (!valid()) return;
         setImportStatus(
           `Imported ${result.ingested}; skipped ${result.skipped}; ${result.pending_indexing} pending indexing.`,
         );
@@ -222,12 +219,13 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
         setFile(null);
         changed();
       } catch (error) {
+        if (!valid()) return;
         const message =
           error instanceof Error ? error.message : "Import failed";
         setImportStatus(`Error: ${message}`);
         toast(message, "error");
       } finally {
-        setIsImporting(false);
+        if (valid()) setIsImporting(false);
       }
     });
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -245,28 +243,31 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
       )
     )
       return;
-    void runMutation(async () => {
+    void runMutation(async (valid) => {
       await deleteConversation(id);
+      if (!valid()) return;
       toast("Deleted conversation transcript", "success");
       changed();
     });
   };
   const handleVectorizeSingle = (id: string) => {
-    void runMutation(async () => {
+    void runMutation(async (valid) => {
       await vectorizeConversation(id);
+      if (!valid()) return;
       toast("Vectorization request completed", "success");
       changed();
     });
   };
   const handleBackfillAll = () => {
-    void runMutation(async () => {
+    void runMutation(async (valid) => {
       setIsBackfilling(true);
       try {
         const result = await backfillConversationVectors();
+        if (!valid()) return;
         toast(result.message, "success");
         changed();
       } finally {
-        setIsBackfilling(false);
+        if (valid()) setIsBackfilling(false);
       }
     });
   };

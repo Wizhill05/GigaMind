@@ -114,3 +114,47 @@ it("keeps the row and displays a delete error", async () => {
   await waitFor(() => expect(screen.getByText("Delete denied")).toBeTruthy());
   expect(screen.getByText("Example")).toBeTruthy();
 });
+it("blocks duplicate vectorization and preserves the row on failure", async () => {
+  let resolve!: (response: Response) => void;
+  const pending = new Promise<Response>(r => { resolve = r; });
+  const fetcher = vi.fn((url: string) => url.includes('/vectorize') ? pending : Promise.resolve(list()));
+  vi.stubGlobal('fetch', fetcher);
+  render(<ToastProvider><ConversationsTab onOpenTranscript={() => {}} /></ToastProvider>);
+  await screen.findByText('Example');
+  const button = screen.getByText('Pending Vectorization');
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(fetcher.mock.calls.filter(([url]) => url.includes('/vectorize'))).toHaveLength(1);
+  resolve(new Response(JSON.stringify({ detail: 'Vector service unavailable' }), { status: 503 }));
+  expect(await screen.findByText('Vector service unavailable')).toBeTruthy();
+  expect(screen.getByText('Pending Vectorization')).toBeTruthy();
+});
+it('blocks App navigation and drawer close until a failed request settles', async () => {
+  const { App } = await import('../App');
+  const { within, act } = await import('@testing-library/react');
+  localStorage.setItem('gigamind_master_key', 'key');
+  let resolve!: (response: Response) => void;
+  const pending = new Promise<Response>(r => { resolve = r; });
+  const fetcher = vi.fn((url: string) => {
+    if (url.includes('/vectorize')) return pending;
+    if (url.includes('/stats')) return Promise.resolve(new Response(JSON.stringify({ total_memories: 0, total_storage_files: 0, total_profile_rules: 0, total_chat_logs: 1 })));
+    return Promise.resolve(list());
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  const sidebar = within(await screen.findByRole('complementary'));
+  fireEvent.click(sidebar.getByRole('button', { name: /Chat Transcripts/ }));
+  await screen.findByText('Example');
+  fireEvent.click(screen.getByText('Inspect'));
+  fireEvent.click(screen.getByTitle('Generate Vector Embedding'));
+  fireEvent.click(screen.getByTitle('Generate Vector Embedding'));
+  expect(fetcher.mock.calls.filter(([url]) => url.includes('/vectorize'))).toHaveLength(1);
+  expect(sidebar.getByRole('button', { name: /Memories/ }).matches(':disabled')).toBe(true);
+  expect(screen.getByTitle('Close Drawer').hasAttribute('disabled')).toBe(true);
+  fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+  await act(async () => resolve(new Response(JSON.stringify({ detail: 'Unavailable' }), { status: 503 })));
+  expect(await screen.findByText('Unavailable')).toBeTruthy();
+  expect(screen.getByTitle('Close Drawer').hasAttribute('disabled')).toBe(false);
+  expect(sidebar.getByRole('button', { name: /Memories/ }).matches(':disabled')).toBe(false);
+  localStorage.clear();
+});

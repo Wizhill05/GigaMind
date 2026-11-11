@@ -112,6 +112,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
             </button>
 
             <button
+              disabled={busy}
               onClick={handleAnimatedClose}
               className="p-2 bg-[#161616] border border-[#333333] text-[#8a8f9e] hover:text-white rounded-none transition-colors btn-press"
               title="Close Drawer"

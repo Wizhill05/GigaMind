@@ -21,7 +21,8 @@ import { TranscriptDrawer } from './components/modals/TranscriptDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { Stats, Memory, Conversation } from './types';
-import { ApiError, fetchStats, addMemory, updateMemory, setProfileRule, getApiKey, deleteConversation, vectorizeConversation } from './api';
+import { useConversationMutation } from './useConversationMutation';
+import { ApiError, fetchStats, addMemory, updateMemory, setProfileRule, getApiKey, fetchConversations, deleteConversation, vectorizeConversation } from './api';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -78,9 +79,12 @@ export const AppContent: React.FC = () => {
     return () => statsRequest.current?.abort();
   }, []);
 
+  const mutation = useConversationMutation();
+
   // Global Cmd+K / Ctrl+K keyboard shortcut listener
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (mutation.locked.current) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsCommandPaletteOpen((prev) => !prev);
@@ -124,22 +128,28 @@ export const AppContent: React.FC = () => {
     void loadStats();
   };
 
-  const transcriptBusyRef = useRef(false);
-  const [transcriptBusy, setTranscriptBusy] = useState(false);
   const conversationChanged = () => { setRefreshVersion(v => v + 1); void loadStats(); };
-  const runTranscriptMutation = async (action: () => Promise<void>) => {
-    if (transcriptBusyRef.current) return;
-    transcriptBusyRef.current = true; setTranscriptBusy(true);
-    try { await action(); }
-    catch (error) { toast(error instanceof Error ? error.message : 'Request failed', 'error'); }
-    finally { transcriptBusyRef.current = false; setTranscriptBusy(false); }
-  };
+  const runTranscriptMutation = (action: (valid: () => boolean) => Promise<void>) => mutation.run(action, error => toast(error instanceof Error ? error.message : 'Request failed', 'error'));
   const handleDeleteTranscript = (id: string) => {
-    if (transcriptBusyRef.current || !window.confirm('Permanently delete conversation transcript from database?')) return;
-    void runTranscriptMutation(async () => { await deleteConversation(id); toast('Deleted conversation transcript', 'success'); setActiveTranscript(null); conversationChanged(); });
+    if (mutation.locked.current || !window.confirm('Permanently delete conversation transcript from database?')) return;
+    void runTranscriptMutation(async valid => { await deleteConversation(id); if (!valid()) return; toast('Deleted conversation transcript', 'success'); setActiveTranscript(null); conversationChanged(); });
   };
   const handleVectorizeTranscript = (id: string) => {
-    void runTranscriptMutation(async () => { await vectorizeConversation(id); toast('Vectorization request completed', 'success'); conversationChanged(); });
+    void runTranscriptMutation(async valid => {
+      await vectorizeConversation(id);
+      if (!valid()) return;
+      conversationChanged();
+      let page = 1;
+      while (valid()) {
+        const result = await fetchConversations(page, 100);
+        if (!valid()) return;
+        const updated = result.conversations.find(item => item.id === id);
+        if (updated) { setActiveTranscript(current => current?.id === id ? updated : current); break; }
+        if (page >= result.pages) break;
+        page++;
+      }
+      if (valid()) toast('Vectorization request completed', 'success');
+    });
   };
 
   return (
@@ -155,9 +165,9 @@ export const AppContent: React.FC = () => {
 
       {isAuthenticated && <>
       {/* LEFT SIDEBAR NAVIGATION */}
-      <Sidebar
+      <fieldset disabled={mutation.busy} className="contents"><Sidebar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => { if (!mutation.locked.current) setActiveTab(tab); }}
         counts={{
           memories: stats?.total_memories || 0,
           files: stats?.total_storage_files || 0,
@@ -166,16 +176,18 @@ export const AppContent: React.FC = () => {
         }}
       />
 
+      </fieldset>
       {/* MAIN RIGHT CANVAS */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* TOP BREADCRUMB HEADER */}
-        <Header
+        <fieldset disabled={mutation.busy} className="contents"><Header
           onRefresh={() => { setRefreshVersion(v => v + 1); void loadStats(); }}
           isAuthenticated={isAuthenticated}
           onOpenNewMemoryModal={handleOpenNewMemoryModal}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         />
 
+        </fieldset>
         {/* SCROLLABLE MAIN CONTENT CANVAS WITH SMOOTH ANIMATED TAB TRANSITIONS */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
           <div key={activeTab} className="max-w-6xl mx-auto space-y-6 animate-slide-up">
@@ -204,7 +216,7 @@ export const AppContent: React.FC = () => {
             )}
 
             {activeTab === 'transcripts' && (
-              <ConversationsTab onMutation={conversationChanged} refreshVersion={refreshVersion} onOpenTranscript={(conv) => setActiveTranscript(conv)} />
+              <ConversationsTab mutation={mutation} onList={(items) => setActiveTranscript(current => current ? items.find(item => item.id === current.id) ?? current : null)} onMutation={conversationChanged} refreshVersion={refreshVersion} onOpenTranscript={(conv) => { if (!mutation.locked.current) setActiveTranscript(conv); }} />
             )}
 
             {activeTab === 'vector-lab' && <VectorSearchLabTab />}
@@ -233,9 +245,9 @@ export const AppContent: React.FC = () => {
       />
 
       <TranscriptDrawer
-        busy={transcriptBusy}
+        busy={mutation.busy}
         conversation={activeTranscript}
-        onClose={() => setActiveTranscript(null)}
+        onClose={() => { if (!mutation.locked.current) setActiveTranscript(null); }}
         onDelete={handleDeleteTranscript}
         onVectorize={handleVectorizeTranscript}
       />
