@@ -707,3 +707,146 @@ def test_native_stale_resource_publisher_cannot_resurrect_after_forgetting(
         assert session.exec(select(StorageFileItem)).all() == []
         assert session.exec(select(StorageChunkItem)).all() == []
         assert session.get(jobs.ResourceJobState, key).deleted
+
+
+def test_native_credential_upgrade_also_creates_late_tables(
+    postgres_engine, monkeypatch
+):
+    import hashlib
+    import json
+    from gigamind import security
+    from gigamind.db.jobs import ResourceJobState
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    migrations.migrate(postgres_engine)
+    token = "gm_native-legacy-test-key"
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO client_credentials (id,name,token_hash,scopes_json,project_ids_json,revoked,revision) VALUES (:id,:name,:hash,:scopes,:projects,false,0)"
+            ),
+            {
+                "id": "legacy-client",
+                "name": "legacy",
+                "hash": digest,
+                "scopes": json.dumps(["memory:read"]),
+                "projects": json.dumps(["p"]),
+            },
+        )
+        for column in ("created_at", "expires_at", "last_used_at", "revision"):
+            connection.execute(
+                text(f"ALTER TABLE client_credentials DROP COLUMN {column}")
+            )
+        connection.execute(text("DROP TABLE resource_job_state"))
+        connection.execute(text("DELETE FROM schema_migrations"))
+        connection.execute(text("INSERT INTO schema_migrations VALUES (1)"))
+    migrations.migrate(postgres_engine)
+    assert migrations.schema_ready(postgres_engine)
+    with postgres_engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT token_hash, created_at, expires_at, last_used_at, revision FROM client_credentials"
+            )
+        ).one()
+        assert tuple(row) == (digest, None, None, None, 0)
+        assert (
+            connection.execute(
+                text("SELECT COUNT(*) FROM resource_job_state")
+            ).scalar_one()
+            == 0
+        )
+    monkeypatch.setattr(security, "engine", postgres_engine)
+    assert security.get_actor("Bearer " + token).project_ids == {"p"}
+
+
+def test_native_rotation_and_revocation_race(postgres_engine, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from fastapi import HTTPException
+    from fastapi.testclient import TestClient
+    from gigamind import main, security
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    migrations.migrate(postgres_engine)
+    monkeypatch.setattr(main, "engine", postgres_engine)
+    monkeypatch.setattr(security, "engine", postgres_engine)
+    monkeypatch.setenv("GIGAMIND_API_KEY", "native-client-admin")
+    admin = {"Authorization": "Bearer native-client-admin"}
+    with TestClient(main.app) as http:
+        body = {"name": "native", "scopes": ["memory:read"], "project_ids": ["p"]}
+        client = http.post("/api/v1/admin/clients", headers=admin, json=body).json()
+        path = "/api/v1/admin/clients/" + client["client"]["id"]
+        barrier = Barrier(2)
+
+        def rotate(_):
+            barrier.wait(timeout=5)
+            return http.post(
+                path + "/rotate", headers=admin, json={"expected_revision": 0}
+            )
+
+        with ThreadPoolExecutor(2) as executor:
+            responses = list(executor.map(rotate, range(2)))
+        assert sorted(item.status_code for item in responses) == [200, 409]
+        winner = next(item.json() for item in responses if item.status_code == 200)
+        assert winner["client"]["revision"] == 1
+        assert (
+            security.get_actor("Bearer " + winner["token"]).id == client["client"]["id"]
+        )
+        with pytest.raises(HTTPException) as rejected:
+            security.get_actor("Bearer " + client["token"])
+        assert rejected.value.status_code == 401
+        barrier = Barrier(2)
+
+        def change(action):
+            barrier.wait(timeout=5)
+            return http.post(
+                path + "/" + action,
+                headers=admin,
+                json={"expected_revision": 1} if action == "rotate" else None,
+            )
+
+        with ThreadPoolExecutor(2) as executor:
+            rotation, revocation = list(executor.map(change, ("rotate", "revoke")))
+        assert rotation.status_code in (200, 409) and revocation.status_code == 200
+        tokens = [winner["token"]]
+        if rotation.status_code == 200:
+            tokens.append(rotation.json()["token"])
+        for token in tokens:
+            with pytest.raises(HTTPException) as denied:
+                security.get_actor("Bearer " + token)
+            assert denied.value.status_code == 401
+
+
+def test_native_activity_total_excludes_other_projects(postgres_engine, monkeypatch):
+    from sqlmodel import Session
+    from gigamind.security import Actor
+    from gigamind.db.trust_models import ActivityEvent
+    from gigamind.services import trust
+
+    migrations.migrate(postgres_engine)
+    monkeypatch.setattr(trust, "engine", postgres_engine)
+    with Session(postgres_engine) as session:
+        for ident, project in (
+            ("a", "p"),
+            ("b", "p"),
+            ("hidden", "other"),
+            ("global", None),
+        ):
+            session.add(
+                ActivityEvent(
+                    id=ident,
+                    project_id=project,
+                    writer_id="test",
+                    action="propose",
+                    target_id="target",
+                    created_at="2026-01-01T00:00:00Z",
+                    updated_at="2026-01-01T00:00:00Z",
+                )
+            )
+        session.commit()
+    reader = Actor("reader", {"memory:read"}, {"p"})
+    first = trust.list_activity(reader, limit=1)
+    second = trust.list_activity(reader, limit=1, offset=1)
+    assert first["total"] == second["total"] == 2
+    assert [first["events"][0]["id"], second["events"][0]["id"]] == ["b", "a"]

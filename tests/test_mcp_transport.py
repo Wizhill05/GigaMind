@@ -237,3 +237,45 @@ def test_concurrent_actor_isolation(server):
         )
 
     asyncio.run(run())
+
+
+def test_transport_runs_across_successive_application_lifespans(monkeypatch):
+    from fastapi.testclient import TestClient
+    from mcp.types import LATEST_PROTOCOL_VERSION
+    from gigamind.main import app
+
+    monkeypatch.setenv("GIGAMIND_API_KEY", "repeat-lifespan-test-key")
+    headers = {
+        "Authorization": "Bearer repeat-lifespan-test-key",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+    }
+    for _ in range(2):
+        with TestClient(app) as client:
+            initialized = client.post(
+                "/mcp",
+                headers=headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": LATEST_PROTOCOL_VERSION,
+                        "capabilities": {},
+                        "clientInfo": {"name": "restart-test", "version": "1.0"},
+                    },
+                },
+            )
+            assert initialized.status_code == 200, initialized.text
+            called = client.post(
+                "/mcp",
+                headers=headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": "get_server_status", "arguments": {}},
+                },
+            )
+            assert called.status_code == 200, called.text
+            assert called.json()["result"]["structuredContent"] == {"status": "online"}

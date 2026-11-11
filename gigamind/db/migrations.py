@@ -241,25 +241,38 @@ def migrate(engine):
                 )
             if version < 1:
                 _upgrade(conn)
-            if version < 2 and inspect(conn).has_table("client_credentials", schema=schema):
-                columns = {c["name"] for c in inspect(conn).get_columns("client_credentials", schema=schema)}
-                for name, ddl in {"created_at": "TEXT", "expires_at": "TEXT", "last_used_at": "TEXT", "revision": "INTEGER NOT NULL DEFAULT 0"}.items():
+            if version < 2 and inspect(conn).has_table(
+                "client_credentials", schema=schema
+            ):
+                columns = {
+                    c["name"]
+                    for c in inspect(conn).get_columns(
+                        "client_credentials", schema=schema
+                    )
+                }
+                for name, ddl in {
+                    "created_at": "TEXT",
+                    "expires_at": "TEXT",
+                    "last_used_at": "TEXT",
+                    "revision": "INTEGER NOT NULL DEFAULT 0",
+                }.items():
                     if name not in columns:
-                        conn.exec_driver_sql(f'ALTER TABLE client_credentials ADD COLUMN "{name}" {ddl}')
+                        conn.exec_driver_sql(
+                            f'ALTER TABLE client_credentials ADD COLUMN "{name}" {ddl}'
+                        )
             if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),
                     {"version": VERSION},
                 )
-            else:
-                # Modules may register new tables after this migration was introduced.
-                missing = [
-                    t
-                    for t in SQLModel.metadata.sorted_tables
-                    if not inspect(conn).has_table(t.name, schema=t.schema or schema)
-                ]
-                if missing:
-                    SQLModel.metadata.create_all(conn, tables=missing)
+            # New modules may register tables during the same upgrade as a versioned step.
+            missing = [
+                t
+                for t in SQLModel.metadata.sorted_tables
+                if not inspect(conn).has_table(t.name, schema=t.schema or schema)
+            ]
+            if missing:
+                SQLModel.metadata.create_all(conn, tables=missing)
             for table in SQLModel.metadata.sorted_tables:
                 actual = {
                     c["name"]

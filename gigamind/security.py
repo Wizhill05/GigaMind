@@ -85,18 +85,59 @@ def usable(client):
     if client.revoked:
         return False
     try:
-        return client.expires_at is None or datetime.fromisoformat(client.expires_at) > now_utc()
+        return (
+            client.expires_at is None
+            or datetime.fromisoformat(client.expires_at) > now_utc()
+        )
     except (ValueError, TypeError):
         return False
 
 
+def client_permissions(client):
+    try:
+        scopes = json.loads(client.scopes_json)
+        projects = json.loads(client.project_ids_json)
+    except (TypeError, ValueError):
+        raise unauthorized() from None
+    if (
+        not isinstance(scopes, list)
+        or len(scopes) > 100
+        or any(not isinstance(scope, str) or scope not in SCOPES for scope in scopes)
+        or not isinstance(projects, list)
+        or not projects
+        or len(projects) > 100
+        or any(
+            not isinstance(project, str) or not project.strip() or len(project) > 200
+            for project in projects
+        )
+    ):
+        raise unauthorized()
+    return set(scopes) - {"admin"}, {project.strip() for project in projects}
+
+
 def record_use(session, client):
     now = now_utc()
-    cutoff = (now - timedelta(minutes=5)).isoformat()
-    session.exec(update(ClientCredential).where(
-        ClientCredential.id == client.id,
-        or_(ClientCredential.last_used_at == None, ClientCredential.last_used_at < cutoff),
-    ).values(last_used_at=now.isoformat()))
+    cutoff_time = now - timedelta(minutes=5)
+    try:
+        if (
+            client.last_used_at is not None
+            and datetime.fromisoformat(client.last_used_at) >= cutoff_time
+        ):
+            return
+    except (ValueError, TypeError):
+        pass
+    cutoff = cutoff_time.isoformat()
+    session.exec(
+        update(ClientCredential)
+        .where(
+            ClientCredential.id == client.id,
+            or_(
+                ClientCredential.last_used_at == None,
+                ClientCredential.last_used_at < cutoff,
+            ),
+        )
+        .values(last_used_at=now.isoformat())
+    )
     session.commit()
 
 
@@ -119,12 +160,12 @@ def get_actor(authorization: Optional[str] = Header(default=None)) -> Actor:
             select(ClientCredential).where(ClientCredential.token_hash == digest)
         ).first()
         if client and usable(client):
+            scopes, projects = client_permissions(client)
             record_use(session, client)
-            projects = json.loads(client.project_ids_json)
             return Actor(
                 client.id,
-                set(json.loads(client.scopes_json)) - {"admin"},
-                set(projects) if projects is not None else None,
+                scopes,
+                projects,
             )
     config = resource_config()
     if config:
@@ -144,13 +185,12 @@ def get_actor(authorization: Optional[str] = Header(default=None)) -> Actor:
                     else None
                 )
                 if client and usable(client):
+                    scopes, projects = client_permissions(client)
                     record_use(session, client)
-                    projects = json.loads(client.project_ids_json)
                     return Actor(
                         client.id,
-                        (set(json.loads(client.scopes_json)) & identity.scopes)
-                        - {"admin"},
-                        set(projects) if projects is not None else None,
+                        scopes & identity.scopes,
+                        projects,
                         False,
                     )
         except OAuthTokenError:
@@ -181,22 +221,45 @@ def require_scope(*scopes: str):
     return dependency
 
 
-def create_client(name: str, scopes: list[str], project_ids: list[str], expires_at: Optional[str] = None):
+def create_client(
+    name: str,
+    scopes: list[str],
+    project_ids: list[str],
+    expires_at: Optional[str] = None,
+):
+    if not isinstance(name, str) or not name.strip() or len(name) > 200:
+        raise ValueError("Client name must contain 1 to 200 characters")
+    if (
+        not isinstance(scopes, list)
+        or len(scopes) > 100
+        or any(not isinstance(scope, str) or scope not in SCOPES for scope in scopes)
+    ):
+        raise ValueError("Valid client scopes are required")
+    if (
+        not isinstance(project_ids, list)
+        or not project_ids
+        or len(project_ids) > 100
+        or any(
+            not isinstance(project, str) or not project.strip() or len(project) > 200
+            for project in project_ids
+        )
+    ):
+        raise ValueError("Valid project IDs are required")
+    project_ids = list(dict.fromkeys(project.strip() for project in project_ids))
     expires_at = normalize_expiry(expires_at)
     token = "gm_" + secrets.token_urlsafe(32)
     client = ClientCredential(
         id=str(uuid.uuid4()),
-        name=name,
+        name=name.strip(),
         created_at=now_utc().isoformat(),
         expires_at=expires_at,
         token_hash=hashlib.sha256(token.encode()).hexdigest(),
         scopes_json=json.dumps(scopes),
         project_ids_json=json.dumps(project_ids),
     )
-    with Session(engine) as session:
+    with Session(engine, expire_on_commit=False) as session:
         session.add(client)
         session.commit()
-        session.refresh(client)
     return client, token
 
 

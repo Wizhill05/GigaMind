@@ -11,8 +11,24 @@ def test_scoped_count_and_stable_newest_pagination(tmp_path, monkeypatch):
     initialize_trust_tables(engine)
     monkeypatch.setattr(trust, "engine", engine)
     with Session(engine) as session:
-        for id, project, created in [("a", "a", "1"), ("b", "a", "2"), ("c", "a", "2"), ("d", "b", "3"), ("e", None, "4")]:
-            session.add(ActivityEvent(id=id, project_id=project, writer_id="writer", action="proposed", target_id=id, created_at=created, updated_at=created))
+        for id, project, created in [
+            ("a", "a", "1"),
+            ("b", "a", "2"),
+            ("c", "a", "2"),
+            ("d", "b", "3"),
+            ("e", None, "4"),
+        ]:
+            session.add(
+                ActivityEvent(
+                    id=id,
+                    project_id=project,
+                    writer_id="writer",
+                    action="proposed",
+                    target_id=id,
+                    created_at=created,
+                    updated_at=created,
+                )
+            )
         session.commit()
     reader = Actor("reader", {"memory:read"}, {"a"})
     admin = Actor("admin", set(), None, True)

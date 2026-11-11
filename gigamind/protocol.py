@@ -16,7 +16,10 @@ from gigamind.services.memory import get_profile_rules
 
 actor_context = contextvars.ContextVar("mcp_actor")
 server = Server("GigaMind")
-manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True)
+
+
+def create_manager():
+    return StreamableHTTPSessionManager(server, stateless=True, json_response=True)
 
 
 def schema(properties=None, required=None):
@@ -138,7 +141,13 @@ async def mcp_endpoint(scope, receive, send):
     try:
         actor = await asyncio.to_thread(get_actor, request.headers.get("authorization"))
     except HTTPException as exc:
-        await JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)(
+        await JSONResponse(
+            {"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers
+        )(scope, receive, send)
+        return
+    manager = scope.get("state", {}).get("mcp_manager")
+    if manager is None:
+        await JSONResponse({"detail": "MCP transport is not running"}, status_code=503)(
             scope, receive, send
         )
         return

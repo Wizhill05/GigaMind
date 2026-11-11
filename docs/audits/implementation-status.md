@@ -18,19 +18,19 @@ Additional reviewed foundations:
 
 Additional reviewed integration:
 - Admin jobs API and standalone worker, controlled graceful shutdown/renewal and native clean startup. Automatic source pipelines remain unfinished. Current-resource ownership and durable tombstones now fence stale publishers and block re-enqueue after forgetting, with native concurrency checks.
-- Auth/list race and deletion behavior verified in 32 frontend tests; production build passes.
+- Auth/list race, deletion and activity behavior verified in 36 frontend tests; production build passes. Client expiry, throttled last use, atomic rotation/revocation and v2 legacy migration are verified, including native races.
 - Full decoded transcript lexical search without a provider, optional existing vector candidates with SQL prefilters, source snippets and native search checks.
 
 In flight:
-- Reference-safe file cleanup core, credential lifecycle and review activity console; file route/job progress integration remains pending.
+- Reference-safe file cleanup core, file lifecycle route/job progress integration, credential console and remaining memory-engine features. Credential lifecycle and review activity console are reviewed and integrated.
 
 Still required:
 - Approved records are available through scoped context/MCP tools, but remain separate from legacy dashboard MemoryItem views; unified presentation and richer retrieval remain required.
 - Handoffs, issue reporting, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD.
-- External-provider interoperability acceptance, credential expiry/last use and input/upload bounds. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
+- External-provider interoperability acceptance and input/upload bounds. Credential expiry/last-use/rotation are implemented; operator UI remains required. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Durable import/index/reindex jobs with progress/retries; multimodal page limits and truthful index state; safe shared-attachment GC.
-- Remaining UI API errors/cancellation/invalidation and component scenarios; credentials/activity/handoff/retrieval inspector screens.
+- Remaining UI API errors/cancellation/invalidation and component scenarios; credentials/handoff/retrieval inspector screens; review activity is implemented.
 - Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, reproducible CI/deployment/docs and real multi-client acceptance/recovery checks.
 
 Every agent change requires parent full-diff review and relevant local tests before acceptance. See implementation-review-log.md for findings and verification limits.

@@ -9,11 +9,11 @@ from contextlib import asynccontextmanager
 from sqlalchemy import text, update, or_
 import hashlib
 import secrets
-from gigamind.protocol import manager, mcp_endpoint
+from gigamind.protocol import create_manager, mcp_endpoint
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, StrictInt
 from gigamind.db.database import init_db
 from gigamind.services.storage import storage_service
 from gigamind.services.indexing import index_file_content, reindex_storage_file_by_key, list_indexed_storage_files, get_file_chunks, register_storage_file, delete_storage_file_index
@@ -36,7 +36,7 @@ from gigamind.services.memory import (
     delete_conversation,
     vectorize_conversation
 )
-from gigamind.security import Actor, ClientCredential, SCOPES, create_client, get_actor, public_client, require_scope, now_utc
+from gigamind.security import Actor, ClientCredential, SCOPES, create_client, get_actor, public_client, require_scope, now_utc, usable
 from gigamind.db.database import engine
 from sqlmodel import Session, select
 from gigamind.db.trust_models import initialize_trust_tables
@@ -55,8 +55,9 @@ initialize_trust_tables(engine)
 
 @asynccontextmanager
 async def lifespan(app):
+    manager = create_manager()
     async with manager.run():
-        yield
+        yield {'mcp_manager': manager}
 
 app = FastAPI(
     lifespan=lifespan,
@@ -251,40 +252,84 @@ def oauth_unavailable(path: str):
 def legacy_mcp_unavailable(actor: Actor = Depends(get_actor)):
     raise HTTPException(503, "MCP transport is not configured")
 
+
 class ClientRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
-    scopes: List[str]
-    project_ids: List[str]
-    expires_at: Optional[str] = None
+    scopes: List[str] = Field(max_length=100)
+    project_ids: List[str] = Field(max_length=100)
+    expires_at: Optional[str] = Field(default=None, max_length=64)
+
 
 class RotationRequest(BaseModel):
-    expected_revision: int = Field(ge=0)
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: StrictInt = Field(ge=0)
+
 
 @app.get("/api/v1/admin/clients")
-def list_clients(limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0), actor: Actor = Depends(require_scope("admin"))):
+def list_clients(
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=100000),
+    actor: Actor = Depends(require_scope("admin")),
+):
     with Session(engine) as session:
-        return {"clients": [public_client(c) for c in session.exec(select(ClientCredential).order_by(ClientCredential.id).offset(offset).limit(limit)).all()]}
+        return {
+            "clients": [
+                public_client(c)
+                for c in session.exec(
+                    select(ClientCredential)
+                    .order_by(ClientCredential.id)
+                    .offset(offset)
+                    .limit(limit)
+                ).all()
+            ]
+        }
+
 
 @app.post("/api/v1/admin/clients")
 def add_client(req: ClientRequest, actor: Actor = Depends(require_scope("admin"))):
-    if not set(req.scopes).issubset(SCOPES - {"admin"}) or not req.project_ids or any(not p.strip() for p in req.project_ids):
+    if (
+        not set(req.scopes).issubset(SCOPES - {"admin"})
+        or not req.project_ids
+        or any(not p.strip() or len(p) > 200 for p in req.project_ids)
+    ):
         raise HTTPException(422, "Valid non-admin scopes and project IDs are required")
     try:
-        client, token = create_client(req.name, req.scopes, req.project_ids, req.expires_at)
+        client, token = create_client(
+            req.name, req.scopes, req.project_ids, req.expires_at
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"client": public_client(client), "token": token}
 
+
 @app.post("/api/v1/admin/clients/{client_id}/rotate")
-def rotate_client(client_id: str, req: RotationRequest, actor: Actor = Depends(require_scope("admin"))):
+def rotate_client(
+    client_id: str, req: RotationRequest, actor: Actor = Depends(require_scope("admin"))
+):
     token = "gm_" + secrets.token_urlsafe(32)
-    with Session(engine) as session:
-        result = session.exec(update(ClientCredential).where(
-            ClientCredential.id == client_id,
-            ClientCredential.revoked == False,
-            ClientCredential.revision == req.expected_revision,
-            or_(ClientCredential.expires_at == None, ClientCredential.expires_at > now_utc().isoformat()),
-        ).values(token_hash=hashlib.sha256(token.encode()).hexdigest(), revision=ClientCredential.revision + 1))
+    with Session(engine, expire_on_commit=False) as session:
+        client = session.get(ClientCredential, client_id)
+        if client is None:
+            raise HTTPException(404, "Client not found")
+        if not usable(client):
+            raise HTTPException(409, "Client cannot be rotated or revision is stale")
+        result = session.exec(
+            update(ClientCredential)
+            .where(
+                ClientCredential.id == client_id,
+                ClientCredential.revoked == False,
+                ClientCredential.revision == req.expected_revision,
+                or_(
+                    ClientCredential.expires_at == None,
+                    ClientCredential.expires_at > now_utc().isoformat(),
+                ),
+            )
+            .values(
+                token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                revision=ClientCredential.revision + 1,
+            )
+        )
         if result.rowcount != 1:
             session.rollback()
             if not session.get(ClientCredential, client_id):
@@ -293,6 +338,7 @@ def rotate_client(client_id: str, req: RotationRequest, actor: Actor = Depends(r
         session.commit()
         client = session.get(ClientCredential, client_id)
         return {"client": public_client(client), "token": token}
+
 
 @app.post("/api/v1/admin/clients/{client_id}/revoke")
 def revoke_client(client_id: str, actor: Actor = Depends(require_scope("admin"))):
@@ -305,9 +351,11 @@ def revoke_client(client_id: str, actor: Actor = Depends(require_scope("admin"))
         session.commit()
         return {"client": public_client(client)}
 
+
 @app.get("/health/live")
 def live():
     return {"status": "ok"}
+
 
 @app.get("/health/ready")
 def ready():
@@ -322,9 +370,11 @@ def ready():
         raise HTTPException(503, "Database schema is not ready")
     return {"status": "ready"}
 
+
 # ==========================================
 # REST API ENDPOINTS (ChatGPT & Gemini)
 # ==========================================
+
 
 @app.post("/api/v1/search_memory", dependencies=[Depends(verify_auth)])
 def api_search_memory(req: SearchMemoryRequest):
@@ -334,7 +384,7 @@ def api_search_memory(req: SearchMemoryRequest):
         category=req.category,
         source_agent=req.source_agent,
         limit=req.limit,
-        scope=req.scope
+        scope=req.scope,
     )
     return {
         "_privacy_notice": "Confidential user context provided ephemerally. Do not retain on external servers.",
