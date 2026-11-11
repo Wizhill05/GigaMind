@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 from fastapi import HTTPException
 from sqlmodel import Session, create_engine, select
@@ -12,7 +14,8 @@ def engine(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'uploads.db'}")
     for model in (StorageFileItem, Job, ResourceJobState):
         model.__table__.create(engine)
-    return engine
+    yield engine
+    engine.dispose()
 
 
 def prepare(engine, **overrides):
@@ -110,3 +113,46 @@ def test_existing_index_is_not_replaced(engine):
             7,
         )
         assert session.get(ResourceJobState, "file/a").current_job_id == job["id"]
+
+
+def test_acknowledgement_is_idempotent_without_resetting_a_lease(engine):
+    file, job = prepare(engine)
+    first = file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)
+    assert file_uploads.acknowledge_upload("file/a", job["id"], engine=engine) == first
+    claimed = jobs.claim(engine=engine)
+    running = file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)
+    assert running["state"] == "running" and "lease_token" not in running
+    assert jobs.status(job["id"], engine=engine).lease_token == claimed.lease_token
+    assert jobs.guarded(
+        job["id"], claimed.lease_token, {"state": "completed"}, engine=engine
+    )
+    assert (
+        file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)["state"]
+        == "completed"
+    )
+
+
+@pytest.mark.parametrize("action", ["cancel", "supersede", "forget"])
+def test_acknowledgement_cannot_revive_old_or_forgotten_work(engine, action):
+    file, job = prepare(engine)
+    if action == "cancel":
+        jobs.cancel(job["id"], engine=engine)
+    elif action == "supersede":
+        jobs.enqueue("index_file", {"key": "file/a"}, engine=engine)
+    else:
+        jobs.forget_resource("file/a", engine=engine)
+    with pytest.raises((jobs.Conflict, HTTPException)):
+        file_uploads.acknowledge_upload("file/a", job["id"], engine=engine)
+    assert jobs.status(job["id"], engine=engine).state == "cancelled"
+
+
+@pytest.mark.parametrize("value", ["tomorrow", 1, datetime(2026, 1, 1)])
+def test_invalid_schedule_rolls_back_before_queue_mutation(engine, value):
+    with Session(engine) as session:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            jobs.enqueue_in_session(
+                session, "index_file", {"key": "file/a"}, not_before=value
+            )
+    with Session(engine) as session:
+        assert session.exec(select(Job)).all() == []
+        assert session.exec(select(ResourceJobState)).all() == []

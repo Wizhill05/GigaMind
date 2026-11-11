@@ -28,7 +28,7 @@ def _prepare_upload(
     idempotency_key,
     *,
     engine=None,
-    clock=jobs.utcnow
+    clock=jobs.utcnow,
 ):
     """Register validated metadata and a deferred job, returning committed snapshots."""
     validate_key(key)
@@ -87,7 +87,7 @@ def _prepare_upload(
             indexing_status="pending",
             created_at=now,
             updated_at=now,
-            **values
+            **values,
         )
         session.add(file)
         session.commit()
@@ -104,7 +104,7 @@ def prepare_upload(
     idempotency_key,
     *,
     engine=None,
-    clock=jobs.utcnow
+    clock=jobs.utcnow,
 ):
     try:
         return _prepare_upload(
@@ -138,14 +138,15 @@ def acknowledge_upload(key, job_id, *, engine=None, clock=jobs.utcnow):
             or not job
             or job.kind != "index_file"
             or job.resource_key != key
-            or job.state != "queued"
-            or job.available_at != jobs.stamp(PREPARED_UNTIL)
-            or not session.exec(
+            or job.state not in {"queued", "running", "retrying", "completed", "failed"}
+            or session.exec(
                 select(StorageFileItem.id).where(StorageFileItem.key == key)
             ).first()
+            != job_id
         ):
             raise jobs.Conflict("Upload preparation is no longer current")
-        job.available_at = now
-        job.updated_at = now
+        if job.state == "queued" and job.available_at == jobs.stamp(PREPARED_UNTIL):
+            job.available_at = now
+            job.updated_at = now
         session.commit()
         return job.model_dump(exclude={"lease_token"})

@@ -154,9 +154,13 @@ def enqueue_in_session(
     max_attempts=3,
     *,
     clock=utcnow,
-    not_before=None
+    not_before=None,
 ):
     """Enqueue in the caller's transaction without committing it."""
+    if not_before is not None and (
+        not isinstance(not_before, datetime) or not_before.utcoffset() is None
+    ):
+        raise ValueError("not_before must be a timezone-aware datetime")
     if kind != "index_file":
         raise ValueError("Unknown job kind")
     if kind == "index_file" and (

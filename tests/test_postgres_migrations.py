@@ -1063,3 +1063,66 @@ def test_native_download_admission_is_ordered_against_forgetting(
             download.result(timeout=10)
         assert denied.value.status_code == 409
     assert calls == ["url-first"]
+
+
+def test_native_upload_preparation_is_atomic_and_repeatable(
+    postgres_engine, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from fastapi import HTTPException
+    from sqlmodel import Session, select
+    from gigamind.db.database import StorageFileItem
+    from gigamind.db.jobs import Job, ResourceJobState
+    from gigamind.services import file_uploads, jobs
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    migrations.migrate(postgres_engine)
+
+    def prepare():
+        return file_uploads.prepare_upload(
+            "files/native.txt",
+            "native.txt",
+            "text/plain",
+            "text",
+            3,
+            "test-admin",
+            "native-upload",
+            engine=postgres_engine,
+        )
+
+    with ThreadPoolExecutor(2) as pool:
+        first, second = list(pool.map(lambda _: prepare(), range(2)))
+    assert first == second
+    with Session(postgres_engine) as session:
+        assert len(session.exec(select(Job)).all()) == 1
+        assert session.exec(select(StorageFileItem)).one().indexing_status == "pending"
+        assert (
+            session.get(ResourceJobState, "files/native.txt").current_job_id
+            == first[1]["id"]
+        )
+    assert jobs.claim(engine=postgres_engine) is None
+    acknowledged = file_uploads.acknowledge_upload(
+        "files/native.txt", first[1]["id"], engine=postgres_engine
+    )
+    assert (
+        file_uploads.acknowledge_upload(
+            "files/native.txt", first[1]["id"], engine=postgres_engine
+        )
+        == acknowledged
+    )
+    claimed = jobs.claim(engine=postgres_engine)
+    assert claimed.id == first[1]["id"]
+    file_uploads.acknowledge_upload(
+        "files/native.txt", claimed.id, engine=postgres_engine
+    )
+    assert (
+        jobs.status(claimed.id, engine=postgres_engine).lease_token
+        == claimed.lease_token
+    )
+    jobs.forget_resource("files/native.txt", engine=postgres_engine)
+    with pytest.raises(HTTPException) as denied:
+        file_uploads.acknowledge_upload(
+            "files/native.txt", claimed.id, engine=postgres_engine
+        )
+    assert denied.value.status_code == 409
+    assert jobs.status(claimed.id, engine=postgres_engine).state == "cancelled"
