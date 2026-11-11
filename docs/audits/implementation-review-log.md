@@ -77,3 +77,7 @@ Parent backend combined run before final two small regressions: 37 passed, inclu
 Read context service, protocol/router changes and all SDK/context tests. Parent corrected authority semantics: accepted-knowledge tools no longer silently fall back to unreviewed legacy memories when nothing matches. Added approved preference rules to context even for unrelated tasks, while retaining project filtering and conservative serialized-byte budgets. Added lexical term relevance ordering and removal of question stopwords so trivial query words do not create arbitrary matches. Admin omitted-project context/search defaults to global knowledge rather than mixing project-specific rules; unauthorized projects are checked even for empty lexical queries. Scoped exact retrieval still labels historical statuses explicitly.
 
 Parent updated real SDK fixture to approve its fixture knowledge and added scoped preference/global-default regressions. Focused context/MCP/trust run: 15 passed before the final global-default regression. Retrieval remains lexical, not semantic or multimodal; handoff remains null pending that unit. This is an accepted scoped retrieval foundation, not the complete retrieval roadmap.
+
+2026-11-11, OAuth worker ee24bbfe review
+
+Read its completion transcript and checked its checkout: no changes or commit. Nothing accepted. OAuth remains unavailable; split replacement into signed-token verifier first, then persistent local bindings/discovery/lifecycle integration. Existing unused in-memory issuer must not be restored to mounted routes.
