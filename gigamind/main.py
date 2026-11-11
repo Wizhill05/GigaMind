@@ -41,6 +41,8 @@ from gigamind.db.trust_models import initialize_trust_tables
 from gigamind.db.migrations import schema_ready
 from gigamind.routers.review import router as review_router
 from gigamind.routers.oauth import router as oauth_router
+from gigamind.routers.jobs import router as jobs_router
+from gigamind.db import memory_index  # register before migration
 from gigamind.services.oauth import resource_config
 
 # Initialize DB
@@ -63,6 +65,7 @@ app = FastAPI(
 )
 app.include_router(review_router)
 app.include_router(oauth_router)
+app.include_router(jobs_router)
 
 class MCPMiddleware:
     def __init__(self, app):
