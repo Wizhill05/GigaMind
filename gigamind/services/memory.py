@@ -746,97 +746,110 @@ def search_conversations(
     source_agent: Optional[str] = None,
     limit: int = 5,
 ) -> List[Dict[str, Any]]:
-    """
-    Semantic vector search specifically across chat conversation transcripts.
-    """
-    query_vector = generate_embedding(query)
-    query_lower = (query or "").lower()
-    query_keywords = [k for k in query_lower.split() if len(k) > 2]
+    """Search complete legacy transcripts, with optional existing vector candidates."""
+    import re
 
-    candidates: List[Dict[str, Any]] = []
+    query = (query or "").strip()[:2048]
+    terms = list(dict.fromkeys(re.findall(r"\w+", query.casefold())))
+    if not terms:
+        return []
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError, OverflowError):
+        limit = 5
+
+    def valid_vector(value):
+        return (isinstance(value, list) and len(value) == embedding_config.DEFAULT_DIM
+                and all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                        and math.isfinite(x) for x in value) and any(value))
+
+    try:
+        vector = generate_embedding(query)
+    except Exception:
+        vector = None
+    if not valid_vector(vector):
+        vector = None
 
     with Session(engine) as session:
-        if is_postgres:
-            try:
-                vector_str = f"[{','.join(str(x) for x in query_vector)}]"
-                sql = """
-                SELECT id, platform, title, summary, source_agent, messages_json, created_at,
-                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
+        native_scores = {}
+        if is_postgres and vector:
+            sql = text("""
+                SELECT id, 1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS score
                 FROM conversations
                 WHERE embedding_vector IS NOT NULL
-                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                LIMIT 40;
-                """
-                rows = session.exec(text(sql), params={"vec": vector_str}).all()
-                for r in rows:
-                    if platform and r.platform.lower() != platform.lower():
-                        continue
-                    if source_agent and (r.source_agent or "").lower() != source_agent.lower():
-                        continue
-                    try:
-                        msgs = json.loads(r.messages_json or "[]")
-                    except Exception:
-                        msgs = []
-                    candidates.append({
-                        "id": r.id,
-                        "source": "conversation",
-                        "platform": r.platform,
-                        "title": r.title,
-                        "summary": r.summary,
-                        "source_agent": r.source_agent or "user",
-                        "content": f"[{r.platform.upper()} Transcript] {r.title}: {r.summary}",
-                        "messages": msgs,
-                        "messages_count": len(msgs),
-                        "created_at": r.created_at,
-                        "score": float(r.vector_score or 0.0),
-                        "vector_score": float(r.vector_score or 0.0)
-                    })
-            except Exception as pg_err:
-                print(f"pgvector search_conversations note: {pg_err}")
-                session.rollback()
+                  AND (:platform IS NULL OR lower(platform) = lower(:platform))
+                  AND (:source_agent IS NULL OR lower(source_agent) = lower(:source_agent))
+                ORDER BY embedding_vector <=> CAST(:vec AS vector), id
+                LIMIT :candidate_limit
+            """)
+            rows = session.exec(sql, params={"vec": str(vector), "platform": platform,
+                "source_agent": source_agent, "candidate_limit": max(40, limit)}).all()
+            native_scores = {row.id: float(row.score) for row in rows
+                             if row.score is not None and math.isfinite(row.score)}
 
-        if not candidates:
-            stmt = select(ConversationItem).limit(60)
-            if platform:
-                stmt = stmt.where(ConversationItem.platform == platform)
-            if source_agent:
-                stmt = stmt.where(ConversationItem.source_agent == source_agent)
-            conv_items = session.exec(stmt).all()
-            for c in conv_items:
-                score = 0.0
+        stmt = select(ConversationItem)
+        if platform:
+            stmt = stmt.where(func.lower(ConversationItem.platform) == platform.lower())
+        if source_agent:
+            stmt = stmt.where(func.lower(ConversationItem.source_agent) == source_agent.lower())
+        stmt = stmt.order_by(ConversationItem.id).execution_options(yield_per=20)
+        best = []
+        for c in session.exec(stmt):
+            try:
+                messages = json.loads(c.messages_json or "[]")
+            except (ValueError, TypeError):
+                messages = []
+            if not isinstance(messages, list):
+                messages = []
+            hits = set()
+            snippets = []
+            for field in (c.title or "", c.summary or ""):
+                folded = field.casefold()
+                hits.update(term for term in terms if term in folded)
+            for index, message in enumerate(messages):
+                if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+                    continue
+                content = message["content"]
+                folded = content.casefold()
+                found = [term for term in terms if term in folded]
+                hits.update(found)
+                if found and len(snippets) < 3:
+                    match = re.search(re.escape(found[0]), content, re.IGNORECASE)
+                    pos = match.start() if match else 0
+                    snippet = {"role": message.get("role", "unknown"), "index": index,
+                               "text": content[max(0, pos - 100):pos + 200]}
+                    for key in ("id", "created_at"):
+                        if key in message:
+                            snippet[key] = message[key]
+                    snippets.append(snippet)
+            lexical = len(hits) / len(terms)
+            semantic = native_scores.get(c.id)
+            if not is_postgres and vector:
                 try:
-                    c_vec = json.loads(c.embedding_json)
-                    score += cosine_similarity(query_vector, c_vec) * 0.7
-                except Exception:
-                    pass
-                c_text = f"{c.title} {c.summary}".lower()
-                kw_hits = sum(1 for kw in query_keywords if kw in c_text)
-                if query_keywords:
-                    score += (kw_hits / len(query_keywords)) * 0.3
-
-                if score > 0.05:
-                    try:
-                        msgs = json.loads(c.messages_json or "[]")
-                    except Exception:
-                        msgs = []
-                    candidates.append({
-                        "id": c.id,
-                        "source": "conversation",
-                        "platform": c.platform,
-                        "title": c.title,
-                        "summary": c.summary,
-                        "source_agent": c.source_agent or "user",
-                        "content": f"[{c.platform.upper()} Transcript] {c.title}: {c.summary}",
-                        "messages": msgs,
-                        "messages_count": len(msgs),
-                        "created_at": c.created_at,
-                        "score": round(score, 4)
-                    })
-
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-    top_candidates = candidates[:30]
-    reranked = rerank_candidates(query=query, candidates=top_candidates, top_n=limit)
-    return reranked
+                    stored = json.loads(c.embedding_json or "[]")
+                except (ValueError, TypeError):
+                    stored = None
+                if valid_vector(stored):
+                    semantic = cosine_similarity(vector, stored)
+            if not lexical and (semantic is None or semantic <= 0):
+                continue
+            score = lexical + (max(0.0, semantic) * 0.25 if semantic is not None else 0)
+            result = {"id": c.id, "source": "conversation", "platform": c.platform,
+                      "title": c.title, "summary": c.summary,
+                      "source_agent": c.source_agent or "user",
+                      "content": f"[{c.platform.upper()} Transcript] {c.title}: {c.summary}",
+                      "messages": messages, "messages_count": len(messages),
+                      "created_at": c.created_at, "score": round(score, 4),
+                      "retrieval_method": "lexical+vector" if lexical and semantic is not None
+                                          else "lexical" if lexical else "vector",
+                      "evidence": snippets}
+            if semantic is not None:
+                result["vector_score"] = semantic
+            best.append(result)
+            best.sort(key=lambda item: (-item["score"], item["id"]))
+            if len(best) > limit:
+                best.pop()
+        return best
 
 def backfill_conversation_vectors() -> int:
     """Computes and backfills Gemini Embedding 2 vectors for all stored conversations."""
