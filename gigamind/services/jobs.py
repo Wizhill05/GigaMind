@@ -146,9 +146,17 @@ def validate_resource_key(key):
         raise ValueError("Resource key must be nonblank and at most 1024 UTF-8 bytes")
 
 
-def enqueue(
-    kind, payload, idempotency_key=None, max_attempts=3, *, engine=None, clock=utcnow
+def enqueue_in_session(
+    session,
+    kind,
+    payload,
+    idempotency_key=None,
+    max_attempts=3,
+    *,
+    clock=utcnow,
+    not_before=None
 ):
+    """Enqueue in the caller's transaction without committing it."""
     if kind != "index_file":
         raise ValueError("Unknown job kind")
     if kind == "index_file" and (
@@ -182,34 +190,43 @@ def enqueue(
         idempotency_key=idempotency_key,
         state="queued",
         max_attempts=max_attempts,
-        available_at=now,
+        available_at=stamp(not_before) if not_before is not None else now,
         created_at=now,
         updated_at=now,
     )
+    owner = lock_resource(session, payload["key"], now)
+    if idempotency_key is not None:
+        old = session.exec(
+            select(Job).where(Job.idempotency_key == idempotency_key)
+        ).first()
+        if old is not None:
+            if (
+                old.kind != kind
+                or old.payload_json != encoded
+                or old.max_attempts != max_attempts
+            ):
+                raise Conflict(
+                    "Idempotency key already used with different job parameters"
+                )
+            return old
+    if owner.deleted:
+        raise Conflict("Resource has been forgotten")
+    cancel_active(session, payload["key"], now)
+    session.add(job)
+    owner.current_job_id = job.id
+    owner.updated_at = now
+    session.flush()
+    return job
+
+
+def enqueue(
+    kind, payload, idempotency_key=None, max_attempts=3, *, engine=None, clock=utcnow
+):
     with Session(resolve_engine(engine), expire_on_commit=False) as session:
         try:
-            owner = lock_resource(session, payload["key"], now)
-            if idempotency_key is not None:
-                old = session.exec(
-                    select(Job).where(Job.idempotency_key == idempotency_key)
-                ).first()
-                if old is not None:
-                    if (
-                        old.kind != kind
-                        or old.payload_json != encoded
-                        or old.max_attempts != max_attempts
-                    ):
-                        raise Conflict(
-                            "Idempotency key already used with different job parameters"
-                        )
-                    session.commit()
-                    return old
-            if owner.deleted:
-                raise Conflict("Resource has been forgotten")
-            cancel_active(session, payload["key"], now)
-            session.add(job)
-            owner.current_job_id = job.id
-            owner.updated_at = now
+            job = enqueue_in_session(
+                session, kind, payload, idempotency_key, max_attempts, clock=clock
+            )
             session.commit()
             return job
         except IntegrityError:
@@ -221,6 +238,9 @@ def enqueue(
             ).first()
             if old is None:
                 raise
+            encoded = json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+            )
             if (
                 old.kind != kind
                 or old.payload_json != encoded
