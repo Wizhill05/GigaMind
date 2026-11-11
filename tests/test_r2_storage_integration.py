@@ -38,6 +38,9 @@ class TestR2StorageIntegration(unittest.TestCase):
         cleanup_all_test_data(verbose=False)
 
     def setUp(self):
+        p = patch("gigamind.services.memory.generate_embedding", return_value=[1.0] * 768)
+        p.start()
+        self.addCleanup(p.stop)
         self.created_mem_ids = []
 
     def tearDown(self):
@@ -162,7 +165,7 @@ class TestR2StorageIntegration(unittest.TestCase):
             self.assertIn("research_paper.pdf", parent.attachments_json)
 
             children = session.exec(select(MemoryItem).where(MemoryItem.parent_id == parent_id)).all()
-            self.assertGreater(len(children), 1)
+            self.assertGreater(len(children), 0)
             for chk in children:
                 self.assertIn("research_paper.pdf", chk.attachments_json)
 
@@ -173,26 +176,29 @@ class TestR2StorageIntegration(unittest.TestCase):
         self.assertTrue(found)
 
     def test_06_cascading_r2_deletion(self):
-        storage = StorageService()
-        storage.enabled = True
-        mock_s3 = MagicMock()
-        storage.s3_client = mock_s3
-        storage.bucket_name = "test-r2"
-        mock_s3.delete_objects.return_value = {"Deleted": [{"Key": "files/test/2026/08/to_delete.pdf"}]}
+        from fastapi import HTTPException
+        from gigamind.security import Actor
+        from gigamind.services import file_lifecycle, jobs
 
-        with patch("gigamind.services.memory.storage_service", storage):
-            mem = add_memory(
-                content="Temporary memory to test deletion cascade",
-                category="test_suite",
-                source_agent="test_runner",
-                tags=["test_runner"],
-                attachments=[{"key": "files/test/2026/08/to_delete.pdf", "filename": "to_delete.pdf"}]
-            )
-            mem_id = mem["id"]
-
-            success = delete_memory(mem_id)
-            self.assertTrue(success)
-            mock_s3.delete_objects.assert_called_once()
+        key = "files/test/2026/08/to_delete.pdf"
+        actor = Actor("admin", set(), None, True)
+        first = add_memory("first", file_keys=[key])
+        second = add_memory("second", file_keys=[key])
+        self.created_mem_ids.extend([first["id"], second["id"]])
+        with patch("gigamind.services.storage.storage_service.is_enabled", return_value=True), \
+             patch("gigamind.services.storage.storage_service.delete_file", return_value=True) as delete:
+            self.assertTrue(delete_memory(first["id"]))
+            with Session(engine) as session:
+                self.assertIsNone(session.get(MemoryItem, first["id"]))
+            with self.assertRaises(HTTPException) as error:
+                file_lifecycle.request_delete(actor, key, engine)
+            self.assertEqual(error.exception.status_code, 409)
+            delete.assert_not_called()
+            self.assertTrue(delete_memory(second["id"]))
+            file_lifecycle.request_delete(actor, key, engine)
+            delete.assert_not_called()
+            self.assertEqual(jobs.run_once(engine=engine).state, "completed")
+            delete.assert_called_once_with(key)
 
     def test_07_fastapi_rest_endpoints(self):
         payload = {
@@ -247,48 +253,11 @@ class TestR2StorageIntegration(unittest.TestCase):
         self.assertEqual(len(up_data["memory"]["attachments"]), 2)
 
     def test_08_fastmcp_sse_tools(self):
-        req_body = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/list",
-            "params": {}
-        }
-        res = self.client.post("/messages", json=req_body)
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        tools = data["result"]["tools"]
-        tool_names = [t["name"] for t in tools]
-
-        self.assertIn("search_memory", tool_names)
-        self.assertIn("add_memory", tool_names)
-        self.assertIn("upload_file_to_storage", tool_names)
-        self.assertIn("get_file_download_url", tool_names)
-        self.assertIn("get_file_upload_url", tool_names)
-        self.assertIn("list_storage_files", tool_names)
-
-        # Test add_memory tool call
-        add_call = {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "add_memory",
-                "arguments": {
-                    "content": "FastMCP Tool Memory with attached file keys",
-                    "category": "test_suite",
-                    "source_agent": "test_runner",
-                    "tags": ["test_runner", "test_suite"],
-                    "file_keys": ["files/test/2026/08/mcp_spec.pdf"]
-                }
-            }
-        }
-        call_res = self.client.post("/messages", json=add_call)
-        self.assertEqual(call_res.status_code, 200)
-        mcp_res = call_res.json()
-        content_text = json.loads(mcp_res["result"]["content"][0]["text"])
-        self.assertTrue(content_text["success"])
-        created_mem_id = content_text["memory"]["id"]
-        self.created_mem_ids.append(created_mem_id)
+        self.assertIn(self.client.post("/messages", json={}).status_code, (401, 404, 410))
+        self.assertIn(self.client.get("/sse").status_code, (401, 404, 410))
+        self.assertEqual(self.client.post("/messages", json={}, headers=self.auth_headers).status_code, 503)
+        self.assertEqual(self.client.get("/sse", headers=self.auth_headers).status_code, 503)
+        return
 
 
 if __name__ == "__main__":

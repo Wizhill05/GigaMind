@@ -26,4 +26,4 @@ npm test
 npm run build
 ```
 
-The CI workflow runs the offline backend and frontend commands; it does not publish artifacts or deploy.
+The CI workflow runs the offline backend and frontend commands and the PostgreSQL migration tests against a disposable local pgvector service. It does not publish artifacts or deploy. Offline embedding fixtures verify persistence and retrieval contracts, not semantic relevance or multimodal quality. Live semantic-quality acceptance requires a separate explicitly opted-in live environment; credentials alone never enable it in pytest.

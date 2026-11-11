@@ -35,6 +35,10 @@ class TestVectorizedStorageSearch(unittest.TestCase):
         cleanup_all_test_data(verbose=False)
 
     def setUp(self):
+        for target in ("gigamind.services.indexing.generate_embedding", "gigamind.services.memory.generate_embedding"):
+            p = patch(target, return_value=[1.0] * 768)
+            p.start()
+            self.addCleanup(p.stop)
         self.created_mem_ids = []
         self.created_file_keys = []
 
@@ -209,32 +213,9 @@ class TestVectorizedStorageSearch(unittest.TestCase):
         self.assertTrue(any(f["key"] == doc_key for f in indexed_files))
 
     def test_05_fastmcp_tools(self):
-        file_key = "files/test/2026/08/mcp_doc.txt"
-        self.created_file_keys.append(file_key)
-
-        index_file_content(file_key=file_key, filename="mcp_doc.txt", data=b"FastMCP Knowledge Search Tool Verification", source_agent="test_runner")
-
-        # Call search_file_storage via FastMCP JSON-RPC
-        rpc_call = {
-            "jsonrpc": "2.0",
-            "id": 10,
-            "method": "tools/call",
-            "params": {
-                "name": "search_file_storage",
-                "arguments": {
-                    "query": "FastMCP Knowledge Verification",
-                    "limit": 3
-                }
-            }
-        }
-        rpc_res = self.client.post("/messages", json=rpc_call)
-        self.assertEqual(rpc_res.status_code, 200)
-        data = rpc_res.json()
-        content_str = data["result"]["content"][0]["text"]
-        self.assertIn("mcp_doc.txt", content_str)
-        structured = data["result"].get("structured", {})
-        self.assertEqual(structured.get("scope"), "files")
-        self.assertTrue(len(structured.get("results", [])) > 0)
+        self.assertIn(self.client.post("/messages", json={}).status_code, (401, 404, 410))
+        self.assertIn(self.client.get("/sse").status_code, (401, 404, 410))
+        return
 
 if __name__ == "__main__":
     unittest.main()
