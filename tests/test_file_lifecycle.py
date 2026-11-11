@@ -254,3 +254,35 @@ def test_attachment_committing_first_blocks_cleanup(setup, monkeypatch):
     with Session(setup) as session:
         assert session.get(MemoryItem, saved["id"]) is not None
         assert not session.exec(select(jobs.Job)).all()
+
+
+def test_downloads_use_expiring_signatures_even_with_legacy_public_domain():
+    from gigamind.services.storage import StorageService
+
+    calls = []
+
+    class Client:
+        def generate_presigned_url(self, **options):
+            calls.append(options)
+            return "https://private.example.test/signed"
+
+    storage = StorageService.__new__(StorageService)
+    storage.enabled = True
+    storage.s3_client = Client()
+    storage.bucket_name = "isolated-bucket"
+    storage.public_domain = "https://public.example.test"
+    assert (
+        storage.get_presigned_download_url("key", expires_in=60, filename="notes.txt")
+        == "https://private.example.test/signed"
+    )
+    assert calls == [
+        {
+            "ClientMethod": "get_object",
+            "Params": {
+                "Bucket": "isolated-bucket",
+                "Key": "key",
+                "ResponseContentDisposition": 'inline; filename="notes.txt"',
+            },
+            "ExpiresIn": 60,
+        }
+    ]

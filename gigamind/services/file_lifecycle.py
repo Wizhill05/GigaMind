@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from contextlib import contextmanager
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
@@ -28,7 +29,7 @@ def validate_key(key):
         jobs.validate_resource_key(key)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
-    if not owned_key(key):
+    if not owned_key(key) or any(ord(char) < 32 or ord(char) == 127 for char in key):
         raise HTTPException(422, "Invalid file key")
 
 
@@ -37,15 +38,38 @@ def tombstoned_keys(keys, engine=None):
     if not keys:
         return set()
     with Session(jobs.resolve_engine(engine)) as session:
-        return set(session.exec(select(ResourceJobState.key).where(
-            ResourceJobState.key.in_(keys), ResourceJobState.deleted.is_(True)
-        )).all())
+        return set(
+            session.exec(
+                select(ResourceJobState.key).where(
+                    ResourceJobState.key.in_(keys), ResourceJobState.deleted.is_(True)
+                )
+            ).all()
+        )
 
 
 def require_active(key, engine=None):
     validate_key(key)
     if key in tombstoned_keys([key], engine):
         raise HTTPException(409, "File has been deleted")
+
+
+@contextmanager
+def active_access(key, engine=None):
+    """Order an access admission against forgetting the same resource."""
+    validate_key(key)
+    with Session(jobs.resolve_engine(engine)) as session:
+        owner = jobs.lock_resource(session, key, jobs.stamp(jobs.utcnow()))
+        if owner.deleted:
+            raise HTTPException(409, "File has been deleted")
+        yield
+        session.commit()
+
+
+def download_url(key, *, engine=None, **options):
+    from gigamind.services.storage import storage_service
+
+    with active_access(key, engine):
+        return storage_service.get_presigned_download_url(key=key, **options)
 
 
 def referenced(session, key):

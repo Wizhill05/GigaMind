@@ -980,3 +980,86 @@ def test_native_cleanup_and_attachment_races(postgres_engine, monkeypatch):
             select(MemoryItem).where(MemoryItem.parent_id.is_(None))
         ).all()
         assert [row.content for row in rows] == ["attachment wins"]
+
+
+def test_native_download_admission_is_ordered_against_forgetting(
+    postgres_engine, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from fastapi import HTTPException
+    from gigamind.security import Actor
+    from gigamind.services import file_lifecycle, jobs
+    from gigamind.services.storage import storage_service
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    migrations.migrate(postgres_engine)
+    actor = Actor("download-admin", set(), None, True)
+    admitted, release, delete_attempted = Event(), Event(), Event()
+    calls = []
+    original_lock = jobs.lock_resource
+
+    def sign(key, **options):
+        calls.append(key)
+        admitted.set()
+        assert release.wait(5), "download test did not release signer"
+        return "https://example.test/" + key
+
+    def observe_lock(session, key, now):
+        if admitted.is_set() and not release.is_set():
+            delete_attempted.set()
+        return original_lock(session, key, now)
+
+    monkeypatch.setattr(storage_service, "get_presigned_download_url", sign)
+    monkeypatch.setattr(jobs, "lock_resource", observe_lock)
+    with ThreadPoolExecutor(2) as pool:
+        download = pool.submit(
+            file_lifecycle.download_url, "url-first", engine=postgres_engine
+        )
+        assert admitted.wait(5)
+        deletion = pool.submit(
+            file_lifecycle.request_delete, actor, "url-first", postgres_engine
+        )
+        try:
+            assert delete_attempted.wait(5)
+        finally:
+            release.set()
+        assert download.result(timeout=10) == "https://example.test/url-first"
+        assert deletion.result(timeout=10).state == "queued"
+    with pytest.raises(HTTPException) as denied:
+        file_lifecycle.download_url("url-first", engine=postgres_engine)
+    assert denied.value.status_code == 409 and calls == ["url-first"]
+
+    deletion_locked, release_delete, download_attempted = Event(), Event(), Event()
+    original_referenced = file_lifecycle.referenced
+
+    def hold_reference_check(session, key):
+        if key == "delete-first":
+            deletion_locked.set()
+            assert release_delete.wait(5), "download test did not release deletion"
+        return original_referenced(session, key)
+
+    def observe_download(session, key, now):
+        if key == "delete-first" and deletion_locked.is_set():
+            download_attempted.set()
+        return original_lock(session, key, now)
+
+    monkeypatch.setattr(file_lifecycle, "referenced", hold_reference_check)
+    monkeypatch.setattr(jobs, "lock_resource", observe_download)
+    with ThreadPoolExecutor(2) as pool:
+        deletion = pool.submit(
+            file_lifecycle.request_delete, actor, "delete-first", postgres_engine
+        )
+        assert deletion_locked.wait(5)
+        download = pool.submit(
+            file_lifecycle.download_url, "delete-first", engine=postgres_engine
+        )
+        try:
+            assert download_attempted.wait(5)
+        finally:
+            release_delete.set()
+        assert deletion.result(timeout=10).state == "queued"
+        with pytest.raises(HTTPException) as denied:
+            download.result(timeout=10)
+        assert denied.value.status_code == 409
+    assert calls == ["url-first"]

@@ -5,6 +5,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from sqlmodel import Session, select, text
+from fastapi import HTTPException
+from gigamind.db.jobs import ResourceJobState
 from gigamind.db.database import engine, is_postgres, StorageFileItem, StorageChunkItem
 from gigamind.services.parser import extract_text_from_file
 from gigamind.services.chunking import chunk_text
@@ -337,9 +339,13 @@ def delete_all_storage_file_indexes() -> int:
 
 def list_indexed_storage_files(limit: int = 100) -> List[Dict[str, Any]]:
     """Returns list of indexed files with chunk counts, statuses, and presigned download links."""
+    from gigamind.services.file_lifecycle import download_url
+
     with Session(engine) as session:
+        deleted = select(ResourceJobState.key).where(ResourceJobState.deleted.is_(True))
         files = session.exec(
             select(StorageFileItem)
+            .where(StorageFileItem.key.not_in(deleted))
             .order_by(StorageFileItem.created_at.desc())
             .limit(limit)
         ).all()
@@ -347,9 +353,12 @@ def list_indexed_storage_files(limit: int = 100) -> List[Dict[str, Any]]:
         for f in files:
             url = None
             if storage_service.is_enabled():
-                url = storage_service.get_presigned_download_url(
-                    f.key, filename=f.filename
-                )
+                try:
+                    url = download_url(f.key, filename=f.filename, engine=engine)
+                except HTTPException as exc:
+                    if exc.status_code == 409:
+                        continue
+                    raise
 
             res.append(
                 {

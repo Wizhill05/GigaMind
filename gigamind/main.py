@@ -159,8 +159,8 @@ class ResetMemoriesRequest(BaseModel):
 
 class PresignedUrlRequest(BaseModel):
     key: str = Field(..., description="Cloudflare R2 storage key")
-    expires_in: int = Field(3600, description="Expiration time in seconds (default 3600)")
-    filename: Optional[str] = Field(None, description="Optional override filename for Content-Disposition")
+    expires_in: StrictInt = Field(3600, ge=1, le=3600, description="Expiration time in seconds, at most one hour")
+    filename: Optional[str] = Field(None, max_length=255, description="Optional override filename for Content-Disposition")
     inline: bool = Field(True, description="Inline display (True) or force attachment download (False)")
 
 class PresignedUploadUrlRequest(BaseModel):
@@ -693,6 +693,7 @@ def api_upload_file_base64(req: FileUploadBase64Request, background_tasks: Backg
 
     return {"success": True, "file": file_meta, "indexing": "queued"}
 
+
 @app.post("/api/v1/files/reindex", status_code=202, dependencies=[Depends(verify_auth)])
 def api_reindex_file(req: ReindexFileRequest):
     file_lifecycle.validate_key(req.key)
@@ -702,6 +703,7 @@ def api_reindex_file(req: ReindexFileRequest):
         raise HTTPException(409, str(exc)) from exc
     return {"key": req.key, "job_id": job.id, "state": job.state}
 
+
 @app.get("/api/v1/files/indexed", dependencies=[Depends(verify_auth)])
 def api_list_indexed_files(limit: int = Query(100, ge=1, le=100)):
     """Returns indexed files with chunk counts and vector status from Neon PostgreSQL."""
@@ -710,53 +712,88 @@ def api_list_indexed_files(limit: int = Query(100, ge=1, le=100)):
     files = [f for f in files if f["key"] not in deleted]
     return {"files": files, "count": len(files)}
 
+
 @app.get("/api/v1/files/chunks", dependencies=[Depends(verify_auth)])
 def api_get_file_chunks(key: str):
     """Returns all semantic vector chunks and page numbers for an indexed file key."""
-    file_lifecycle.require_active(key)
-    chunks = get_file_chunks(key)
+    with file_lifecycle.active_access(key):
+        chunks = get_file_chunks(key)
     return {"key": key, "chunks": chunks, "count": len(chunks)}
+
 
 @app.post("/api/v1/files/url", dependencies=[Depends(verify_auth)])
 def api_get_file_url(req: PresignedUrlRequest):
     """Generates a fresh time-limited presigned download URL."""
     file_lifecycle.require_active(req.key)
     if not storage_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Cloudflare R2 storage is not configured on this server.")
-    url = storage_service.get_presigned_download_url(
-        key=req.key,
-        expires_in=req.expires_in,
-        filename=req.filename,
-        inline=req.inline
+        raise HTTPException(
+            status_code=503,
+            detail="Cloudflare R2 storage is not configured on this server.",
+        )
+    url = file_lifecycle.download_url(
+        key=req.key, expires_in=req.expires_in, filename=req.filename, inline=req.inline
     )
     if not url:
-        raise HTTPException(status_code=404, detail=f"Could not generate download URL for key '{req.key}'")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not generate download URL for key '{req.key}'",
+        )
     return {"success": True, "key": req.key, "url": url, "expires_in": req.expires_in}
+
 
 @app.post("/api/v1/files/upload_url", dependencies=[Depends(verify_auth)])
 def api_get_file_upload_url(req: PresignedUploadUrlRequest):
-    raise HTTPException(410, "Direct upload URLs are unavailable until an upload completion protocol is supported. Use the file upload endpoint.")
+    raise HTTPException(
+        410,
+        "Direct upload URLs are unavailable until an upload completion protocol is supported. Use the file upload endpoint.",
+    )
+
 
 @app.get("/api/v1/files", dependencies=[Depends(verify_auth)])
-def api_list_files(prefix: str = Query("", max_length=1024), limit: int = Query(100, ge=1, le=100)):
+def api_list_files(
+    prefix: str = Query("", max_length=1024), limit: int = Query(100, ge=1, le=100)
+):
     """Lists files currently indexed in the Cloudflare R2 bucket."""
     if len(prefix.encode("utf-8")) > 1024:
         raise HTTPException(422, "Prefix must be at most 1024 UTF-8 bytes")
     if not storage_service.is_enabled():
-        return {"enabled": False, "files": [], "message": "Cloudflare R2 storage is not configured."}
+        return {
+            "enabled": False,
+            "files": [],
+            "message": "Cloudflare R2 storage is not configured.",
+        }
     files = storage_service.list_files(prefix=prefix, limit=limit)
     deleted = file_lifecycle.tombstoned_keys([f["key"] for f in files])
-    files = [f for f in files if f["key"] not in deleted]
-    return {"enabled": True, "files": files, "count": len(files)}
+    retained = []
+    for file in files:
+        if file["key"] in deleted:
+            continue
+        try:
+            file["url"] = file_lifecycle.download_url(
+                file["key"], filename=file.get("filename")
+            )
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                continue
+            raise
+        retained.append(file)
+    return {"enabled": True, "files": retained, "count": len(retained)}
+
 
 def delete_file_response(key: str, actor: Actor):
     job = file_lifecycle.request_delete(actor, key)
-    return {"key": key, "job_id": job.id, "state": job.state,
-            "cleanup": "completed" if job.state == "completed" else "pending"}
+    return {
+        "key": key,
+        "job_id": job.id,
+        "state": job.state,
+        "cleanup": "completed" if job.state == "completed" else "pending",
+    }
 
 
 @app.post("/api/v1/files/delete", status_code=202)
-def api_post_delete_file(req: DeleteFileRequest, actor: Actor = Depends(require_scope("admin"))):
+def api_post_delete_file(
+    req: DeleteFileRequest, actor: Actor = Depends(require_scope("admin"))
+):
     return delete_file_response(req.key, actor)
 
 

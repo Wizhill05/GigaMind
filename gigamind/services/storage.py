@@ -36,7 +36,6 @@ class StorageService:
         self.access_key_id = os.getenv("R2_ACCESS_KEY_ID", "").strip()
         self.secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
         self.bucket_name = os.getenv("R2_BUCKET_NAME", "gigamind-storage").strip()
-        self.public_domain = os.getenv("R2_PUBLIC_DOMAIN", "").strip().rstrip("/")
         
         endpoint_url = os.getenv("R2_ENDPOINT_URL", "").strip()
         if not endpoint_url and self.account_id:
@@ -189,9 +188,6 @@ class StorageService:
         if not self.is_enabled():
             return None
 
-        if self.public_domain:
-            return f"{self.public_domain}/{key}"
-
         try:
             params: Dict[str, Any] = {"Bucket": self.bucket_name, "Key": key}
             disposition_type = "inline" if inline else "attachment"
@@ -303,7 +299,7 @@ class StorageService:
                     "size_bytes": item.get("Size", 0),
                     "last_modified": item.get("LastModified", datetime.now(timezone.utc)).isoformat() if hasattr(item.get("LastModified"), "isoformat") else str(item.get("LastModified")),
                     "mime_type": mime_type or "application/octet-stream",
-                    "url": self.get_presigned_download_url(key, filename=filename)
+                    "url": None
                 })
             return results
         except (ClientError, BotoCoreError, Exception) as e:
