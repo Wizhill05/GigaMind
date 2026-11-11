@@ -8,18 +8,18 @@ const evidence = z.object({
   source_role: z.string().nullable().optional(),
 });
 const memory = z.object({
-  id: z.string(),
+  id: z.string().min(1),
   content: z.string(),
   project_id: z.string().nullable(),
   writer_id: z.string(),
-  revision: z.number(),
+  revision: z.number().int().positive().safe(),
   status: z.string(),
   kind: z.string().optional(),
   evidence: z.array(evidence).default([]),
 });
 const history = z.object({
   revisions: z.array(
-    z.object({ revision: z.number(), status: z.string(), snapshot: memory }),
+    z.object({ revision: z.number().int().positive().safe(), status: z.string(), snapshot: memory }),
   ),
 });
 export type Knowledge = z.infer<typeof memory>;
@@ -38,8 +38,10 @@ async function request<T>(
     },
   });
   const body: unknown = await response.json().catch(() => null);
-  if (!response.ok)
-    throw new ApiError(response.status, `Request failed (${response.status})`);
+  if (!response.ok) {
+    const detail = z.object({ detail: z.string() }).safeParse(body);
+    throw new ApiError(response.status, detail.success ? detail.data.detail : `Request failed (${response.status})`);
+  }
   return schema.parse(body);
 }
 export function listKnowledge(
@@ -58,7 +60,7 @@ export function listKnowledge(
   if (project) params.set("project_id", project);
   return request(
     `/knowledge?${params}`,
-    z.object({ memories: z.array(memory), total: z.number() }),
+    z.object({ memories: z.array(memory), total: z.number().int().nonnegative().safe() }),
     { signal },
   );
 }

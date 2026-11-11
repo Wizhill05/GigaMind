@@ -25,16 +25,27 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
   const busyRef = useRef(false);
   const [conflict, setConflict] = useState(false);
   const [version, setVersion] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [listFailed, setListFailed] = useState(false);
+  const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
+  const [historyVersion, setHistoryVersion] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     const key = getApiKey();
+    setLoading(true);
+    setListFailed(false);
     setError("");
     listKnowledge(q, project, status, offset, controller.signal)
       .then((result) => {
-        if (!controller.signal.aborted && getApiKey() === key) setData(result);
+        if (!controller.signal.aborted && getApiKey() === key) {
+          setData(result);
+          setSelected(current => current ? result.memories.find(m => m.id === current.id) ?? null : null);
+          setConflict(false);
+          setLoading(false);
+        }
       })
       .catch(() => {
-        if (!controller.signal.aborted) setError("Could not load knowledge.");
+        if (!controller.signal.aborted) { setError("Could not load knowledge."); setLoading(false); setListFailed(true); setData({ memories: [], total: 0 }); }
       });
     return () => controller.abort();
   }, [q, project, status, offset, refreshVersion, version]);
@@ -42,17 +53,23 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
     const controller = new AbortController();
     const key = getApiKey();
     setHistory([]);
+    setHistoryState("loading");
     if (selected)
       getKnowledgeHistory(selected.id, controller.signal)
         .then((result) => {
           if (!controller.signal.aborted && getApiKey() === key)
-            setHistory(result.revisions);
+            { setHistory(result.revisions); setHistoryState("ready"); }
         })
         .catch(() => {
-          if (!controller.signal.aborted) setError("Could not load history.");
+          if (!controller.signal.aborted) setHistoryState("error");
         });
     return () => controller.abort();
-  }, [selected]);
+  }, [selected, historyVersion]);
+  const clearScope = () => {
+    if (busyRef.current) return false;
+    setLoading(true); setData({ memories: [], total: 0 }); setSelected(null); setHistory([]); setConflict(false); setError("");
+    return true;
+  };
   async function mutate(action: () => Promise<unknown>) {
     if (busyRef.current || conflict) return;
     busyRef.current = true;
@@ -68,7 +85,7 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
       setError(
         stale
           ? "This record changed. Reload before trying again."
-          : "Action failed.",
+          : err instanceof Error ? err.message : "Action failed.",
       );
     } finally {
       busyRef.current = false;
@@ -76,8 +93,8 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
     }
   }
   const reload = () => {
-    setSelected(null);
-    setConflict(false);
+    if (busyRef.current) return;
+    setLoading(true);
     setVersion((v) => v + 1);
   };
   return (
@@ -93,7 +110,9 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
           <input
             className="bg-[#222] p-2"
             value={q}
+            disabled={busy}
             onChange={(e) => {
+              if (!clearScope()) return;
               setQ(e.target.value);
               setOffset(0);
             }}
@@ -105,7 +124,9 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
             className="bg-[#222] p-2"
             placeholder="Global scope"
             value={project}
+            disabled={busy}
             onChange={(e) => {
+              if (!clearScope()) return;
               setProject(e.target.value);
               setOffset(0);
             }}
@@ -116,7 +137,9 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
           <select
             className="bg-[#222] p-2"
             value={status}
+            disabled={busy}
             onChange={(e) => {
+              if (!clearScope()) return;
               setStatus(e.target.value);
               setOffset(0);
             }}
@@ -124,7 +147,6 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
             <option>accepted</option>
             <option>superseded</option>
             <option>deleted</option>
-            <option>expired</option>
           </select>
         </label>
       </div>
@@ -133,8 +155,8 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
           {error} <button onClick={reload}>Reload</button>
         </div>
       )}
-      <p>{data.total} records</p>
-      {data.memories.map((m) => (
+      {loading ? <p>Loading knowledge...</p> : <p>{data.total} records</p>}
+      {!loading && data.memories.map((m) => (
         <article key={m.id} className="border border-[#333] p-4 space-y-2">
           <p>{m.content}</p>
           <p className="text-xs text-gray-400">
@@ -147,33 +169,34 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
               {e.source_role ? ` (${e.source_role})` : ""}: {e.quote}
             </p>
           ))}
-          <button onClick={() => setSelected(m)} className="text-orange-400">
+          <button disabled={busy} onClick={() => { if (!busyRef.current) { setConflict(false); setError(""); setSelected(m); } }} className="text-orange-400">
             History and actions
           </button>
         </article>
       ))}
       <div className="flex gap-4">
         <button
-          disabled={offset === 0}
-          onClick={() => setOffset(Math.max(0, offset - 20))}
+          disabled={busy || loading || offset === 0}
+          onClick={() => { if (clearScope()) setOffset(Math.max(0, offset - 20)); }}
         >
           Previous
         </button>
         <span>Page {Math.floor(offset / 20) + 1}</span>
         <button
-          disabled={offset + 20 >= data.total}
-          onClick={() => setOffset(offset + 20)}
+          disabled={busy || loading || offset + 20 >= data.total}
+          onClick={() => { if (clearScope()) setOffset(offset + 20); }}
         >
           Next
         </button>
       </div>
-      {selected && (
+      {selected && !loading && !listFailed && (
         <div className="border border-[#555] p-4 space-y-3">
           <h2>History: {selected.content}</h2>
           {selected.status === "accepted" && (
             <button
               disabled={busy || conflict}
               onClick={() => {
+                if (busyRef.current || conflict) return;
                 if (
                   window.confirm(
                     `Delete this accepted record at revision ${selected.revision}?`,
@@ -187,6 +210,8 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
               Delete accepted record
             </button>
           )}
+          {historyState === "loading" && <p>Loading history...</p>}
+          {historyState === "error" && <p>Could not load history. <button disabled={busy} onClick={() => { if (!busyRef.current) setHistoryVersion(v => v + 1); }}>Retry history</button></p>}
           {history.map((r) => (
             <div key={r.revision} className="border-t border-[#333] pt-2">
               <p>
@@ -209,7 +234,7 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
               </button>
             </div>
           ))}
-          <button onClick={() => setSelected(null)}>Close</button>
+          <button disabled={busy} onClick={() => { if (!busyRef.current) setSelected(null); }}>Close</button>
         </div>
       )}
     </section>

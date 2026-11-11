@@ -121,3 +121,38 @@ test("ignores a late list response and restores using the current revision", asy
     ),
   );
 });
+
+test("locks navigation during a mutation and retains the action after a server error", async () => {
+  let finish: (response: Response) => void = () => {};
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.endsWith("/history")) return Promise.resolve(json({ revisions: [] }));
+    if (url.endsWith("/delete")) return new Promise(resolve => { finish = resolve; });
+    return Promise.resolve(json({ memories: [memory], total: 21 }));
+  });
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  render(<KnowledgeTab refreshVersion={0} />);
+  fireEvent.click(await screen.findByText("History and actions"));
+  fireEvent.click(screen.getByText("Delete accepted record"));
+  expect(screen.getByLabelText("Project")).toBeDisabled();
+  expect(screen.getByText("Next")).toBeDisabled();
+  expect(screen.getByText("History and actions")).toBeDisabled();
+  expect(screen.getByText("Close")).toBeDisabled();
+  fireEvent.click(screen.getByText("Delete accepted record"));
+  expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/delete"))).toHaveLength(1);
+  await act(async () => finish(json({ detail: "Try again later" }, 503)));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Try again later");
+  expect(screen.getByText("Delete accepted record")).toBeEnabled();
+});
+
+test("hides old results while the next scope loads", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    if (String(input).includes("project_id=")) return new Promise(() => {});
+    return Promise.resolve(json({ memories: [memory], total: 1 }));
+  });
+  render(<KnowledgeTab refreshVersion={0} />);
+  expect(await screen.findByText("History and actions")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Project"), { target: { value: "new" } });
+  expect(screen.queryByText("History and actions")).not.toBeInTheDocument();
+  expect(screen.getByText("Loading knowledge...")).toBeInTheDocument();
+});
