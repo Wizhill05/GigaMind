@@ -8,11 +8,12 @@ import { useToast } from '../ui/Toast';
 
 interface MemoriesTabProps {
   refreshVersion: number;
+  onMutation: () => void;
   onOpenNewModal: () => void;
   onOpenEditModal: (mem: Memory) => void;
 }
 
-export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpenEditModal, refreshVersion }) => {
+export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpenEditModal, refreshVersion, onMutation }) => {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -25,7 +26,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   const [sourceAgentFilter, setSourceAgentFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  useEffect(() => { const timer = setTimeout(() => setDebouncedSearch(searchFilter), 400); return () => clearTimeout(timer); }, [searchFilter]);
+  useEffect(() => { const timer = setTimeout(() => { setPage(1); setDebouncedSearch(searchFilter); }, 400); return () => clearTimeout(timer); }, [searchFilter]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [activeSubTab, setActiveSubTab] = useState<'memories' | 'files'>('memories');
@@ -63,8 +64,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
     setLoadError('');
     void fetchMemories(page, 10, categoryFilter || undefined, sourceAgentFilter || undefined, debouncedSearch || undefined, controller.signal).then(res => {
       if (controller.signal.aborted) return;
-      if (res) { setMemories(res.memories); setTotalPages(res.pages || 1); setTotalCount(res.total || 0); }
-      else toast('Could not load memories', 'error');
+      setMemories(res.memories); setSelectedIndex(-1); setTotalPages(res.pages || 1); setTotalCount(res.total || 0);
       setIsLoading(false);
     }).catch(error => {
       if (controller.signal.aborted) return;
@@ -79,7 +79,9 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
       const ok = await deleteMemory(id);
       if (ok) {
         toast(`Memory ${id} deleted successfully`, 'success');
-        setReload(value => value + 1);
+        if (page > 1 && memories.length === 1) setPage(value => value - 1);
+        else setReload(value => value + 1);
+        onMutation();
       }
       } catch (error) { toast(error instanceof Error ? error.message : 'Delete failed', 'error'); }
     }
@@ -97,7 +99,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   // Keyboard Arrow Navigation inside list
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (filteredMemories.length === 0) return;
+      if (activeSubTab !== 'memories' || filteredMemories.length === 0) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       if (e.key === 'ArrowDown') {
@@ -113,7 +115,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [filteredMemories, selectedIndex, onOpenEditModal]);
+  }, [filteredMemories, selectedIndex, onOpenEditModal, activeSubTab]);
 
   return (
     <div className="space-y-6 font-sans text-xs">
@@ -254,7 +256,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
             <input
               type="text"
               value={searchFilter}
-              onChange={(e) => { setSearchFilter(e.target.value); setPage(1); }}
+              onChange={(e) => { setSearchFilter(e.target.value); }}
               placeholder="Filter memory records... (Use ↑ ↓ arrow keys to navigate)"
               className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none font-sans transition-colors"
             />

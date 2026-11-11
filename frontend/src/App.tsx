@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { TabType } from './components/NavigationTabs';
@@ -25,6 +25,8 @@ export const AppContent: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [showAuthGate, setShowAuthGate] = useState<boolean>(false);
   const [authError, setAuthError] = useState('');
+  const [authPending, setAuthPending] = useState(false);
+  const statsRequest = useRef<AbortController | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
 
   // Modals & Palette state
@@ -38,28 +40,38 @@ export const AppContent: React.FC = () => {
   const { toast } = useToast();
 
   const loadStats = async () => {
+    statsRequest.current?.abort();
+    const controller = new AbortController();
+    statsRequest.current = controller;
     const key = getApiKey();
     if (!key) {
       setIsAuthenticated(false);
       setShowAuthGate(true);
+      setAuthPending(false);
       return;
     }
 
+    setAuthPending(true);
     try {
-      const data = await fetchStats();
+      const data = await fetchStats(controller.signal);
+      if (controller.signal.aborted || getApiKey() !== key) return;
       setStats(data);
       setIsAuthenticated(true);
       setShowAuthGate(false);
       setAuthError('');
     } catch (error) {
+      if (controller.signal.aborted || getApiKey() !== key) return;
       setIsAuthenticated(false);
       setShowAuthGate(true);
-      setAuthError(error instanceof ApiError && error.status === 401 ? 'Invalid master key.' : error instanceof Error ? error.message : 'Unable to connect.');
+      setAuthError(error instanceof ApiError && error.status === 401 ? 'Invalid master key.' : error instanceof ApiError && error.status === 403 ? 'Dashboard access requires an admin credential.' : error instanceof Error ? error.message : 'Unable to connect.');
+    } finally {
+      if (!controller.signal.aborted && getApiKey() === key) setAuthPending(false);
     }
   };
 
   useEffect(() => {
-    loadStats();
+    void loadStats();
+    return () => statsRequest.current?.abort();
   }, []);
 
   // Global Cmd+K / Ctrl+K keyboard shortcut listener
@@ -141,6 +153,7 @@ export const AppContent: React.FC = () => {
         <AuthGate
           onAuthenticate={loadStats}
           errorNotice={authError}
+          pending={authPending}
         />
       )}
 
@@ -177,6 +190,7 @@ export const AppContent: React.FC = () => {
             {activeTab === 'memories' && (
               <MemoriesTab
                 refreshVersion={refreshVersion}
+                onMutation={() => { setRefreshVersion(v => v + 1); void loadStats(); }}
                 onOpenNewModal={handleOpenNewMemoryModal}
                 onOpenEditModal={handleOpenEditMemoryModal}
               />

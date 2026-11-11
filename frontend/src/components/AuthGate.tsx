@@ -6,9 +6,10 @@ import { setApiKey } from '../api';
 interface AuthGateProps {
   onAuthenticate: () => void;
   errorNotice?: string;
+  pending: boolean;
 }
 
-export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice }) => {
+export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice, pending }) => {
   const [keyInput, setKeyInput] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -36,10 +37,11 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div>
-            <label className="block text-xs font-medium text-[#c1c5d0] mb-1.5">
+            <label htmlFor="master-key" className="block text-xs font-medium text-[#c1c5d0] mb-1.5">
               Master API Key
             </label>
             <input
+              id="master-key"
               type="password"
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
@@ -50,16 +52,17 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticate, errorNotice 
           </div>
 
           {errorNotice && (
-            <div className="bg-rose-500/10 border border-rose-500/30 p-3 text-xs text-rose-400 rounded-none text-center">
+            <div role="alert" className="bg-rose-500/10 border border-rose-500/30 p-3 text-xs text-rose-400 rounded-none text-center">
               {errorNotice}
             </div>
           )}
 
           <button
             type="submit"
+            disabled={pending}
             className="w-full bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-semibold py-3 rounded-none text-xs tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-[#ff6b00]/20 transition-all btn-press"
           >
-            <span>Authorize Connection</span>
+            <span>{pending ? 'Authorizing…' : 'Authorize Connection'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>

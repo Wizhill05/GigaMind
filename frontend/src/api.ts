@@ -38,8 +38,8 @@ async function checkedFetch(input: string, init: RequestInit): Promise<Response>
   return response;
 }
 
-export async function fetchStats(): Promise<Stats> {
-  return (await checkedFetch('/api/v1/stats', { headers: getHeaders() })).json();
+export async function fetchStats(signal?: AbortSignal): Promise<Stats> {
+  return (await checkedFetch('/api/v1/stats', { headers: getHeaders(), signal })).json();
 }
 
 export async function fetchMemories(
@@ -49,7 +49,7 @@ export async function fetchMemories(
   sourceAgent?: string,
   query?: string,
   signal?: AbortSignal
-): Promise<{ memories: Memory[]; total: number; page: number; pages: number } | null> {
+): Promise<{ memories: Memory[]; total: number; page: number; pages: number }> {
   const params = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (category) params.append('category', category);
   if (sourceAgent) params.append('source_agent', sourceAgent);
