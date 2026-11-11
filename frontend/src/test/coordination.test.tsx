@@ -26,6 +26,7 @@ afterEach(() => {
   localStorage.clear();
 });
 it("loads scoped pages and resolves using the current revision after a conflict", async () => {
+  localStorage.setItem("gigamind_master_key", "test-key");
   let revision = 1;
   const fetcher = vi
     .spyOn(globalThis, "fetch")
@@ -47,6 +48,9 @@ it("loads scoped pages and resolves using the current revision after a conflict"
   fireEvent.click(screen.getByText("Resolve"));
   expect(await screen.findByText(/Stale issue revision/)).toBeTruthy();
   expect(screen.getByText("Resolve").hasAttribute("disabled")).toBe(true);
+  fireEvent.click(screen.getByText("Select issue issue-1"));
+  expect(screen.getByText("Resolve").hasAttribute("disabled")).toBe(true);
+  expect(screen.getByText("Reload issue")).toBeTruthy();
   fireEvent.click(screen.getByText("Reload issue"));
   await screen.findByText(/Selected issue: issue-1 · Revision: 2/);
   fireEvent.click(screen.getByText("Dismiss"));
@@ -81,4 +85,17 @@ it("loads scoped pages and resolves using the current revision after a conflict"
       ),
     ).toBe(true),
   );
+});
+
+it("retries a failed load without sending an unauthenticated request", async () => {
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (String(input).includes("handoffs")) return json({ handoffs: [], total: 0 });
+    return json({ issues: [issue()], total: 1 });
+  });
+  render(<CoordinationTab refreshVersion={0} />);
+  await screen.findByText("API key is required");
+  expect(fetcher).not.toHaveBeenCalled();
+  localStorage.setItem("gigamind_master_key", "test-key");
+  fireEvent.click(screen.getByText("Retry"));
+  expect(await screen.findByText("Select issue issue-1")).toBeTruthy();
 });

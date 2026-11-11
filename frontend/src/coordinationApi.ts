@@ -29,6 +29,7 @@ async function request<T>(
   schema: z.ZodType<T>,
   init: RequestInit = {},
 ): Promise<T> {
+  if (!getApiKey()) throw new Error("API key is required");
   const response = await fetch(`/api/v1/review${path}`, {
     ...init,
     headers: {

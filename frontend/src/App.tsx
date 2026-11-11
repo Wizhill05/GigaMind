@@ -281,7 +281,7 @@ export const AppContent: React.FC = () => {
                   <ActivityTab refreshVersion={refreshVersion} />
                 )}
 
-                {activeTab === "coordination" && <CoordinationTab refreshVersion={refreshVersion} />}
+                {activeTab === "coordination" && <CoordinationTab refreshVersion={refreshVersion} mutation={mutation} />}
 
                 {activeTab === "review" && (
                   <ReviewTab

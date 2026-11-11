@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ApiError } from "../../api";
+import { ApiError, getApiKey } from "../../api";
+import { useConversationMutation, ConversationMutation } from "../../useConversationMutation";
 import {
   Handoff,
   Issue,
@@ -8,9 +9,12 @@ import {
   resolveIssue,
 } from "../../coordinationApi";
 
-export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
+export const CoordinationTab: React.FC<{ refreshVersion: number; mutation?: ConversationMutation }> = ({
   refreshVersion,
+  mutation: sharedMutation,
 }) => {
+  const localMutation = useConversationMutation();
+  const mutation = sharedMutation ?? localMutation;
   const [project, setProject] = useState("");
   const [offset, setOffset] = useState(0);
   const [reload, setReload] = useState(0);
@@ -25,17 +29,20 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
   const lock = useRef(false);
   const generation = useRef(0);
   const mounted = useRef(true);
+  const reloadController = useRef<AbortController | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       generation.current++;
+      reloadController.current?.abort();
     };
   }, []);
   useEffect(() => {
     if (lock.current) return;
     const controller = new AbortController();
     const current = ++generation.current;
+    const key = getApiKey();
     setLoading(true);
     setError("");
     setHandoffs([]);
@@ -49,11 +56,12 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
         if (
           controller.signal.aborted ||
           current !== generation.current ||
-          lock.current
+          lock.current || getApiKey() !== key
         )
           return;
         setHandoffs(h.handoffs);
         setIssues(i.issues);
+        setTarget((previous) => previous && !conflict ? i.issues.find((item) => item.id === previous.id) ?? null : previous);
         setTotals({ handoffs: h.total, issues: i.total });
         setLoading(false);
       })
@@ -61,7 +69,7 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
         if (
           controller.signal.aborted ||
           current !== generation.current ||
-          lock.current
+          lock.current || getApiKey() !== key
         )
           return;
         setError(
@@ -74,40 +82,41 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
     return () => controller.abort();
   }, [project, offset, reload, refreshVersion]);
   const changeScope = (value: string) => {
-    if (lock.current) return;
+    if (lock.current || mutation.locked.current) return;
+    generation.current++;
+    setLoading(true);
     setTarget(null);
     setConflict(false);
     setProject(value);
     setOffset(0);
   };
   const act = async (status: "resolved" | "dismissed") => {
-    if (
-      lock.current ||
-      !target ||
-      conflict ||
-      !window.confirm(
-        `${status === "resolved" ? "Resolve" : "Dismiss"} issue ${target.id}?`,
-      )
-    )
-      return;
+    if (lock.current || mutation.locked.current || loading || error || !target || conflict ||
+        !window.confirm(`${status === "resolved" ? "Resolve" : "Dismiss"} issue ${target.id}?`)) return;
     lock.current = true;
     generation.current++;
     setBusy(true);
-    setError("");
-    try {
+    const key = getApiKey();
+    void mutation.run(async (valid) => {
       await resolveIssue(target, status);
-      if (!mounted.current) return;
+      if (!valid() || !mounted.current) return;
       setTarget(null);
       setReload((v) => v + 1);
-    } catch (e) {
+    }, (e) => {
       if (!mounted.current) return;
       setLoading(false);
       setError(e instanceof Error ? e.message : "Resolution failed");
       if (e instanceof ApiError && e.status === 409) setConflict(true);
-    } finally {
+    }).finally(() => {
       lock.current = false;
-      if (mounted.current) setBusy(false);
-    }
+      if (mounted.current) {
+        setBusy(false);
+        if (getApiKey() !== key) {
+          setLoading(false);
+          setError("API key changed. Reload coordination records.");
+        }
+      }
+    });
   };
   const reloadConflict = () => {
     if (lock.current || !target) return;
@@ -115,9 +124,12 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
     setBusy(true);
     setError("");
     const controller = new AbortController();
+    reloadController.current = controller;
+    const currentGeneration = ++generation.current;
+    const key = getApiKey();
     listIssues(project, offset, controller.signal)
       .then((result) => {
-        if (!mounted.current) return;
+        if (!mounted.current || controller.signal.aborted || generation.current !== currentGeneration || getApiKey() !== key) return;
         setIssues(result.issues);
         setTotals((t) => ({ ...t, issues: result.total }));
         const current = result.issues.find((i) => i.id === target.id);
@@ -130,7 +142,7 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
           );
       })
       .catch((e: unknown) => {
-        if (mounted.current)
+        if (mounted.current && !controller.signal.aborted && generation.current === currentGeneration && getApiKey() === key)
           setError(e instanceof Error ? e.message : "Reload failed");
       })
       .finally(() => {
@@ -162,8 +174,8 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
       {error && (
         <div role="alert" className="text-red-400">
           {error}{" "}
-          {!conflict && !target && (
-            <button className={button} onClick={() => setReload((v) => v + 1)}>
+          {!conflict && (
+            <button className={button} onClick={() => { setError(""); setReload((v) => v + 1); }}>
               Retry
             </button>
           )}
@@ -221,9 +233,9 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
             </p>
             <button
               className={button}
-              disabled={busy || i.status !== "open"}
+              disabled={busy || loading || !!error || conflict || i.status !== "open"}
               onClick={() => {
-                if (!lock.current) {
+                if (!lock.current && !mutation.locked.current && !loading && !error && !conflict) {
                   setTarget(i);
                   setConflict(false);
                   setError("");
@@ -250,14 +262,14 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
           <div className="flex gap-2">
             <button
               className={button}
-              disabled={busy || conflict || target.status !== "open"}
+              disabled={busy || loading || !!error || conflict || target.status !== "open"}
               onClick={() => void act("resolved")}
             >
               Resolve
             </button>
             <button
               className={button}
-              disabled={busy || conflict || target.status !== "open"}
+              disabled={busy || loading || !!error || conflict || target.status !== "open"}
               onClick={() => void act("dismissed")}
             >
               Dismiss
@@ -279,6 +291,9 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
           className={button}
           disabled={busy || offset === 0}
           onClick={() => {
+            if (lock.current || mutation.locked.current) return;
+            generation.current++;
+            setLoading(true);
             setTarget(null);
             setConflict(false);
             setOffset(Math.max(0, offset - 20));
@@ -293,6 +308,9 @@ export const CoordinationTab: React.FC<{ refreshVersion: number }> = ({
             busy || offset + 20 >= Math.max(totals.handoffs, totals.issues)
           }
           onClick={() => {
+            if (lock.current || mutation.locked.current) return;
+            generation.current++;
+            setLoading(true);
             setTarget(null);
             setConflict(false);
             setOffset(offset + 20);
