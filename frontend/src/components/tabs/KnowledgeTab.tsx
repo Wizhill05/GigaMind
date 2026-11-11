@@ -5,11 +5,19 @@ import {
   getKnowledgeHistory,
   listKnowledge,
   restoreKnowledge,
+  setKnowledgeValidity,
   type History,
   type Knowledge,
 } from "../../knowledgeApi";
+import { useConversationMutation, type ConversationMutation } from "../../useConversationMutation";
 
-export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
+export function KnowledgeTab({ refreshVersion, mutation: sharedMutation }: { refreshVersion: number; mutation?: ConversationMutation }) {
+  const localMutation = useConversationMutation();
+  const mutation = sharedMutation ?? localMutation;
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const [validFrom, setValidFrom] = useState("");
+  const [validUntil, setValidUntil] = useState("");
   const [q, setQ] = useState("");
   const [project, setProject] = useState("");
   const [status, setStatus] = useState("accepted");
@@ -54,7 +62,7 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
         }
       })
       .catch(() => {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && getApiKey() === key) {
           setError("Could not load knowledge.");
           setLoading(false);
           setListFailed(true);
@@ -77,7 +85,7 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
           }
         })
         .catch(() => {
-          if (!controller.signal.aborted) setHistoryState("error");
+          if (!controller.signal.aborted && getApiKey() === key) setHistoryState("error");
         });
     return () => controller.abort();
   }, [selected, historyVersion]);
@@ -92,16 +100,18 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
     return true;
   };
   async function mutate(action: () => Promise<unknown>) {
-    if (busyRef.current || conflict || loading || listFailed) return;
+    if (busyRef.current || mutation.locked.current || conflict || loading || listFailed) return;
     listRequest.current?.abort();
     busyRef.current = true;
     setBusy(true);
-    try {
+    await mutation.run(async (valid) => { try {
       await action();
+      if (!valid() || !mounted.current) return;
       setSelected(null);
       setVersion((v) => v + 1);
       setError("");
     } catch (err) {
+      if (!valid() || !mounted.current) return;
       const stale = err instanceof ApiError && err.status === 409;
       setConflict(stale);
       setError(
@@ -113,8 +123,9 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
       );
     } finally {
       busyRef.current = false;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
+    }, () => {});
   }
   const reload = () => {
     if (busyRef.current) return;
@@ -128,6 +139,7 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
         Canonical records used by memory retrieval. Legacy source notes are
         listed under Memories.
       </p>
+      <p>Outside the validity window, records remain approved for audit but are excluded from agent context.</p>
       <div className="flex gap-2 flex-wrap">
         <label>
           Search{" "}
@@ -184,6 +196,7 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
         data.memories.map((m) => (
           <article key={m.id} className="border border-[#333] p-4 space-y-2">
             <p>{m.content}</p>
+            <p>Valid from: {m.valid_from ?? "Unbounded"} · Valid until: {m.valid_until ?? "Unbounded"}</p>
             <p className="text-xs text-gray-400">
               {m.kind ?? "record"} · {m.project_id ?? "Global scope"} ·{" "}
               {m.writer_id} · revision {m.revision} · {m.status}
@@ -201,6 +214,8 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
                   setConflict(false);
                   setError("");
                   setSelected(m);
+                  setValidFrom(m.valid_from ?? "");
+                  setValidUntil(m.valid_until ?? "");
                 }
               }}
               className="text-orange-400"
@@ -231,6 +246,18 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
       {selected && !loading && !listFailed && (
         <div className="border border-[#555] p-4 space-y-3">
           <h2>History: {selected.content}</h2>
+          <p>Current valid from: {selected.valid_from ?? "Unbounded"} · Current valid until: {selected.valid_until ?? "Unbounded"}</p>
+          {selected.status === "accepted" && <form onSubmit={(e) => {
+            e.preventDefault();
+            const aware = (value: string) => !value || /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(value);
+            if (!aware(validFrom) || !aware(validUntil)) { setError("Use ISO timestamps with a timezone, or leave blank for unbounded."); return; }
+            void mutate(() => setKnowledgeValidity(selected.id, selected.revision, validFrom || null, validUntil || null));
+          }} className="space-y-2">
+            <p>Use timezone-aware ISO timestamps. Blank means unbounded.</p>
+            <label>Valid from <input className="bg-[#222] p-2" value={validFrom} disabled={busy} onChange={(e) => setValidFrom(e.target.value)} /></label>{" "}
+            <label>Valid until <input className="bg-[#222] p-2" value={validUntil} disabled={busy} onChange={(e) => setValidUntil(e.target.value)} /></label>{" "}
+            <button disabled={busy || conflict}>Save validity</button>
+          </form>}
           {selected.status === "accepted" && (
             <button
               disabled={busy || conflict}
@@ -269,6 +296,7 @@ export function KnowledgeTab({ refreshVersion }: { refreshVersion: number }) {
                 Revision {r.revision} · {r.status}
               </p>
               <p>{r.snapshot.content}</p>
+              <p>Valid from: {r.snapshot.valid_from === undefined ? "Keeps current bound" : r.snapshot.valid_from ?? "Unbounded"} · Valid until: {r.snapshot.valid_until === undefined ? "Keeps current bound" : r.snapshot.valid_until ?? "Unbounded"}</p>
               <button
                 disabled={busy || conflict || r.revision === selected.revision}
                 onClick={() =>

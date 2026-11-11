@@ -15,6 +15,8 @@ const memory = z.object({
   revision: z.number().int().positive().safe(),
   status: z.string(),
   kind: z.string().optional(),
+  valid_from: z.string().nullable().optional(),
+  valid_until: z.string().nullable().optional(),
   evidence: z.array(evidence).default([]),
 });
 const history = z.object({
@@ -91,4 +93,9 @@ export const restoreKnowledge = (
   request(`/memories/${encodeURIComponent(id)}/restore`, z.object({ memory }), {
     method: "POST",
     body: JSON.stringify({ revision, expected_revision }),
+  });
+export const setKnowledgeValidity = (id: string, expected_revision: number, valid_from: string | null, valid_until: string | null) =>
+  request(`/memories/${encodeURIComponent(id)}/validity`, z.object({ memory }), {
+    method: "POST",
+    body: JSON.stringify({ expected_revision, valid_from, valid_until }),
   });

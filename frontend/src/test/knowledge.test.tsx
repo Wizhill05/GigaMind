@@ -26,11 +26,60 @@ const memory = {
 };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status });
+test("validity conflict reload preserves the precise draft and retries with current revision", async () => {
+  let revision = 2;
+  const precise = "2026-01-01T00:00:00.123456Z";
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/history")) return json({ revisions: [{ revision: 1, status: "accepted", snapshot: { ...memory, valid_until: null } }] });
+    if (init?.method === "POST") {
+      if (revision === 2) { revision = 3; return json({ detail: "stale" }, 409); }
+      return json({ memory: { ...memory, revision: 4 } });
+    }
+    return json({ memories: [{ ...memory, revision, valid_from: precise, valid_until: revision === 3 ? "2027-01-01T00:00:00Z" : null }], total: 1 });
+  });
+  render(<KnowledgeTab refreshVersion={0} />);
+  fireEvent.click(await screen.findByText("History and actions"));
+  expect(await screen.findByText(/Keeps current bound/)).toHaveTextContent("Unbounded");
+  fireEvent.click(screen.getByText("Save validity"));
+  await screen.findByRole("alert");
+  fireEvent.click(screen.getByText("Reload"));
+  await screen.findByText(/Current valid from:/);
+  expect(screen.getByLabelText("Valid from")).toHaveValue(precise);
+  expect(screen.getByLabelText("Valid until")).toHaveValue("");
+  fireEvent.click(screen.getByText("Save validity"));
+  await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2));
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
+    { expected_revision: 2, valid_from: precise, valid_until: null },
+    { expected_revision: 3, valid_from: precise, valid_until: null },
+  ]);
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   localStorage.clear();
   sessionStorage.clear();
+});
+test("rejects naive timestamps and retains drafts rejected by the server", async () => {
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (init?.method === "POST") return json({ detail: "Invalid validity interval" }, 422);
+    if (String(input).endsWith("/history")) return json({ revisions: [] });
+    return json({ memories: [memory], total: 1 });
+  });
+  render(<KnowledgeTab refreshVersion={0} />);
+  fireEvent.click(await screen.findByText("History and actions"));
+  const from = screen.getByLabelText("Valid from");
+  const until = screen.getByLabelText("Valid until");
+  fireEvent.change(from, { target: { value: "2026-01-01T00:00:00" } });
+  fireEvent.click(screen.getByText("Save validity"));
+  expect(screen.getByRole("alert")).toHaveTextContent("timezone");
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  fireEvent.change(from, { target: { value: "2027-01-01T00:00:00Z" } });
+  fireEvent.change(until, { target: { value: "2026-01-01T00:00:00Z" } });
+  fireEvent.click(screen.getByText("Save validity"));
+  expect(await screen.findByText(/Invalid validity interval/)).toBeInTheDocument();
+  expect(from).toHaveValue("2027-01-01T00:00:00Z");
+  expect(until).toHaveValue("2026-01-01T00:00:00Z");
 });
 test("filters, pages, displays evidence and recovers from a delete conflict", async () => {
   const fetcher = vi

@@ -293,7 +293,7 @@ export const AppContent: React.FC = () => {
                   />
                 )}
                 {activeTab === "knowledge" && (
-                  <KnowledgeTab refreshVersion={refreshVersion} />
+                  <KnowledgeTab refreshVersion={refreshVersion} mutation={mutation} />
                 )}
 
                 {activeTab === "files" && <FilesTab refreshVersion={refreshVersion} onMutation={() => { setRefreshVersion(v => v + 1); void loadStats(); }} />}
