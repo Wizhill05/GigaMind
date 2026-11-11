@@ -94,6 +94,7 @@ def test_transport(server):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     assert {t.name for t in (await session.list_tools()).tools} == {
+                        "get_identity",
                         "get_user_profile",
                         "search_memory",
                         "get_server_status",
@@ -135,6 +136,16 @@ def test_transport(server):
             ):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
+                    identity = (
+                        await session.call_tool("get_identity", {})
+                    ).structuredContent
+                    assert identity == {
+                        "id": created["client"]["id"],
+                        "scopes": ["memory:propose", "memory:read"],
+                        "project_ids": ["p"],
+                        "is_admin": False,
+                    }
+                    assert (await session.call_tool("get_identity", {"extra": 1})).isError
                     assert (await session.call_tool("get_server_status", {})).isError
                     proposal = await session.call_tool(
                         "propose_memory",
@@ -230,6 +241,13 @@ def test_concurrent_actor_isolation(server):
                                 {"query": "purple", "project_id": "other"},
                             )
                             assert bool(result.isError) == expected_error
+                            identity = (
+                                await session.call_tool("get_identity", {})
+                            ).structuredContent
+                            assert identity["is_admin"] is (not expected_error)
+                            if expected_error:
+                                assert identity["id"] == created["client"]["id"]
+                                assert identity["project_ids"] == ["p"]
 
         await asyncio.gather(
             call(admin, False),

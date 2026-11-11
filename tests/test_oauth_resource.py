@@ -280,6 +280,13 @@ def test_signed_token_through_sdk(issuer, tmp_path):
                         ) as (read, write, _):
                             async with ClientSession(read, write) as session:
                                 await session.initialize()
+                                identity = await session.call_tool("get_identity", {})
+                                assert identity.structuredContent == {
+                                    "id": created.json()["client"]["id"],
+                                    "scopes": ["memory:read"],
+                                    "project_ids": ["projectA"],
+                                    "is_admin": False,
+                                }
                                 found = await session.call_tool(
                                     "search_memory",
                                     {"query": "zircon", "project_id": "projectA"},

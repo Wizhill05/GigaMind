@@ -46,6 +46,25 @@ async def list_tools():
     )
     return [
         Tool(
+            name="get_identity",
+            description="Get the current actor's effective authorization.",
+            inputSchema=schema(),
+            outputSchema=schema(
+                {
+                    "id": {"type": "string"},
+                    "scopes": {"type": "array", "items": {"type": "string"}},
+                    "project_ids": {
+                        "anyOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "null"},
+                        ]
+                    },
+                    "is_admin": {"type": "boolean"},
+                },
+                ["id", "scopes", "project_ids", "is_admin"],
+            ),
+        ),
+        Tool(
             name="get_user_profile",
             description="Get profile rules (admin only).",
             inputSchema=schema(),
@@ -113,6 +132,15 @@ async def list_tools():
 @server.call_tool()
 async def call_tool(name, arguments):
     actor = actor_context.get()
+    if name == "get_identity":
+        return {
+            "id": actor.id,
+            "scopes": sorted(actor.scopes),
+            "project_ids": (
+                sorted(actor.project_ids) if actor.project_ids is not None else None
+            ),
+            "is_admin": actor.is_admin,
+        }
     if name in ("get_server_status", "get_user_profile"):
         if not actor.is_admin:
             raise ValueError("403: Administrator required")
