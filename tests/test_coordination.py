@@ -407,3 +407,59 @@ def test_http_coordination_pagination_bounds(server):
             for params in ({"limit": 0}, {"limit": 101}, {"offset": -1}):
                 response = http.get("/api/v1/review/" + path, params=params)
                 assert response.status_code == 422
+
+
+def test_sdk_coordination_denies_client_without_scopes(server):
+    import asyncio
+    import httpx
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    with httpx.Client(
+        base_url=server,
+        headers={"Authorization": "Bearer test-master-key"},
+        trust_env=False,
+    ) as http:
+        response = http.post(
+            "/api/v1/admin/clients",
+            json={"name": "no-scope", "scopes": [], "project_ids": ["a"]},
+        )
+        assert response.status_code == 200
+        token = response.json()["token"]
+
+    async def exercise():
+        async with httpx.AsyncClient(
+            headers={"Authorization": "Bearer " + token}, trust_env=False
+        ) as http:
+            async with streamable_http_client(server + "/mcp", http_client=http) as (
+                read,
+                write,
+                _,
+            ):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    requests = {
+                        "save_handoff": dict(
+                            task_name="task",
+                            summary="report",
+                            status="working",
+                            project_id="a",
+                            verified_outcomes=[],
+                            unresolved=[],
+                            next_actions=[],
+                            idempotency_key="denied",
+                        ),
+                        "report_memory_issue": dict(
+                            memory_id="hidden",
+                            reason="check",
+                            project_id="a",
+                            idempotency_key="denied",
+                        ),
+                        "get_context": dict(query="task", project_id="a"),
+                    }
+                    for name, arguments in requests.items():
+                        result = await session.call_tool(name, arguments)
+                        assert result.isError
+                        assert "403" in str(result.content)
+
+    asyncio.run(exercise())

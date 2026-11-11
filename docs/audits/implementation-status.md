@@ -28,17 +28,17 @@ Additional reviewed features:
 - Global-body limits and local CI verification are implemented. Reference-safe cleanup, delete/reindex routes, tombstone access fencing, credential lifecycle and review activity are reviewed and integrated.
 
 In review:
-- Scoped handoff/issue services, REST/MCP tools and context integration are integrated provisionally. Parent full-diff review and26 focused integrated checks pass; broader SDK/rollback/native coverage remains required.
+- Scoped immutable handoffs and memory issues, REST/MCP tools and context integration are reviewed and accepted. Scope/revocation, zero-scope SDK denial, rollback and native idempotency/migration checks pass; coordination UI remains unfinished.
 - Conversation list error/retry, cancellation and header refresh are implemented provisionally, with parent source-role/provenance corrections. Current frontend72 tests and production build pass. Mutation error/import retry work is provisionally integrated, but search/deletion refresh, navigation locks and missing HTTP scenarios still require completion.
 - Local SQLite backup/new-path restore is reviewed and accepted, including input digest/WAL checks, observed concurrent write, actual credential/upload services and trust-history recovery. Parent59 focused checks pass. PostgreSQL and object recovery remain unfinished.
 
 Still required:
 - Approved records are available through scoped context/MCP tools and a dedicated Knowledge console. They remain separate from legacy MemoryItem storage; richer retrieval and clear source presentation remain required.
-- Handoffs, issue reporting, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD. Approved-record deletion, read redaction and admin audit/restore are implemented with stale-supersession protection.
+- Handoff/issue console, temporal validity/expiry and complete authenticated provenance through legacy admin CRUD. Approved-record deletion, read redaction and admin audit/restore are implemented with stale-supersession protection.
 - External-provider interoperability acceptance. Decoded-file upload bounds and global encoded-body limits including MCP are implemented. Credential expiry/last-use/rotation and credential console are implemented. Supported JWT issuer configuration is documented; no hosted issuer was provisioned or tested.
 - Full corpus semantic/lexical retrieval, transcript segmentation including late turns, source-ledger integration and reliable no-match behavior.
 - Automatic import indexing jobs, live-provider multimodal/token acceptance and complete source state presentation. Upload indexing, file reindex/deletion, Jobs progress/retries and reference-safe shared-attachment GC are implemented.
 - Remaining UI API errors/cancellation/invalidation and component scenarios; handoff/retrieval inspector screens; review activity is implemented.
-- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:261 backend tests pass with21 optional native checks skipped; the21 native checks passed separately. The frontend suite has65 passing tests and a successful production build. The final Knowledge conflict guard additionally passes all8 focused Knowledge tests and a fresh build. Hosted CI has not been run.
+- Full backup/restore, forgetting tombstones/import ledger, labeled isolated demo fixtures/evaluation, deployment/docs and real multi-client acceptance/recovery checks. Offline CI is implemented and locally verified:277 backend tests pass with24 optional native checks skipped; all24 native checks passed separately. The frontend suite has65 passing tests and a successful production build. The final Knowledge conflict guard additionally passes all8 focused Knowledge tests and a fresh build. Hosted CI has not been run.
 
 Every agent change requires parent full-diff review and relevant local tests before acceptance. See implementation-review-log.md for findings and verification limits.

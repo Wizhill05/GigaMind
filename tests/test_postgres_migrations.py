@@ -1352,3 +1352,70 @@ def test_native_v3_coordination_upgrade_preserves_existing_data(
         assert session.get(Job, "job").resource_key == "file"
         assert session.get(UploadManifest, "file").job_id == "job"
         assert session.get(ClientCredential, "client").token_hash == "hash"
+
+
+@pytest.mark.parametrize("kind", ["handoff", "issue"])
+def test_native_coordination_idempotency_race(postgres_engine, monkeypatch, kind):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from fastapi import HTTPException
+    from sqlmodel import Session, select
+    from gigamind.db.trust_models import ActivityEvent
+    from gigamind.security import Actor
+    from gigamind.services import coordination, trust
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    migrations.migrate(postgres_engine)
+    monkeypatch.setattr(trust, "engine", postgres_engine)
+    admin = Actor("admin", set(), None, True)
+    writer = Actor("writer", {"memory:read", "memory:propose"}, {"a"})
+    if kind == "handoff":
+        save = coordination.save_handoff
+        payload = dict(
+            task_name="task",
+            summary="report",
+            status="working",
+            project_id="a",
+            verified_outcomes=[],
+            unresolved=[],
+            next_actions=[],
+            idempotency_key="race",
+        )
+        label, action, changed = "handoff", "handoff_saved", {"summary": "different"}
+    else:
+        proposal = trust.create_proposal(
+            admin, content="fact", project_id="a", evidence=[], idempotency_key="fact"
+        )["proposal"]
+        memory = trust.resolve_proposal(
+            admin, proposal["id"], action="approve", expected_revision=1
+        )["memory"]
+        save = coordination.report_memory_issue
+        payload = dict(
+            memory_id=memory["id"],
+            reason="check",
+            project_id="a",
+            idempotency_key="race",
+        )
+        label, action, changed = (
+            "issue",
+            "memory_issue_reported",
+            {"reason": "different"},
+        )
+    barrier = Barrier(4)
+
+    def write(_):
+        barrier.wait(timeout=10)
+        return save(writer, **payload)[label]
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(write, range(4)))
+    assert all(result == results[0] for result in results)
+    assert save(writer, **payload)[label] == results[0]
+    with pytest.raises(HTTPException) as mismatch:
+        save(writer, **dict(payload, **changed))
+    assert mismatch.value.status_code == 409
+    with Session(postgres_engine) as session:
+        events = session.exec(
+            select(ActivityEvent).where(ActivityEvent.action == action)
+        ).all()
+        assert len(events) == 1
