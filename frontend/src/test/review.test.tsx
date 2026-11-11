@@ -220,6 +220,7 @@ test("preview tracks edited conflicts in both directions and ignores late respon
   fireEvent.click(await screen.findByRole("checkbox"));
   const text = screen.getByLabelText("Approval text");
   fireEvent.change(text, { target: { value: "slow" } });
+  await waitFor(() => expect(release).toBeTypeOf("function"));
   fireEvent.change(text, { target: { value: "remove" } });
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled(),
@@ -337,4 +338,26 @@ test("pages through proposals", async () => {
   expect(
     fetcher.mock.calls.some(([url]) => String(url).includes("offset=20")),
   ).toBe(true);
+});
+
+test("approves a whitespace-padded draft using the server's normalized conflict preview", async () => {
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).includes("/preview")) {
+      const body = JSON.parse(String(init?.body));
+      return json({ proposal_id: "p1", revision: body.expected_revision,
+        content: body.content.trim(), conflicts: [] });
+    }
+    if (String(input).includes("/resolve"))
+      return json({ proposal: { ...proposal, status: "accepted" }, memory });
+    return json({ proposals: [proposal], total: 1 });
+  });
+  const mutated = vi.fn();
+  render(<ReviewTab refreshVersion={0} onMutation={mutated} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Original/ }));
+  fireEvent.change(screen.getByLabelText("Approval text"), { target: { value: "  Draft\n" } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
+  expect(screen.getByLabelText("Approval text")).toHaveValue("  Draft\n");
+  fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+  await waitFor(() => expect(mutated).toHaveBeenCalledOnce());
+  expect(fetcher.mock.calls.some(([url]) => String(url).includes("/resolve"))).toBe(true);
 });

@@ -71,28 +71,34 @@ export function ReviewTab({
     if (selected?.status === "proposed" && content.trim() && !stale) {
       setDetailError("");
       const key = JSON.stringify([selected.id, selected.revision, content]);
-      previewProposal(selected.id, content, selected.revision, c.signal)
-        .then((result) => {
-          if (
-            !c.signal.aborted &&
-            result.proposal_id === selected.id &&
-            result.revision === selected.revision &&
-            result.content === content
-          ) {
-            setConflicts(result.conflicts);
-            setPreviewKey(key);
-          } else if (!c.signal.aborted) {
-            setDetailError(
-              "Preview response did not match the current draft. Please retry.",
-            );
-          }
-        })
-        .catch((e) => {
-          if (!c.signal.aborted) {
-            setDetailError(message(e));
-            if (e instanceof ApiError && e.status === 409) setStale(true);
-          }
-        });
+      const timer = window.setTimeout(() => {
+        previewProposal(selected.id, content, selected.revision, c.signal)
+          .then((result) => {
+            if (
+              !c.signal.aborted &&
+              result.proposal_id === selected.id &&
+              result.revision === selected.revision &&
+              result.content === content.trim()
+            ) {
+              setConflicts(result.conflicts);
+              setPreviewKey(key);
+            } else if (!c.signal.aborted) {
+              setDetailError(
+                "Preview response did not match the current draft. Please retry.",
+              );
+            }
+          })
+          .catch((e) => {
+            if (!c.signal.aborted) {
+              setDetailError(message(e));
+              if (e instanceof ApiError && e.status === 409) setStale(true);
+            }
+          });
+      }, 200);
+      return () => {
+        window.clearTimeout(timer);
+        c.abort();
+      };
     }
     return () => c.abort();
   }, [selected, content, detailReload, stale]);
@@ -289,10 +295,10 @@ export function ReviewTab({
                       {c.content} ({c.id}, revision {c.revision}, {c.status})
                     </label>
                   ))}
-                  {!previewKey && !detailError && (
-                    <p>Loading conflicting records...</p>
-                  )}
                 </div>
+              )}
+              {!previewKey && !detailError && !stale && content.trim() && (
+                <p role="status">Checking conflicts...</p>
               )}
               {detailError && (
                 <p role="alert">
@@ -300,6 +306,7 @@ export function ReviewTab({
                   {!stale && (
                     <button
                       className={button}
+                      disabled={busy}
                       onClick={() => setDetailReload((v) => v + 1)}
                     >
                       Retry preview
@@ -364,6 +371,7 @@ export function ReviewTab({
               {historyError}{" "}
               <button
                 className={button}
+                disabled={busy}
                 onClick={() => setHistoryReload((v) => v + 1)}
               >
                 Reload current record
