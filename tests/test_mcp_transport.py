@@ -497,3 +497,21 @@ def test_authenticated_delete(server):
         history = client.get(path + "/history").json()["revisions"]
         assert [revision["status"] for revision in history] == ["accepted", "deleted"]
         assert client.get(path).json()["memory"]["content"] == memory["content"]
+
+
+def test_smoke_example(server):
+    created = httpx.post(
+        server + '/api/v1/admin/clients',
+        headers={'Authorization': 'Bearer test-master-key'},
+        trust_env=False,
+        json={'name': 'smoke', 'scopes': ['memory:read'], 'project_ids': ['p']},
+    ).json()
+    env = {'PATH': os.environ['PATH'], 'GIGAMIND_CLIENT_TOKEN': created['token']}
+    result = subprocess.run(
+        [sys.executable, 'examples/mcp_smoke.py', '--url', server + '/mcp',
+         '--project', 'p', '--query', 'absent'],
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'Accepted matches: 0' in result.stdout
+    assert created['token'] not in result.stdout + result.stderr
