@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check, Paperclip, ExternalLink, RefreshCw, FileText } from 'lucide-react';
 import { PixelDatabase } from '../ui/PixelIcons';
 import { Memory, StorageFile } from '../../types';
-import { fetchMemories, deleteMemory, fetchIndexedFiles, reindexStorageFile } from '../../api';
+import { getApiKey, fetchMemories, deleteMemory, fetchIndexedFiles, reindexStorageFile } from '../../api';
 import { AgentBadge, CategoryBadge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
 
@@ -40,29 +40,44 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
 
   const { toast } = useToast();
 
+  const [storageError, setStorageError] = useState('');
+  const storageRequest = useRef<AbortController | null>(null);
+  const storageAlive = useRef(true);
+  const indexing = useRef(new Set<string>());
+  useEffect(() => { storageAlive.current = true; return () => { storageAlive.current = false; storageRequest.current?.abort(); }; }, []);
   const loadStorageFiles = async () => {
-    setIsStorageLoading(true);
-    const res = await fetchIndexedFiles(100);
-    if (res && res.files) {
-      setStorageFiles(res.files);
+    storageRequest.current?.abort();
+    const controller = new AbortController(); storageRequest.current = controller;
+    const credential = getApiKey();
+    setIsStorageLoading(true); setStorageError('');
+    try {
+      const res = await fetchIndexedFiles(100, controller.signal);
+      if (!controller.signal.aborted && storageAlive.current && getApiKey() === credential) setStorageFiles(res.files);
+    } catch (error) {
+      if (!controller.signal.aborted && storageAlive.current && getApiKey() === credential) setStorageError(error instanceof Error ? error.message : 'Could not load files');
+    } finally {
+      if (!controller.signal.aborted && storageAlive.current && getApiKey() === credential) setIsStorageLoading(false);
     }
-    setIsStorageLoading(false);
   };
-
   const handleReindex = async (key: string) => {
-    setReindexingKey(key);
-    const ok = await reindexStorageFile(key);
-    if (ok) {
-      toast(`Re-indexing queued for ${key}`, 'success');
-      setTimeout(loadStorageFiles, 1500);
-    } else {
-      toast('Could not queue vector extraction', 'error');
+    if (indexing.current.has(key)) return;
+    indexing.current.add(key); setReindexingKey(key);
+    const credential = getApiKey();
+    try {
+      const result = await reindexStorageFile(key);
+      if (!storageAlive.current || getApiKey() !== credential) return;
+      toast(`Indexing queued for ${key} (job ${result.job_id}, ${result.state}). See Jobs.`, 'success');
+      void loadStorageFiles(); onMutation();
+    } catch (error) {
+      if (storageAlive.current && getApiKey() === credential) toast(error instanceof Error ? error.message : 'Could not queue vector extraction', 'error');
+    } finally {
+      indexing.current.delete(key);
+      if (storageAlive.current && getApiKey() === credential) setReindexingKey(null);
     }
-    setReindexingKey(null);
   };
 
   useEffect(() => {
-    if (activeSubTab !== 'memories') { void loadStorageFiles(); return; }
+    if (activeSubTab !== 'memories') { void loadStorageFiles(); return () => storageRequest.current?.abort(); }
     const controller = new AbortController();
     setIsLoading(true);
     setLoadError('');
@@ -186,7 +201,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
               <span>Cloudflare R2 Vectorized Files ({storageFiles.length})</span>
             </span>
             <button
-              onClick={loadStorageFiles}
+              onClick={() => void loadStorageFiles()}
               disabled={isStorageLoading}
               className="flex items-center gap-1.5 bg-[#141414] hover:bg-[#202020] border border-[#333333] text-[#c1c5d0] px-3 py-1 text-xs transition-colors disabled:opacity-50"
             >
@@ -197,6 +212,8 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
 
           {isStorageLoading ? (
             <div className="p-12 text-center text-[#8a8f9e]">Loading indexed documents...</div>
+          ) : storageError ? (
+            <div role="alert" className="p-4 text-red-400">{storageError} <button onClick={() => void loadStorageFiles()}>Retry</button></div>
           ) : storageFiles.length === 0 ? (
             <div className="p-12 text-center text-[#8a8f9e]">
               No files have been uploaded and vectorized yet. Upload PDFs or documents via the Memory modal or FastMCP tools.

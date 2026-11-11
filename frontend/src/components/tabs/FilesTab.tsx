@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   FileText,
   Upload,
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { StorageFile, StorageChunk, SearchResult } from '../../types';
 import {
+  getApiKey,
   fetchIndexedFiles,
   searchFiles,
   uploadFile,
@@ -29,7 +30,7 @@ import {
 } from '../../api';
 import { useToast } from '../ui/Toast';
 
-export const FilesTab: React.FC = () => {
+export const FilesTab: React.FC<{ onMutation?: () => void; refreshVersion?: number }> = ({ onMutation, refreshVersion }) => {
   const [files, setFiles] = useState<StorageFile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isUploading, setIsUploading] = useState<boolean>(false);
@@ -51,18 +52,34 @@ export const FilesTab: React.FC = () => {
 
   const { toast } = useToast();
 
+  const [listError, setListError] = useState('');
+  const [chunkError, setChunkError] = useState('');
+  const listRequest = useRef<AbortController | null>(null);
+  const chunkRequest = useRef<AbortController | null>(null);
+  const alive = useRef(false);
+  const mutations = useRef(new Set<string>());
   const loadFiles = async () => {
-    setIsLoading(true);
-    const res = await fetchIndexedFiles(100);
-    if (res && res.files) {
-      setFiles(res.files);
+    listRequest.current?.abort();
+    const controller = new AbortController();
+    listRequest.current = controller;
+    const key = getApiKey();
+    setIsLoading(true); setListError('');
+    try {
+      const res = await fetchIndexedFiles(100, controller.signal);
+      if (!controller.signal.aborted && alive.current && getApiKey() === key) setFiles(res.files);
+    } catch (error) {
+      if (!controller.signal.aborted && alive.current && getApiKey() === key) setListError(error instanceof Error ? error.message : 'Could not load files');
+    } finally {
+      if (!controller.signal.aborted && alive.current && getApiKey() === key) setIsLoading(false);
     }
-    setIsLoading(false);
   };
-
   useEffect(() => {
-    loadFiles();
-  }, []);
+    alive.current = true;
+    void loadFiles();
+    return () => { alive.current = false; listRequest.current?.abort(); };
+  }, [refreshVersion]);
+
+  useEffect(() => () => chunkRequest.current?.abort(), []);
 
   // Handle direct file search
   const handleSearch = async (e?: React.FormEvent) => {
@@ -114,52 +131,50 @@ export const FilesTab: React.FC = () => {
 
     if (successCount > 0) {
       toast(`Uploaded ${successCount} file(s). Vector indexing queued in background.`, 'success');
-      setTimeout(loadFiles, 1500);
+      void loadFiles();
+      onMutation?.();
     }
   };
 
-  // Handle file deletion
-  const handleDelete = async (file: StorageFile) => {
-    if (!window.confirm(`Delete ${file.filename} from Cloudflare R2 and remove all vector chunks?`)) {
-      return;
-    }
-    const ok = await deleteStorageFile(file.key);
-    if (ok) {
-      toast(`Deleted ${file.filename}`, 'success');
-      loadFiles();
-    } else {
-      toast(`Failed to delete ${file.filename}`, 'error');
-    }
-  };
-
-  // Handle manual re-indexing
-  const handleReindex = async (file: StorageFile) => {
+  const handleMutation = async (file: StorageFile, action: 'delete' | 'index') => {
+    if (mutations.current.has(file.key)) return;
+    if (action === 'delete' && !window.confirm(`Delete ${file.filename} and its vector chunks?`)) return;
+    mutations.current.add(file.key);
+    const credential = getApiKey();
     setReindexingKeys(prev => ({ ...prev, [file.key]: true }));
-    toast(`Re-indexing ${file.filename}...`, 'info');
-    const ok = await reindexStorageFile(file.key);
-    if (ok) {
-      toast(`Re-indexing queued for ${file.filename}`, 'success');
-      setTimeout(async () => {
-        await loadFiles();
-        setReindexingKeys(prev => ({ ...prev, [file.key]: false }));
-      }, 2500);
-    } else {
-      toast(`Could not trigger re-indexing for ${file.filename}`, 'error');
-      setReindexingKeys(prev => ({ ...prev, [file.key]: false }));
+    try {
+      if (action === 'delete') {
+        const result = await deleteStorageFile(file.key);
+        if (!alive.current || getApiKey() !== credential) return;
+        toast(`Cleanup ${result.cleanup} for ${file.filename} (job ${result.job_id}, ${result.state}). See Jobs.`, 'success');
+      } else {
+        const result = await reindexStorageFile(file.key);
+        if (!alive.current || getApiKey() !== credential) return;
+        toast(`Indexing queued for ${file.filename} (job ${result.job_id}, ${result.state}). See Jobs.`, 'success');
+      }
+      void loadFiles(); onMutation?.();
+    } catch (error) {
+      if (alive.current && getApiKey() === credential) toast(error instanceof Error ? error.message : 'File action failed', 'error');
+    } finally {
+      mutations.current.delete(file.key);
+      if (alive.current && getApiKey() === credential) setReindexingKeys(prev => ({ ...prev, [file.key]: false }));
     }
   };
-
-  // Open chunks inspection modal
+  const handleDelete = (file: StorageFile) => void handleMutation(file, 'delete');
+  const handleReindex = (file: StorageFile) => void handleMutation(file, 'index');
   const handleOpenChunksModal = async (file: StorageFile) => {
-    setSelectedFileForChunks(file);
-    setIsLoadingChunks(true);
-    const res = await fetchFileChunks(file.key);
-    if (res && res.chunks) {
-      setFileChunks(res.chunks);
-    } else {
-      setFileChunks([]);
+    chunkRequest.current?.abort();
+    const controller = new AbortController(); chunkRequest.current = controller;
+    const credential = getApiKey();
+    setSelectedFileForChunks(file); setFileChunks([]); setChunkError(''); setIsLoadingChunks(true);
+    try {
+      const res = await fetchFileChunks(file.key, controller.signal);
+      if (!controller.signal.aborted && alive.current && getApiKey() === credential) setFileChunks(res.chunks);
+    } catch (error) {
+      if (!controller.signal.aborted && alive.current && getApiKey() === credential) setChunkError(error instanceof Error ? error.message : 'Could not load chunks');
+    } finally {
+      if (!controller.signal.aborted && alive.current && getApiKey() === credential) setIsLoadingChunks(false);
     }
-    setIsLoadingChunks(false);
   };
 
   // Filtered files list
@@ -193,7 +208,7 @@ export const FilesTab: React.FC = () => {
 
         <div className="flex items-center gap-2.5">
           <button
-            onClick={loadFiles}
+            onClick={() => void loadFiles()}
             disabled={isLoading}
             className="px-3 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-white border border-[#333333] transition-colors flex items-center gap-1.5 font-mono text-[11px]"
           >
@@ -400,6 +415,8 @@ export const FilesTab: React.FC = () => {
             <RefreshCw className="w-6 h-6 animate-spin mx-auto text-[#ff6b00]" />
             <p>Loading files from Cloudflare R2 and Neon pgvector...</p>
           </div>
+        ) : listError ? (
+          <div role="alert" className="p-4 text-red-400">{listError} <button onClick={() => void loadFiles()}>Retry</button></div>
         ) : filteredFiles.length === 0 ? (
           <div className="p-12 text-center text-[#8a8f9e] space-y-3">
             <HardDrive className="w-8 h-8 mx-auto text-[#444444]" />
@@ -546,7 +563,7 @@ export const FilesTab: React.FC = () => {
                 </div>
               </div>
               <button
-                onClick={() => setSelectedFileForChunks(null)}
+                onClick={() => { chunkRequest.current?.abort(); setSelectedFileForChunks(null); }}
                 className="p-1 text-[#8a8f9e] hover:text-white hover:bg-[#222222] transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -560,6 +577,8 @@ export const FilesTab: React.FC = () => {
                   <RefreshCw className="w-5 h-5 animate-spin mx-auto text-[#ff6b00] mb-2" />
                   <span>Loading semantic chunks...</span>
                 </div>
+              ) : chunkError ? (
+                <div role="alert" className="p-4 text-red-400">{chunkError} <button onClick={() => void handleOpenChunksModal(selectedFileForChunks)}>Retry</button></div>
               ) : fileChunks.length === 0 ? (
                 <div className="p-8 text-center text-[#8a8f9e]">
                   No vector chunks found for this file. It may be a non-text binary or still undergoing indexing.
@@ -585,7 +604,7 @@ export const FilesTab: React.FC = () => {
             {/* MODAL FOOTER */}
             <div className="p-3 border-t border-[#262626] bg-[#111111] flex justify-end">
               <button
-                onClick={() => setSelectedFileForChunks(null)}
+                onClick={() => { chunkRequest.current?.abort(); setSelectedFileForChunks(null); }}
                 className="px-4 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-white border border-[#333333] transition-colors font-sans text-xs"
               >
                 Close

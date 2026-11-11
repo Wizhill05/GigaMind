@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Memory, MemoryAttachment, StorageFile, StorageChunk, ProfileRule, Conversation, SearchResult, Stats } from './types';
+import { Memory, MemoryAttachment, ProfileRule, Conversation, SearchResult, Stats } from './types';
 
 const API_KEY_KEY = 'gigamind_master_key';
 
@@ -354,65 +354,44 @@ export async function fetchFiles(prefix: string = '', limit: number = 100): Prom
   }
 }
 
-export async function deleteStorageFile(key: string): Promise<boolean> {
-  try {
-    const res = await fetch('/api/v1/files/delete', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ key }),
-    });
-    if (res.ok) return true;
+const fileSchema = z.object({
+  id: z.string(), key: z.string(), filename: z.string(),
+  mime_type: z.string().nullish().transform(v => v ?? undefined),
+  size_bytes: z.number(), source_agent: z.string().nullish().transform(v => v ?? undefined),
+  extracted_text_length: z.number(), total_chunks: z.number(), indexing_status: z.string(),
+  url: z.string().nullish().transform(v => v ?? undefined), created_at: z.string(),
+  updated_at: z.string().nullish().transform(v => v ?? undefined),
+});
+const chunkSchema = z.object({
+  id: z.string(), file_key: z.string(), chunk_index: z.number(), total_chunks: z.number(),
+  page_number: z.number().nullish().transform(v => v ?? undefined),
+  is_visual_anchor: z.boolean().nullish().transform(v => v ?? undefined),
+  content: z.string(), created_at: z.string(),
+});
+const jobSchema = z.object({ key: z.string(), job_id: z.string(), state: z.string() });
 
-    // Fallback to path parameter DELETE endpoint
-    const fallbackRes = await fetch(`/api/v1/files/${encodeURIComponent(key)}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
-    });
-    return fallbackRes.ok;
-  } catch (err) {
-    console.error('deleteStorageFile error:', err);
-    return false;
-  }
+export async function deleteStorageFile(key: string) {
+  const res = await checkedFetch('/api/v1/files/delete', {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ key }),
+  });
+  return jobSchema.extend({ cleanup: z.enum(['pending', 'completed']) }).parse(await res.json());
 }
 
-export async function fetchIndexedFiles(limit: number = 100): Promise<{ files: StorageFile[]; count: number } | null> {
-  try {
-    const res = await fetch(`/api/v1/files/indexed?limit=${limit}`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error('fetchIndexedFiles error:', err);
-    return null;
-  }
+export async function fetchIndexedFiles(limit = 100, signal?: AbortSignal) {
+  const res = await checkedFetch(`/api/v1/files/indexed?limit=${limit}`, { headers: getHeaders(), signal });
+  return z.object({ files: z.array(fileSchema), count: z.number() }).parse(await res.json());
 }
 
-export async function reindexStorageFile(key: string): Promise<boolean> {
-  try {
-    const res = await fetch('/api/v1/files/reindex', {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ key }),
-    });
-    return res.ok;
-  } catch (err) {
-    console.error('reindexStorageFile error:', err);
-    return false;
-  }
+export async function reindexStorageFile(key: string) {
+  const res = await checkedFetch('/api/v1/files/reindex', {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ key }),
+  });
+  return jobSchema.parse(await res.json());
 }
 
-export async function fetchFileChunks(key: string): Promise<{ key: string; chunks: StorageChunk[]; count: number } | null> {
-  try {
-    const res = await fetch(`/api/v1/files/chunks?key=${encodeURIComponent(key)}`, {
-      headers: getHeaders(),
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error('fetchFileChunks error:', err);
-    return null;
-  }
+export async function fetchFileChunks(key: string, signal?: AbortSignal) {
+  const res = await checkedFetch(`/api/v1/files/chunks?key=${encodeURIComponent(key)}`, { headers: getHeaders(), signal });
+  return z.object({ key: z.string(), chunks: z.array(chunkSchema), count: z.number() }).parse(await res.json());
 }
 
 export async function importConversationsFile(file: File, platform?: string) {
