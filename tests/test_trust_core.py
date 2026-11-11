@@ -2,7 +2,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import create_engine
-from gigamind.db.trust_models import initialize_trust_tables
+from gigamind.db.migrations import migrate
 from gigamind.security import Actor, get_actor
 from gigamind.services import trust
 from gigamind.routers.review import router
@@ -14,7 +14,7 @@ def setup(tmp_path, monkeypatch):
     engine = create_engine(
         f"sqlite:///{tmp_path}/test.db", connect_args={"check_same_thread": False}
     )
-    initialize_trust_tables(engine)
+    migrate(engine)
     monkeypatch.setattr(trust, "engine", engine)
     admin = Actor("human", set(), None, True)
     agent = Actor("agent", {"memory:read", "memory:propose", "memory:approve"}, {"a"})
