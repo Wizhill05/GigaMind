@@ -184,43 +184,23 @@ export async function fetchConversations(
   return conversationListSchema.parse(await res.json());
 }
 
-export async function deleteConversation(id: string): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/v1/conversations/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
-    });
-    return res.ok;
-  } catch (err) {
-    console.error('deleteConversation error:', err);
-    return false;
-  }
+const conversationMutationSchema = z.object({ success: z.literal(true), id: z.string(), message: z.string() });
+const backfillSchema = z.object({ success: z.literal(true), message: z.string() });
+const importSchema = z.object({ success: z.literal(true), ingested: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(), pending_indexing: z.number().int().nonnegative(), total_processed: z.number().int().nonnegative(), message: z.string() });
+
+export async function deleteConversation(id: string) {
+  const res = await checkedFetch(`/api/v1/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: getHeaders() });
+  return conversationMutationSchema.parse(await res.json());
 }
 
-export async function vectorizeConversation(id: string): Promise<boolean> {
-  try {
-    const res = await fetch(`/api/v1/conversations/${encodeURIComponent(id)}/vectorize`, {
-      method: 'POST',
-      headers: getHeaders(),
-    });
-    return res.ok;
-  } catch (err) {
-    console.error('vectorizeConversation error:', err);
-    return false;
-  }
+export async function vectorizeConversation(id: string) {
+  const res = await checkedFetch(`/api/v1/conversations/${encodeURIComponent(id)}/vectorize`, { method: 'POST', headers: getHeaders() });
+  return conversationMutationSchema.parse(await res.json());
 }
 
-export async function backfillConversationVectors(): Promise<boolean> {
-  try {
-    const res = await fetch('/api/v1/conversations/backfill_vectors', {
-      method: 'POST',
-      headers: getHeaders(),
-    });
-    return res.ok;
-  } catch (err) {
-    console.error('backfillConversationVectors error:', err);
-    return false;
-  }
+export async function backfillConversationVectors() {
+  const res = await checkedFetch('/api/v1/conversations/backfill_vectors', { method: 'POST', headers: getHeaders() });
+  return backfillSchema.parse(await res.json());
 }
 
 export async function searchConversations(
@@ -446,22 +426,10 @@ export async function fetchFileChunks(key: string): Promise<{ key: string; chunk
   }
 }
 
-export async function importConversationsFile(file: File, platform?: string): Promise<{ success: boolean; ingested: number; skipped: number; message: string } | null> {
-  try {
-    const formData = new FormData();
-    formData.append('file', file);
-    const url = platform ? `/api/v1/conversations/import_file?platform=${encodeURIComponent(platform)}` : '/api/v1/conversations/import_file';
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${getApiKey()}`,
-      },
-      body: formData,
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (err) {
-    console.error('importConversationsFile error:', err);
-    return null;
-  }
+export async function importConversationsFile(file: File, platform?: string) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const url = platform ? `/api/v1/conversations/import_file?platform=${encodeURIComponent(platform)}` : '/api/v1/conversations/import_file';
+  const res = await checkedFetch(url, { method: 'POST', headers: { Authorization: `Bearer ${getApiKey()}` }, body: formData });
+  return importSchema.parse(await res.json());
 }

@@ -124,30 +124,22 @@ export const AppContent: React.FC = () => {
     void loadStats();
   };
 
-  // Transcript drawer handlers
-  const handleDeleteTranscript = async (id: string) => {
-    if (!window.confirm("Permanently delete conversation transcript from database?")) return;
-    const ok = await deleteConversation(id);
-    if (ok) {
-      toast("Deleted conversation transcript", "success");
-      setActiveTranscript(null);
-      loadStats();
-    } else {
-      toast("Failed to delete conversation transcript", "error");
-    }
+  const transcriptBusyRef = useRef(false);
+  const [transcriptBusy, setTranscriptBusy] = useState(false);
+  const conversationChanged = () => { setRefreshVersion(v => v + 1); void loadStats(); };
+  const runTranscriptMutation = async (action: () => Promise<void>) => {
+    if (transcriptBusyRef.current) return;
+    transcriptBusyRef.current = true; setTranscriptBusy(true);
+    try { await action(); }
+    catch (error) { toast(error instanceof Error ? error.message : 'Request failed', 'error'); }
+    finally { transcriptBusyRef.current = false; setTranscriptBusy(false); }
   };
-
-  const handleVectorizeTranscript = async (id: string) => {
-    toast("Vectorizing transcript with Gemini Embedding 2...", "info");
-    const ok = await vectorizeConversation(id);
-    if (ok) {
-      toast("Transcript vectorized successfully", "success");
-      if (activeTranscript && activeTranscript.id === id) {
-        setActiveTranscript({ ...activeTranscript, is_vectorized: true });
-      }
-    } else {
-      toast("Failed to vectorize transcript", "error");
-    }
+  const handleDeleteTranscript = (id: string) => {
+    if (transcriptBusyRef.current || !window.confirm('Permanently delete conversation transcript from database?')) return;
+    void runTranscriptMutation(async () => { await deleteConversation(id); toast('Deleted conversation transcript', 'success'); setActiveTranscript(null); conversationChanged(); });
+  };
+  const handleVectorizeTranscript = (id: string) => {
+    void runTranscriptMutation(async () => { await vectorizeConversation(id); toast('Vectorization request completed', 'success'); conversationChanged(); });
   };
 
   return (
@@ -212,7 +204,7 @@ export const AppContent: React.FC = () => {
             )}
 
             {activeTab === 'transcripts' && (
-              <ConversationsTab refreshVersion={refreshVersion} onOpenTranscript={(conv) => setActiveTranscript(conv)} />
+              <ConversationsTab onMutation={conversationChanged} refreshVersion={refreshVersion} onOpenTranscript={(conv) => setActiveTranscript(conv)} />
             )}
 
             {activeTab === 'vector-lab' && <VectorSearchLabTab />}
@@ -241,6 +233,7 @@ export const AppContent: React.FC = () => {
       />
 
       <TranscriptDrawer
+        busy={transcriptBusy}
         conversation={activeTranscript}
         onClose={() => setActiveTranscript(null)}
         onDelete={handleDeleteTranscript}

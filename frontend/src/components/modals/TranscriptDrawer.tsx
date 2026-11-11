@@ -5,12 +5,13 @@ import { AgentBadge } from '../ui/Badge';
 
 interface TranscriptDrawerProps {
   conversation: Conversation | null;
+  busy?: boolean;
   onClose: () => void;
   onDelete?: (id: string) => void;
   onVectorize?: (id: string) => void;
 }
 
-export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation, onClose, onDelete, onVectorize }) => {
+export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation, onClose, onDelete, onVectorize, busy = false }) => {
   const [copied, setCopied] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
 
@@ -23,9 +24,10 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [conversation, isExiting]);
+  }, [conversation, isExiting, busy]);
 
   const handleAnimatedClose = () => {
+    if (busy) return;
     setIsExiting(true);
     setTimeout(() => {
       setIsExiting(false);
@@ -76,6 +78,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
           <div className="flex items-center gap-2">
             {onVectorize && (
               <button
+                disabled={busy}
                 onClick={() => onVectorize(conversation.id)}
                 className={`p-2 border rounded-none transition-colors btn-press flex items-center gap-1 text-[11px] font-mono ${
                   conversation.is_vectorized
@@ -91,6 +94,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({ conversation
 
             {onDelete && (
               <button
+                disabled={busy}
                 onClick={() => onDelete(conversation.id)}
                 className="p-2 bg-[#161616] border border-[#333333] hover:border-rose-500/40 text-rose-400 hover:text-rose-300 rounded-none transition-colors btn-press"
                 title="Delete Transcript from Database"

@@ -35,9 +35,10 @@ import { useToast } from '../ui/Toast';
 interface ConversationsTabProps {
   onOpenTranscript: (conv: Conversation) => void;
   refreshVersion?: number;
+  onMutation?: () => void;
 }
 
-export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTranscript, refreshVersion = 0 }) => {
+export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTranscript, refreshVersion = 0, onMutation = () => {} }) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -55,6 +56,9 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
   const [showImportCard, setShowImportCard] = useState(false);
   const [importPlatform, setImportPlatform] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
@@ -99,75 +103,54 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
     setIsSearching(false);
   };
 
-  // Handle file upload import
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const runMutation = async (action: () => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try { await action(); }
+    catch (error) { toast(error instanceof Error ? error.message : 'Request failed', 'error'); }
+    finally { busyRef.current = false; setBusy(false); }
+  };
 
+  const submitImport = async (selected: File) => runMutation(async () => {
     setIsImporting(true);
-    setImportStatus(`Uploading and parsing ${file.name}...`);
-    toast(`Uploading ${file.name}...`, 'info');
-
-    const res = await importConversationsFile(file, importPlatform || undefined);
-    setIsImporting(false);
+    setImportStatus(`Uploading ${selected.name}...`);
+    try {
+      const result = await importConversationsFile(selected, importPlatform || undefined);
+      setImportStatus(`Imported ${result.ingested}; skipped ${result.skipped}; ${result.pending_indexing} pending indexing.`);
+      toast(result.message, 'success');
+      setFile(null);
+      onMutation();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Import failed';
+      setImportStatus(`Error: ${message}`);
+      toast(message, 'error');
+    } finally { setIsImporting(false); }
+  });
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    if (!selected || busyRef.current) return;
+    setFile(selected);
     e.target.value = '';
-
-    if (res && res.success) {
-      toast(res.message, 'success');
-      setImportStatus(res.message);
-      loadConversations();
-      setTimeout(() => {
-        setShowImportCard(false);
-        setImportStatus(null);
-      }, 3000);
-    } else {
-      toast(`Failed to import ${file.name}. Check format.`, 'error');
-      setImportStatus(`Error: Failed to import ${file.name}.`);
-    }
+    void submitImport(selected);
   };
-
-  // Handle single conversation deletion
-  const handleDeleteConversation = async (id: string, title?: string) => {
-    if (!window.confirm(`Permanently delete conversation transcript "${title || id}" from database?`)) {
-      return;
-    }
-    const ok = await deleteConversation(id);
-    if (ok) {
-      toast(`Deleted conversation transcript`, 'success');
-      loadConversations();
-    } else {
-      toast(`Failed to delete conversation transcript`, 'error');
-    }
+  const handleDeleteConversation = (id: string, title?: string) => {
+    if (busyRef.current || !window.confirm(`Permanently delete conversation transcript "${title || id}" from database?`)) return;
+    void runMutation(async () => { await deleteConversation(id); toast('Deleted conversation transcript', 'success'); onMutation(); });
   };
-
-  // Handle single conversation vectorization
-  const handleVectorizeSingle = async (id: string) => {
-    toast('Vectorizing transcript with Gemini Embedding 2...', 'info');
-    const ok = await vectorizeConversation(id);
-    if (ok) {
-      toast('Transcript vectorized successfully', 'success');
-      loadConversations();
-    } else {
-      toast('Failed to vectorize transcript', 'error');
-    }
+  const handleVectorizeSingle = (id: string) => {
+    void runMutation(async () => { await vectorizeConversation(id); toast('Vectorization request completed', 'success'); onMutation(); });
   };
-
-  // Handle bulk backfill vectorization
-  const handleBackfillAll = async () => {
-    setIsBackfilling(true);
-    toast('Starting background vector backfill with Gemini Embedding 2...', 'info');
-    const ok = await backfillConversationVectors();
-    if (ok) {
-      toast('Bulk vectorization queued in background', 'success');
-      setTimeout(loadConversations, 3000);
-    } else {
-      toast('Failed to trigger bulk vectorization', 'error');
-    }
-    setIsBackfilling(false);
+  const handleBackfillAll = () => {
+    void runMutation(async () => {
+      setIsBackfilling(true);
+      try { const result = await backfillConversationVectors(); toast(result.message, 'success'); onMutation(); }
+      finally { setIsBackfilling(false); }
+    });
   };
 
   return (
-    <div className="space-y-6 font-sans text-xs">
+    <fieldset disabled={busy} className="space-y-6 font-sans text-xs">
       {/* HEADER & TOP CONTROLS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#141414] border border-[#262626] p-5 rounded-none">
         <div>
@@ -200,7 +183,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
 
           <button
             onClick={handleBackfillAll}
-            disabled={isBackfilling}
+            disabled={busy}
             className="px-3 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#22c55e] hover:text-white border border-[#333333] transition-colors flex items-center gap-1.5 font-mono text-[11px]"
             title="Compute Gemini Embedding 2 vectors for all unindexed transcripts"
           >
@@ -209,6 +192,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
           </button>
 
           <button
+            disabled={busy}
             onClick={() => setShowImportCard(!showImportCard)}
             className="px-3.5 py-1.5 bg-[#ff6b00] hover:bg-[#e05e00] text-white font-medium border border-[#ff6b00] transition-colors flex items-center gap-1.5 font-sans text-xs shadow-sm shadow-[#ff6b00]/20"
           >
@@ -229,6 +213,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
               </h3>
             </div>
             <button
+              disabled={busy}
               onClick={() => setShowImportCard(false)}
               className="text-[#8a8f9e] hover:text-white"
             >
@@ -237,7 +222,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <select value={importPlatform} onChange={e => setImportPlatform(e.target.value)} aria-label="Import format" className="bg-[#161616] text-white p-2">
+            <select disabled={busy} value={importPlatform} onChange={e => setImportPlatform(e.target.value)} aria-label="Import format" className="bg-[#161616] text-white p-2">
               <option value="">Auto-Detect Format (Claude/GPT)</option>
               <option value="claude">Claude Export</option>
               <option value="chatgpt">ChatGPT Export</option>
@@ -263,12 +248,13 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
                   accept=".json"
                   className="hidden"
                   onChange={handleFileUpload}
-                  disabled={isImporting}
+                  disabled={busy}
                 />
               </label>
             </div>
           </div>
 
+          {file && !isImporting && <button disabled={busy} onClick={() => void submitImport(file)} className="text-[#ff6b00] underline">Retry {file.name}</button>}
           {importStatus && (
             <div className={`p-3 border font-mono text-[11px] flex items-center gap-2 ${
               importStatus.startsWith('Error')
@@ -392,7 +378,7 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
             {(searchResults !== null ? searchResults : conversations).map((conv) => (
               <div
                 key={conv.id}
-                onClick={() => onOpenTranscript(conv)}
+                onClick={() => { if (!busyRef.current) onOpenTranscript(conv); }}
                 className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:bg-[#1c1c1c] cursor-pointer transition-colors group"
               >
                 <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -498,6 +484,6 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({ onOpenTransc
           </div>
         )}
       </div>
-    </div>
+    </fieldset>
   );
 };
