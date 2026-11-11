@@ -76,6 +76,18 @@ class StorageService:
     def is_enabled(self) -> bool:
         return self.enabled and self.s3_client is not None
 
+    def create_immutable_object(self, key: str, data: bytes, mime_type: str) -> None:
+        """Create an object only if its key is absent; propagate uncertain failures."""
+        if not self.is_enabled():
+            raise RuntimeError("Storage is not configured")
+        self.s3_client.put_object(
+            Bucket=self.bucket_name,
+            Key=key,
+            Body=data,
+            ContentType=mime_type,
+            IfNoneMatch="*",
+        )
+
     def generate_storage_key(self, filename: str, prefix: str = "files") -> str:
         """Generate isolated hierarchical storage key: prefix/YYYY/MM/{uuid}_{filename}"""
         now = datetime.now(timezone.utc)
