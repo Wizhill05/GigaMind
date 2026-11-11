@@ -3,8 +3,14 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, StrictInt, ConfigDict
 from gigamind.security import Actor, get_actor
 from gigamind.services import trust, context
+from gigamind.services import knowledge_list
 
 router = APIRouter(prefix="/api/v1/review", tags=["review"])
+
+
+@router.get("/knowledge")
+def knowledge(q: Optional[str] = None, project_id: Optional[str] = None, status: str = "accepted", limit: int = 20, offset: int = 0, actor: Actor = Depends(get_actor)):
+    return knowledge_list.list_knowledge(actor, q, project_id, status, limit, offset)
 
 from gigamind.services.trust_schema import (
     Proposal,

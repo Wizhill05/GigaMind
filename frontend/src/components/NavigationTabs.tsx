@@ -11,6 +11,7 @@ import {
 
 export type TabType =
   | "jobs"
+  | "knowledge"
   | "clients"
   | "activity"
   | "review"
