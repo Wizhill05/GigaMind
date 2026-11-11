@@ -57,7 +57,15 @@ def test_coordination_persistence_scope_and_budget(tmp_path, monkeypatch):
     )
     assert trust.get_memory(agent, memory["id"])["memory"] == memory
     assert context.get_context(agent, "accepted", "a", 64)["handoff"] is None
+    coordination.save_handoff(
+        admin,
+        **dict(
+            payload, project_id="b", summary="outside scope", idempotency_key="outside"
+        ),
+    )
     result = context.get_context(agent, "accepted", "a", 10000)
+    assert memory["content"] in str(result["memories"])
+    assert "outside scope" not in json.dumps(result)
     assert result["handoff"]["id"] == first["id"]
     assert len(json.dumps(result, ensure_ascii=True).encode()) <= 10000
     with pytest.raises(HTTPException):
@@ -181,3 +189,221 @@ def test_concurrent_idempotency_and_issue_scope(tmp_path, monkeypatch):
             project_id="a",
             idempotency_key="i",
         )
+
+
+def test_issue_idempotency_resolution_and_rollback(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from sqlmodel import Session, select
+    from gigamind.db.trust_models import ActivityEvent
+    from gigamind.db.coordination import MemoryIssue
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path}/issues.db", connect_args={"timeout": 10}
+    )
+    migrate(engine)
+    monkeypatch.setattr(trust, "engine", engine)
+    admin = Actor("admin", set(), None, True)
+    agent = Actor("writer", {"memory:read", "memory:propose"}, {"a"})
+    proposal = trust.create_proposal(
+        admin,
+        content="unchanged fact",
+        project_id="a",
+        evidence=[],
+        idempotency_key="p",
+    )["proposal"]
+    memory = trust.resolve_proposal(
+        admin, proposal["id"], action="approve", expected_revision=1
+    )["memory"]
+    payload = dict(
+        memory_id=memory["id"], project_id="a", reason="wrong", idempotency_key="issue"
+    )
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(
+            pool.map(
+                lambda _: coordination.report_memory_issue(agent, **payload), range(4)
+            )
+        )
+    issue = results[0]["issue"]
+    assert all(result["issue"] == issue for result in results)
+    with pytest.raises(HTTPException) as mismatch:
+        coordination.report_memory_issue(agent, **dict(payload, reason="different"))
+    assert mismatch.value.status_code == 409
+    for invalid in (
+        dict(payload, reason=" "),
+        dict(payload, reason=3),
+        dict(payload, writer_id="forged"),
+    ):
+        with pytest.raises(HTTPException) as error:
+            coordination.report_memory_issue(agent, **invalid)
+        assert error.value.status_code == 422
+    assert (
+        coordination.list_issues(Actor("other", {"memory:read"}, {"a"}), "a")["total"]
+        == 0
+    )
+    with Session(engine) as session:
+        before = len(session.exec(select(ActivityEvent)).all())
+    original = trust.event
+
+    def fail(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("event failure")
+
+    monkeypatch.setattr(trust, "event", fail)
+    with pytest.raises(RuntimeError, match="event failure"):
+        coordination.resolve_issue(
+            admin, issue["id"], status="resolved", expected_revision=1
+        )
+    with Session(engine) as session:
+        row = session.get(MemoryIssue, issue["id"])
+        assert (row.status, row.revision) == ("open", 1)
+        assert len(session.exec(select(ActivityEvent)).all()) == before
+    monkeypatch.setattr(trust, "event", original)
+
+    def resolve(_):
+        try:
+            return coordination.resolve_issue(
+                admin, issue["id"], status="resolved", expected_revision=1
+            )
+        except HTTPException as exc:
+            return exc.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(resolve, range(2)))
+    assert sum(isinstance(value, dict) for value in outcomes) == 1
+    assert 409 in outcomes
+    assert trust.get_memory(agent, memory["id"])["memory"] == memory
+
+
+def test_coordination_read_bounds(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path}/bounds.db")
+    migrate(engine)
+    monkeypatch.setattr(trust, "engine", engine)
+    reader = Actor("reader", {"memory:read"}, {"a"})
+    for listing in (coordination.list_handoffs, coordination.list_issues):
+        for project in (None, "b"):
+            with pytest.raises(HTTPException) as denied:
+                listing(reader, project)
+            assert denied.value.status_code == 403
+        for limit, offset in ((0, 0), (101, 0), (1, -1)):
+            with pytest.raises(HTTPException) as invalid:
+                listing(reader, "a", limit, offset)
+            assert invalid.value.status_code == 422
+        with pytest.raises(HTTPException) as denied:
+            listing(Actor("no-scope", set(), {"a"}), "a")
+        assert denied.value.status_code == 403
+
+
+def test_scoped_sdk_coordination_and_revocation(server):
+    import asyncio
+    import httpx
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    admin = {"Authorization": "Bearer test-master-key"}
+    with httpx.Client(base_url=server, headers=admin, trust_env=False) as http:
+        client = http.post(
+            "/api/v1/admin/clients",
+            json={
+                "name": "coord-sdk",
+                "scopes": ["memory:read", "memory:propose"],
+                "project_ids": ["sdk-a"],
+            },
+        ).json()
+        proposal = http.post(
+            "/api/v1/review/proposals",
+            json={
+                "content": "sdk accepted preference",
+                "project_id": "sdk-a",
+                "evidence": [],
+                "idempotency_key": "sdk-coord-proposal",
+            },
+        ).json()["proposal"]
+        memory = http.post(
+            f"/api/v1/review/proposals/{proposal['id']}/resolve",
+            json={"action": "approve", "expected_revision": 1},
+        ).json()["memory"]
+
+        async def exercise():
+            headers = {"Authorization": "Bearer " + client["token"]}
+            async with httpx.AsyncClient(headers=headers, trust_env=False) as transport:
+                async with streamable_http_client(
+                    server + "/mcp", http_client=transport
+                ) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        handoff = dict(
+                            task_name="sdk task",
+                            summary="sdk handoff",
+                            status="working",
+                            project_id="sdk-a",
+                            verified_outcomes=[],
+                            unresolved=[],
+                            next_actions=[],
+                            idempotency_key="sdk-handoff",
+                        )
+                        result = await session.call_tool("save_handoff", handoff)
+                        assert not result.isError
+                        issue = await session.call_tool(
+                            "report_memory_issue",
+                            {
+                                "memory_id": memory["id"],
+                                "reason": "check",
+                                "project_id": "sdk-a",
+                                "idempotency_key": "sdk-issue",
+                            },
+                        )
+                        assert (
+                            not issue.isError
+                            and issue.structuredContent["issue"]["memory_id"]
+                            == memory["id"]
+                        )
+                        context_result = await session.call_tool(
+                            "get_context",
+                            {
+                                "query": "sdk accepted preference",
+                                "project_id": "sdk-a",
+                                "token_budget": 10000,
+                            },
+                        )
+                        assert not context_result.isError
+                        assert (
+                            context_result.structuredContent["handoff"]["id"]
+                            == result.structuredContent["handoff"]["id"]
+                        )
+                        assert memory["content"] in str(
+                            context_result.structuredContent["memories"]
+                        )
+                        for changes in (
+                            {"project_id": "sdk-b"},
+                            {"project_id": None},
+                            {"writer_id": "forged"},
+                        ):
+                            assert (
+                                await session.call_tool(
+                                    "save_handoff", dict(handoff, **changes)
+                                )
+                            ).isError
+                        assert (
+                            http.post(
+                                "/api/v1/admin/clients/"
+                                + client["client"]["id"]
+                                + "/revoke"
+                            ).status_code
+                            == 200
+                        )
+                        await session.call_tool("save_handoff", handoff)
+
+        with pytest.raises(ExceptionGroup) as revoked:
+            asyncio.run(exercise())
+        assert "401 Unauthorized" in str(revoked.value.exceptions[0])
+
+
+def test_http_coordination_pagination_bounds(server):
+    import httpx
+
+    headers = {"Authorization": "Bearer test-master-key"}
+    with httpx.Client(base_url=server, headers=headers, trust_env=False) as http:
+        for path in ("handoffs", "issues"):
+            for params in ({"limit": 0}, {"limit": 101}, {"offset": -1}):
+                response = http.get("/api/v1/review/" + path, params=params)
+                assert response.status_code == 422

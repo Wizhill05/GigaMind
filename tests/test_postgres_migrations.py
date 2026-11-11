@@ -358,8 +358,10 @@ def test_native_file_publication_rolls_back_and_clears_vectors(
     )
     with postgres_engine.begin() as connection:
         connection.execute(
-            text("""CREATE FUNCTION deny_vector_publication() RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN RAISE EXCEPTION 'injected native vector failure'; RETURN NEW; END; $$""")
+            text(
+                """CREATE FUNCTION deny_vector_publication() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'injected native vector failure'; RETURN NEW; END; $$"""
+            )
         )
         connection.execute(
             text(
@@ -1284,3 +1286,69 @@ def test_native_delete_cannot_be_reclassified_by_stale_approval(
         )
         == 1
     )
+
+
+def test_native_v3_coordination_upgrade_preserves_existing_data(
+    postgres_engine, monkeypatch
+):
+    from sqlalchemy import inspect
+    from sqlmodel import Session
+    from gigamind.db.coordination import Handoff, MemoryIssue
+    from gigamind.db.jobs import Job, UploadManifest
+    from gigamind.db.trust_models import MemoryProposal
+    from gigamind.security import ClientCredential
+
+    monkeypatch.setenv("EMBEDDING_DIM", "3")
+    migrations.migrate(postgres_engine)
+    with Session(postgres_engine) as session:
+        session.add(
+            MemoryProposal(
+                id="proposal",
+                writer_id="writer",
+                idempotency_key="key",
+                payload_json="{}",
+                project_id="p",
+                created_at="old",
+                updated_at="old",
+            )
+        )
+        session.add(
+            Job(
+                id="job",
+                kind="upload",
+                resource_key="file",
+                payload_json="{}",
+                state="queued",
+                available_at="old",
+                created_at="old",
+                updated_at="old",
+            )
+        )
+        session.add(
+            UploadManifest(key="file", job_id="job", sha256="a" * 64, size_bytes=3)
+        )
+        session.add(
+            ClientCredential(
+                id="client",
+                name="client",
+                token_hash="hash",
+                scopes_json='["memory:read"]',
+                project_ids_json='["p"]',
+            )
+        )
+        session.commit()
+    with postgres_engine.begin() as connection:
+        Handoff.__table__.drop(connection)
+        MemoryIssue.__table__.drop(connection)
+        connection.execute(text("DELETE FROM schema_migrations"))
+        connection.execute(text("INSERT INTO schema_migrations (version) VALUES (3)"))
+    migrations.migrate(postgres_engine)
+    assert migrations.schema_ready(postgres_engine)
+    assert {"coordination_handoffs", "coordination_issues"} <= set(
+        inspect(postgres_engine).get_table_names()
+    )
+    with Session(postgres_engine) as session:
+        assert session.get(MemoryProposal, "proposal").project_id == "p"
+        assert session.get(Job, "job").resource_key == "file"
+        assert session.get(UploadManifest, "file").job_id == "job"
+        assert session.get(ClientCredential, "client").token_hash == "hash"

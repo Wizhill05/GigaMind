@@ -21,14 +21,10 @@ def serialize(row):
     return result
 
 
-def project_access(actor, project):
-    trust.access(actor, project)
-
-
 def _save(actor, model, values, label):
     key = values.pop("idempotency_key")
     project = values["project_id"]
-    project_access(actor, project)
+    trust.access(actor, project)
     payload = json.dumps(values, sort_keys=True, separators=(",", ":"))
 
     def existing(session):
@@ -103,7 +99,7 @@ def report_memory_issue(actor, **kwargs):
 
 def _list(actor, model, project_id, limit, offset):
     trust.scope(actor, "memory:read")
-    project_access(actor, project_id)
+    trust.access(actor, project_id)
     trust.pagination(limit, offset)
     with Session(trust.engine) as session:
         query = select(model).where(model.project_id == project_id)
