@@ -107,3 +107,59 @@ it("keeps failed deletion visible and retries only once while pending", async ()
     String(fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[0]),
   ).toContain("get_profile");
 });
+
+it("rejects an old credential response and retries with the new key", async () => {
+  let resolveOld: (response: Response) => void = () => {};
+  const fetchMock = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveOld = resolve;
+        }),
+    )
+    .mockResolvedValueOnce(json({ profile: [rule] }));
+  vi.stubGlobal("fetch", fetchMock);
+  const { setApiKey } = await import("../api");
+  setApiKey("old");
+  render(<ProfileRulesTab refreshVersion={0} onOpenNewRuleModal={() => {}} />);
+  setApiKey("new");
+  resolveOld(json({ profile: [rule] }));
+  expect(await screen.findByText(/Credentials changed/)).toBeTruthy();
+  expect(screen.queryByText("editor")).toBeNull();
+  fireEvent.click(screen.getByText("Retry"));
+  expect(await screen.findByText("editor")).toBeTruthy();
+});
+
+it("ignores a deletion completed after credentials change", async () => {
+  let resolveDelete: (response: Response) => void = () => {};
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(json({ profile: [rule] }))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveDelete = resolve;
+          }),
+      ),
+  );
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const { setApiKey } = await import("../api");
+  setApiKey("old");
+  const onMutation = vi.fn();
+  render(
+    <ProfileRulesTab
+      refreshVersion={0}
+      onOpenNewRuleModal={() => {}}
+      onMutation={onMutation}
+    />,
+  );
+  fireEvent.click(await screen.findByText("Delete"));
+  setApiKey("new");
+  resolveDelete(json({ success: true, id: "a/b", message: "deleted" }));
+  expect(await screen.findByText(/Credentials changed/)).toBeTruthy();
+  await waitFor(() => expect(screen.getByText("Add Rule").closest("button")?.disabled).toBe(false));
+  expect(onMutation).not.toHaveBeenCalled();
+});

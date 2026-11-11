@@ -300,6 +300,7 @@ export const AppContent: React.FC = () => {
 
                 {activeTab === "rules" && (
                   <ProfileRulesTab
+                    mutation={mutation}
                     onMutation={() => { void loadStats(); }}
                     refreshVersion={refreshVersion}
                     onOpenNewRuleModal={() => setIsRuleModalOpen(true)}

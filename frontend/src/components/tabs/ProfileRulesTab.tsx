@@ -5,9 +5,14 @@ import { ProfileRule } from "../../types";
 import { fetchProfileRules, deleteProfileRule, getApiKey } from "../../api";
 import { AgentBadge, CategoryBadge } from "../ui/Badge";
 import { useToast } from "../ui/Toast";
+import {
+  useConversationMutation,
+  type ConversationMutation,
+} from "../../useConversationMutation";
 
 interface ProfileRulesTabProps {
   refreshVersion: number;
+  mutation?: ConversationMutation;
   onMutation?: () => void;
   onOpenNewRuleModal: () => void;
 }
@@ -16,6 +21,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
   onOpenNewRuleModal,
   refreshVersion,
   onMutation,
+  mutation: sharedMutation,
 }) => {
   const [rules, setRules] = useState<ProfileRule[]>([]);
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -26,9 +32,17 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleteError, setDeleteError] = useState("");
-  const [pending, setPending] = useState(false);
+  const localMutation = useConversationMutation();
+  const mutation = sharedMutation ?? localMutation;
+  const pending = mutation.busy;
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [version, setVersion] = useState(0);
-  const deleting = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -50,34 +64,48 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
           );
       })
       .finally(() => {
-        if (!controller.signal.aborted && getApiKey() === key)
+        if (!controller.signal.aborted) {
+          if (getApiKey() !== key) {
+            setRules([]);
+            setError("Credentials changed. Retry to load profile rules.");
+          }
           setLoading(false);
+        }
       });
     return () => controller.abort();
   }, [categoryFilter, sourceAgentFilter, refreshVersion, version]);
 
   const handleDelete = async (id: string) => {
     if (
-      deleting.current ||
+      mutation.locked.current ||
       !window.confirm(`Confirm deletion of profile rule: ${id}?`)
     )
       return;
-    deleting.current = true;
-    setPending(true);
     setDeleteError("");
-    try {
-      await deleteProfileRule(id);
-      toast("Profile rule deleted", "success");
-      setVersion((v) => v + 1);
-      onMutation?.();
-    } catch (err: unknown) {
-      setDeleteError(
-        err instanceof Error ? err.message : "Failed to delete profile rule",
-      );
-    } finally {
-      deleting.current = false;
-      setPending(false);
-    }
+    await mutation.run(
+      async (valid) => {
+        try {
+          await deleteProfileRule(id);
+        } finally {
+          if (mounted.current && !valid()) {
+            setRules([]);
+            setError("Credentials changed. Retry to load profile rules.");
+          }
+        }
+        if (!mounted.current || !valid()) return;
+        toast("Profile rule deleted", "success");
+        setVersion((v) => v + 1);
+        onMutation?.();
+      },
+      (err: unknown) => {
+        if (mounted.current)
+          setDeleteError(
+            err instanceof Error
+              ? err.message
+              : "Failed to delete profile rule",
+          );
+      },
+    );
   };
 
   const filteredRules = rules.filter((rule) => {
@@ -105,7 +133,9 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
 
         <button
           disabled={pending}
-          onClick={onOpenNewRuleModal}
+          onClick={() => {
+            if (!mutation.locked.current) onOpenNewRuleModal();
+          }}
           className="bg-gradient-to-r from-[#ff6b00] to-[#f59e0b] hover:opacity-90 text-white font-medium px-4 py-2 rounded-none flex items-center gap-2 transition-all shadow-sm btn-press"
         >
           <Plus className="w-4 h-4" />
@@ -123,7 +153,9 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
               type="text"
               disabled={pending}
               value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
+              onChange={(e) => {
+                if (!mutation.locked.current) setSearchFilter(e.target.value);
+              }}
               placeholder="Search rule keys or values..."
               className="w-full bg-[#0f0f0f] border border-[#262626] focus:border-[#ff6b00] pl-9 pr-3 py-1.5 text-xs text-white placeholder-[#8a8f9e] outline-none rounded-none font-sans"
             />
@@ -135,7 +167,10 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
               <select
                 disabled={pending}
                 value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
+                onChange={(e) => {
+                  if (!mutation.locked.current)
+                    setCategoryFilter(e.target.value);
+                }}
                 className="bg-transparent text-white outline-none cursor-pointer"
               >
                 <option value="" className="bg-[#0f0f0f]">
@@ -157,7 +192,10 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
               <select
                 disabled={pending}
                 value={sourceAgentFilter}
-                onChange={(e) => setSourceAgentFilter(e.target.value)}
+                onChange={(e) => {
+                  if (!mutation.locked.current)
+                    setSourceAgentFilter(e.target.value);
+                }}
                 className="bg-transparent text-white outline-none cursor-pointer"
               >
                 <option value="" className="bg-[#0f0f0f]">
@@ -194,7 +232,9 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
           <div role="alert" className="p-4 text-rose-400">
             {error}{" "}
             <button
-              onClick={() => setVersion((v) => v + 1)}
+              onClick={() => {
+                if (!mutation.locked.current) setVersion((v) => v + 1);
+              }}
               className="underline"
             >
               Retry
