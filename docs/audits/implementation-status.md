@@ -29,7 +29,7 @@ Additional reviewed features:
 
 In review:
 - Scoped immutable handoffs and memory issues, REST/MCP tools and context integration are reviewed and accepted. Scope/revocation, zero-scope SDK denial, rollback and native idempotency/migration checks pass; coordination UI remains unfinished.
-- Conversation list error/retry, cancellation and header refresh are implemented provisionally, with parent source-role/provenance corrections. Current frontend72 tests and production build pass. Mutation error/import retry work is provisionally integrated, but search/deletion refresh, navigation locks and missing HTTP scenarios still require completion.
+- Conversation list error/retry, cancellation and header refresh are implemented provisionally, with parent source-role/provenance corrections. Search/list behavior is now reviewed and accepted with79 frontend tests and a successful production build, including stale response, credential-change retry, evidence, filtered deletion and last-page checks. Mutation error/import retry work is integrated, but shared App/tab/drawer locking and remaining mutation HTTP scenarios still require completion.
 - Local SQLite backup/new-path restore is reviewed and accepted, including input digest/WAL checks, observed concurrent write, actual credential/upload services and trust-history recovery. Parent59 focused checks pass. PostgreSQL and object recovery remain unfinished.
 
 Still required:
