@@ -109,10 +109,9 @@ def test_authenticated_knowledge_list_filters_before_pagination(tmp_path, monkey
             assert [
                 m["id"] for m in get({"project_id": "a", "q": "%_"}).json()["memories"]
             ] == [literal["id"]]
-            assert get({"project_id": "a", "q": "absent"}).json() == {
-                "memories": [],
-                "total": 0,
-            }
+            empty = get({"project_id": "a", "q": "absent"}).json()
+            assert empty["memories"] == [] and empty["total"] == 0
+            assert empty["as_of"].endswith("+00:00")
             assert [m["id"] for m in get({}, headers).json()["memories"]] == [
                 global_record["id"]
             ]

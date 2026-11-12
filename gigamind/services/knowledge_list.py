@@ -26,11 +26,12 @@ def list_knowledge(
         trust.fail(422, "Invalid status")
     if q is not None and (not isinstance(q, str) or len(q) > 1000):
         trust.fail(422, "Query too long")
+    as_of = knowledge_validity.current_time()
     query = context._knowledge_query(actor, project_id).where(
         AcceptedKnowledge.status == status
     )
     if not actor.is_admin:
-        query = query.where(knowledge_validity.active_clause())
+        query = query.where(knowledge_validity.active_clause(as_of))
     if q:
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         query = query.where(
@@ -45,4 +46,16 @@ def list_knowledge(
             .offset(offset)
             .limit(limit)
         ).all()
-        return {"memories": [trust.memory_dict(row) for row in rows], "total": total}
+        memories = []
+        for row in rows:
+            item = trust.memory_dict(row)
+            if row.status != "accepted":
+                item["validity_status"] = "inactive"
+            elif row.valid_from is not None and row.valid_from > as_of:
+                item["validity_status"] = "future"
+            elif row.valid_until is not None and row.valid_until <= as_of:
+                item["validity_status"] = "expired"
+            else:
+                item["validity_status"] = "active"
+            memories.append(item)
+        return {"memories": memories, "total": total, "as_of": as_of}

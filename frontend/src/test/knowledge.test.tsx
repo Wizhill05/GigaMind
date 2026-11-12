@@ -597,3 +597,27 @@ test("App locks navigation for one validity save and preserves its draft on fail
   expect(sidebar.getByRole("button", { name: /^Memories/ })).toBeEnabled();
   expect(screen.getByText("Save validity")).toBeEnabled();
 });
+
+test("shows server validity and as-of context on refresh without inferring from bounds", async () => {
+  let version = 0;
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    version += 1;
+    return json({
+      memories: [
+        { ...memory, validity_status: version === 1 ? "future" : "expired", valid_from: "2026-01-01T00:00:00.123456Z" },
+        { ...memory, id: "two", content: "Inactive fact", status: "deleted", validity_status: "inactive" },
+        { ...memory, id: "three", content: "Active fact", validity_status: "active" },
+      ],
+      total: 3,
+      as_of: version === 1 ? "2026-01-01T00:00:00.123455+00:00" : "2026-01-02T00:00:00.000001+00:00",
+    });
+  });
+  const view = render(<KnowledgeTab refreshVersion={0} />);
+  expect(await screen.findByText("Validity: future")).toBeInTheDocument();
+  expect(screen.getByText("Validity: active")).toBeInTheDocument();
+  expect(screen.getByText("Validity: inactive")).toBeInTheDocument();
+  expect(screen.getByText(/2026-01-01T00:00:00.123455/)).toBeInTheDocument();
+  view.rerender(<KnowledgeTab refreshVersion={1} />);
+  expect(await screen.findByText("Validity: expired")).toBeInTheDocument();
+  expect(screen.getByText(/2026-01-02T00:00:00.000001/)).toBeInTheDocument();
+});
