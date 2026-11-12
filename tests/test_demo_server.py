@@ -82,6 +82,7 @@ def test_launcher_end_to_end(tmp_path):
             assert stats["total_memories"] == 64
             assert stats["total_chat_logs"] == 15
             assert get("/api/v1/review/context?query=unrelated")["rules"]
+            assert get("/api/v1/review/handoffs")["total"] == 1
             assert get("/api/v1/review/handoffs?project_id=demo-orchard")["total"] == 1
             assert get("/api/v1/review/issues?project_id=demo-orchard")["total"] == 1
             listed = get("/api/v1/jobs")["jobs"]
@@ -108,6 +109,84 @@ def test_launcher_end_to_end(tmp_path):
                 r.get("page_number") == 12 and r.get("source") == "file"
                 for r in results
             )
+
+            def request_json(path, body=None, token=key):
+                headers = {"Authorization": "Bearer " + token}
+                if body is not None:
+                    headers["Content-Type"] = "application/json"
+                req = Request(
+                    url + path,
+                    data=json.dumps(body).encode() if body is not None else None,
+                    headers=headers,
+                )
+                with urlopen(req, timeout=5) as response:
+                    return json.load(response)
+
+            issued = request_json(
+                "/api/v1/admin/clients",
+                {
+                    "name": "synthetic scope check",
+                    "scopes": ["memory:read", "memory:propose"],
+                    "project_ids": ["demo-orchard"],
+                },
+            )
+            token = issued["token"]
+            assert (
+                request_json(
+                    "/api/v1/review/handoffs?project_id=demo-orchard", token=token
+                )["total"]
+                == 1
+            )
+            assert (
+                request_json(
+                    "/api/v1/review/issues?project_id=demo-orchard", token=token
+                )["total"]
+                == 0
+            )
+            for endpoint in (
+                "/api/v1/review/handoffs",
+                "/api/v1/review/handoffs?project_id=demo-harbor",
+                "/api/v1/review/issues?project_id=demo-harbor",
+                "/api/v1/jobs",
+            ):
+                try:
+                    request_json(endpoint, token=token)
+                    raise AssertionError("Scoped reader accessed an unauthorized view")
+                except HTTPError as exc:
+                    assert exc.code == 403
+            accepted = request_json(
+                "/api/v1/review/knowledge?project_id=demo-orchard&q=weekly", token=token
+            )["memories"]
+            assert accepted
+            assert accepted[0]["validity_status"] == "active"
+            own_issue = request_json(
+                "/api/v1/review/issues",
+                {
+                    "memory_id": accepted[0]["id"],
+                    "reason": "SYNTHETIC HTTP fixture concern",
+                    "project_id": "demo-orchard",
+                    "idempotency_key": "synthetic-reader-issue",
+                },
+                token,
+            )["issue"]
+            own = request_json(
+                "/api/v1/review/issues?project_id=demo-orchard", token=token
+            )
+            assert own["total"] == 1 and own["issues"][0]["id"] == own_issue["id"]
+            assert (
+                request_json("/api/v1/review/issues?project_id=demo-orchard")["total"]
+                == 2
+            )
+            request_json(
+                "/api/v1/admin/clients/" + issued["client"]["id"] + "/revoke", {}
+            )
+            try:
+                request_json(
+                    "/api/v1/review/handoffs?project_id=demo-orchard", token=token
+                )
+                raise AssertionError("Revoked reader retained access")
+            except HTTPError as exc:
+                assert exc.code == 401
             assets = list((runtime / "dist/assets").glob("*.js"))
             assert any("Synthetic demo" in f.read_text() for f in assets)
             assert hostile.read_bytes() == b"untouched"

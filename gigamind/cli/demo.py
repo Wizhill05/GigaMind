@@ -207,11 +207,11 @@ def main():
             subject="budget",
             approve=False,
         )
-    for project in ("demo-orchard", "demo-harbor"):
+    for project in (None, "demo-orchard", "demo-harbor"):
         coordination.save_handoff(
             actor,
             task_name="SYNTHETIC DEMO: planning handoff",
-            summary=f"SYNTHETIC DEMO: {project} fictional next steps",
+            summary=f"SYNTHETIC DEMO: {project or 'global'} fictional next steps",
             status="open",
             project_id=project,
             verified_outcomes=[],

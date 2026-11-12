@@ -14,7 +14,7 @@ Reviewed and integrated foundations:
 
 Additional reviewed foundations:
 - Durable queue core with lease fencing, retry/reclaim and real indexing cancellation tests; native PostgreSQL claim/idempotency checks. Atomic file metadata/chunk/vector publication is verified with injected native failures.
-- Isolated synthetic demo CLI with 64 source memories, 15 conversations, scoped reviewed facts/rules and pending proposals; source indexes stay pending.
+- Isolated synthetic demo CLI with64 source memories,15 conversations,3 fictional text-only files/36 chunks, global/scoped handoffs, issues, simulated queue states, scoped reviewed facts/rules and pending proposals; source indexes stay pending.
 - Canonical branch-aware CLI/REST source imports, atomic deduplication, complete text/role retention and no automatic promotion to facts or provider requirement. Segmentation/indexing and full provenance ledger remain unfinished.
 
 Additional reviewed integration:
