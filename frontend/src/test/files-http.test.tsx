@@ -410,13 +410,37 @@ it("keeps an uncertain upload and verifies it only on explicit request", async (
   const mutation = vi.fn();
   const fetcher = vi.fn((url: string, init?: RequestInit) => {
     if (url === "/api/v1/files/upload?prefix=files" && init?.method === "POST")
-      return Promise.resolve(new Response(JSON.stringify({ detail: { message: "Upload outcome unknown", key: "files/key", job_id: "job-1" } }), { status: 503 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            detail: {
+              message: "Upload outcome unknown",
+              key: "files/key",
+              job_id: "job-1",
+            },
+          }),
+          { status: 503 },
+        ),
+      );
     if (url === "/api/v1/files/upload/recover" && init?.method === "POST")
-      return Promise.resolve(new Response(JSON.stringify({ key: "files/key", job_id: "job-1", state: "queued", verified: true })));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            key: "files/key",
+            job_id: "job-1",
+            state: "queued",
+            verified: true,
+          }),
+        ),
+      );
     return Promise.resolve(list());
   });
   vi.stubGlobal("fetch", fetcher);
-  const view = render(<ToastProvider><FilesTab onMutation={mutation} /></ToastProvider>);
+  const view = render(
+    <ToastProvider>
+      <FilesTab onMutation={mutation} />
+    </ToastProvider>,
+  );
   await screen.findByText("example.txt");
   const input = view.container.querySelector('input[type="file"][multiple]');
   if (!input) throw new Error("Missing upload input");
@@ -426,6 +450,310 @@ it("keeps an uncertain upload and verifies it only on explicit request", async (
   fireEvent.click(verify);
   await screen.findByText(/job job-1, queued/);
   expect(mutation).toHaveBeenCalledTimes(1);
-  expect(fetcher.mock.calls.filter(([url]) => url.includes("/upload?"))).toHaveLength(1);
-  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("/recover"))).toHaveLength(1);
+  expect(
+    fetcher.mock.calls.filter(([url]) => url.includes("/upload?")),
+  ).toHaveLength(1);
+  expect(
+    fetcher.mock.calls.filter(([url]) => url.endsWith("/recover")),
+  ).toHaveLength(1);
+});
+
+const uncertainUpload = () =>
+  json(
+    {
+      detail: {
+        message: "Unknown upload",
+        key: "files/recover",
+        job_id: "recovery-job",
+      },
+    },
+    503,
+  );
+const verifiedUpload = () =>
+  json({
+    key: "files/recover",
+    job_id: "recovery-job",
+    state: "queued",
+    verified: true,
+  });
+function uploadInput(container: HTMLElement) {
+  const input = container.querySelector('input[type="file"][multiple]');
+  if (!(input instanceof HTMLInputElement))
+    throw new Error("Missing upload input");
+  return input;
+}
+const chooseUpload = (input: HTMLInputElement, names = ["uncertain.txt"]) =>
+  fireEvent.change(input, {
+    target: { files: names.map((name) => new File(["text"], name)) },
+  });
+
+it.each([401, 409, 503])(
+  "keeps references after recovery %s and retries without another upload",
+  async (status) => {
+    setApiKey("admin");
+    let attempts = 0;
+    const changed = vi.fn();
+    const fetcher = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (url) => {
+        if (String(url).includes("/upload?")) return uncertainUpload();
+        if (String(url).endsWith("/recover"))
+          return ++attempts === 1
+            ? json({ detail: "Verification refused" }, status)
+            : verifiedUpload();
+        return list();
+      });
+    const view = render(
+      <ToastProvider>
+        <FilesTab onMutation={changed} />
+      </ToastProvider>,
+    );
+    await screen.findByText("example.txt");
+    chooseUpload(uploadInput(view.container));
+    fireEvent.click(await screen.findByText("Verify existing upload"));
+    expect(await screen.findByText(/Verification refused/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Recovery reference: files\/recover/),
+    ).toBeInTheDocument();
+    expect(changed).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Verify existing upload"));
+    await screen.findByText(/Upload verified.*recovery-job, queued/);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(
+      fetcher.mock.calls.filter(([u]) => String(u).includes("/upload?")),
+    ).toHaveLength(1);
+    await waitFor(() =>
+      expect(
+        fetcher.mock.calls.filter(([u]) => String(u).includes("/indexed?")),
+      ).toHaveLength(2),
+    );
+  },
+);
+
+it("serializes recovery with file actions and duplicate verification clicks", async () => {
+  setApiKey("admin");
+  const pending = deferred();
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (url) => {
+      if (String(url).includes("/upload?")) return uncertainUpload();
+      if (String(url).endsWith("/recover")) return pending.promise;
+      return list();
+    });
+  const view = mount();
+  await screen.findByText("example.txt");
+  const input = uploadInput(view.container);
+  chooseUpload(input);
+  const verify = await screen.findByText("Verify existing upload");
+  fireEvent.click(verify);
+  fireEvent.click(verify);
+  expect(input).toBeDisabled();
+  expect(screen.getByTitle("Delete File from R2")).toBeDisabled();
+  expect(screen.getByTitle("Re-Index Vectors")).toBeDisabled();
+  fireEvent.click(screen.getByTitle("Delete File from R2"));
+  expect(
+    fetcher.mock.calls.filter(([u]) => String(u).endsWith("/recover")),
+  ).toHaveLength(1);
+  await act(async () => {
+    pending.finish(verifiedUpload());
+    await pending.promise;
+  });
+  await waitFor(() => expect(input).toBeEnabled());
+  expect(fetcher.mock.calls.some(([u]) => String(u).endsWith("/delete"))).toBe(
+    false,
+  );
+});
+
+it.each(["credential", "unmount"])(
+  "ignores recovery after %s and settles the view",
+  async (mode) => {
+    setApiKey("admin");
+    const pending = deferred();
+    const changed = vi.fn();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).includes("/upload?")) return uncertainUpload();
+      if (String(url).endsWith("/recover")) return pending.promise;
+      return list();
+    });
+    const view = render(
+      <ToastProvider>
+        <FilesTab onMutation={changed} />
+      </ToastProvider>,
+    );
+    await screen.findByText("example.txt");
+    chooseUpload(uploadInput(view.container));
+    fireEvent.click(await screen.findByText("Verify existing upload"));
+    if (mode === "unmount") view.unmount();
+    else {
+      setApiKey("replacement");
+      view.rerender(
+        <ToastProvider>
+          <FilesTab onMutation={changed} />
+        </ToastProvider>,
+      );
+    }
+    await act(async () => {
+      pending.finish(verifiedUpload());
+      await pending.promise;
+    });
+    expect(changed).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Recovery reference:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Upload verified/)).not.toBeInTheDocument();
+    if (mode === "credential")
+      expect(uploadInput(view.container)).toBeEnabled();
+  },
+);
+
+it.each(["credential", "unmount"])(
+  "does not send the next upload after %s",
+  async (mode) => {
+    setApiKey("admin");
+    const pending = deferred();
+    const changed = vi.fn();
+    const fetcher = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (url) =>
+        String(url).includes("/upload?") ? pending.promise : list(),
+      );
+    const view = render(
+      <ToastProvider>
+        <FilesTab onMutation={changed} />
+      </ToastProvider>,
+    );
+    await screen.findByText("example.txt");
+    const input = uploadInput(view.container);
+    chooseUpload(input, ["one", "two"]);
+    chooseUpload(input, ["duplicate"]);
+    if (mode === "unmount") view.unmount();
+    else setApiKey("replacement");
+    await act(async () => {
+      pending.finish(
+        json({ success: true, file: { key: "one", filename: "one" } }),
+      );
+      await pending.promise;
+    });
+    expect(
+      fetcher.mock.calls.filter(([u]) => String(u).includes("/upload?")),
+    ).toHaveLength(1);
+    expect(changed).not.toHaveBeenCalled();
+  },
+);
+
+it("refreshes a mixed batch once and never refreshes an all-failed batch", async () => {
+  const changed = vi.fn();
+  let uploads = 0;
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+    if (String(url).includes("/upload?"))
+      return ++uploads === 1
+        ? json({ success: true, file: { key: "one", filename: "one" } })
+        : uncertainUpload();
+    return list();
+  });
+  const view = render(
+    <ToastProvider>
+      <FilesTab onMutation={changed} />
+    </ToastProvider>,
+  );
+  await screen.findByText("example.txt");
+  const input = uploadInput(view.container);
+  chooseUpload(input, ["one", "two"]);
+  await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(input).toBeEnabled());
+  chooseUpload(input, ["two"]);
+  await waitFor(() =>
+    expect(screen.getAllByText(/Recovery reference:/)).toHaveLength(2),
+  );
+  expect(changed).toHaveBeenCalledTimes(1);
+});
+
+it("App recovery refreshes list, stats and an active search exactly once", async () => {
+  const { App } = await import("../App");
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.includes("/upload?")) return uncertainUpload();
+      if (path.endsWith("/recover")) return verifiedUpload();
+      if (path.includes("/indexed?")) return list();
+      if (path.endsWith("/search_files")) return json({ results: [] });
+      return json({
+        total_memories: 0,
+        total_storage_files: 1,
+        total_profile_rules: 0,
+        total_chat_logs: 0,
+      });
+    });
+  const view = render(<App />);
+  expect(fetcher).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Master API Key"), {
+    target: { value: "admin" },
+  });
+  fireEvent.click(screen.getByText("Authorize Connection"));
+  fireEvent.click(
+    within(await screen.findByRole("complementary")).getByRole("button", {
+      name: /Files & Storage/,
+    }),
+  );
+  await screen.findByText("example.txt");
+  fireEvent.change(screen.getByPlaceholderText(/Search concepts/), {
+    target: { value: "submitted" },
+  });
+  fireEvent.click(screen.getByText("Search Files"));
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.filter(([u]) => String(u).endsWith("/search_files")),
+    ).toHaveLength(1),
+  );
+  const main = view.container.querySelector("main");
+  if (!main) throw new Error("Main missing");
+  chooseUpload(uploadInput(main));
+  fireEvent.click(await screen.findByText("Verify existing upload"));
+  await screen.findByText(/Upload verified/);
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.filter(([u]) => String(u).endsWith("/search_files")),
+    ).toHaveLength(2),
+  );
+  expect(
+    fetcher.mock.calls.filter(([u]) => String(u).includes("/indexed?")),
+  ).toHaveLength(2);
+  expect(
+    fetcher.mock.calls.filter(([u]) => String(u).endsWith("/stats")),
+  ).toHaveLength(2);
+  fireEvent.click(screen.getByTitle("Refresh telemetry"));
+  await waitFor(() =>
+    expect(
+      fetcher.mock.calls.filter(([u]) => String(u).endsWith("/search_files")),
+    ).toHaveLength(3),
+  );
+});
+
+it("blocks recovery behind an already running file action", async () => {
+  setApiKey("admin");
+  const pending = deferred();
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (url) => {
+      if (String(url).includes("/upload?")) return uncertainUpload();
+      if (String(url).endsWith("/reindex")) return pending.promise;
+      if (String(url).endsWith("/recover")) return verifiedUpload();
+      return list();
+    });
+  const view = mount();
+  await screen.findByText("example.txt");
+  chooseUpload(uploadInput(view.container));
+  const verify = await screen.findByText("Verify existing upload");
+  fireEvent.click(screen.getByTitle("Re-Index Vectors"));
+  expect(verify).toBeDisabled();
+  fireEvent.click(verify);
+  expect(fetcher.mock.calls.some(([u]) => String(u).endsWith("/recover"))).toBe(
+    false,
+  );
+  await act(async () => {
+    pending.finish(json({ key: "a/b", job_id: "index-job", state: "queued" }));
+    await pending.promise;
+  });
+  await waitFor(() => expect(verify).toBeEnabled());
+  fireEvent.click(verify);
+  await screen.findByText(/Upload verified/);
 });

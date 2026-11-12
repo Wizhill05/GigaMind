@@ -5,13 +5,11 @@ afterEach(() => vi.unstubAllGlobals());
 it("reports structured validation details", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ detail: [{ msg: "Invalid query" }] }), {
-          status: 422,
-        }),
-      ),
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: [{ msg: "Invalid query" }] }), {
+        status: 422,
+      }),
+    ),
   );
   await expect(fetchMemories()).rejects.toMatchObject({
     name: "ApiError",
@@ -32,20 +30,18 @@ it("preserves cancellation and sends the search query", async () => {
 it("renders recoverable upload errors as text with the recovery reference", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            detail: {
-              message: "Upload outcome unknown",
-              key: "files/key",
-              job_id: "pending-job",
-            },
-          }),
-          { status: 503 },
-        ),
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            message: "Upload outcome unknown",
+            key: "files/key",
+            job_id: "pending-job",
+          },
+        }),
+        { status: 503 },
       ),
+    ),
   );
   const result = await uploadFile(new File(["abc"], "a.txt"));
   expect(result).toEqual({
@@ -58,17 +54,14 @@ it("renders recoverable upload errors as text with the recovery reference", asyn
 it("rejects malformed upload success rather than passing unchecked data into attachments", async () => {
   vi.stubGlobal(
     "fetch",
-    vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ success: true, file: { key: 1 } }), {
-          status: 202,
-        }),
-      ),
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, file: { key: 1 } }), {
+        status: 202,
+      }),
+    ),
   );
   expect((await uploadFile(new File(["abc"], "a.txt"))).success).toBe(false);
 });
-
 
 it.each([
   { key: "files/key", job_id: "job", state: "queued", verified: false },
@@ -82,6 +75,8 @@ it.each([
     return new Response(JSON.stringify(payload), { status: 200 });
   });
   vi.stubGlobal("fetch", fetchMock);
-  await expect(recoverUpload({ key: "files/key", job_id: "job" })).rejects.toThrow();
+  await expect(
+    recoverUpload({ key: "files/key", job_id: "job" }),
+  ).rejects.toThrow();
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });

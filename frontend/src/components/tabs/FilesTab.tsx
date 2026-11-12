@@ -202,31 +202,65 @@ export const FilesTab: React.FC<{
 
   const uploadBusy = useRef(false);
   const [recovering, setRecovering] = useState(false);
-  const [failures, setFailures] = useState<{ id: number; name: string; error: string; credential: string; recovery?: UploadRecoveryReference }[]>([]);
+  const [failures, setFailures] = useState<
+    {
+      id: number;
+      name: string;
+      error: string;
+      credential: string;
+      recovery?: UploadRecoveryReference;
+    }[]
+  >([]);
   const nextFailure = useRef(0);
   const refreshAfterUpload = () => {
-    setLocalRevision(value => value + 1);
+    setLocalRevision((value) => value + 1);
     onMutation?.();
   };
-  const handleRecovery = async (failure: typeof failures[number]) => {
-    if (uploadBusy.current || mutations.current.size || !failure.recovery || getApiKey() !== failure.credential) return;
+  const handleRecovery = async (failure: (typeof failures)[number]) => {
+    if (
+      uploadBusy.current ||
+      mutations.current.size ||
+      !failure.recovery ||
+      getApiKey() !== failure.credential
+    )
+      return;
     uploadBusy.current = true;
     setRecovering(true);
     let verified = false;
     try {
       const result = await recoverUpload(failure.recovery);
       if (!alive.current || getApiKey() !== failure.credential) return;
-      setFailures(current => current.filter(item => item.id !== failure.id));
-      toast(`Upload verified (job ${result.job_id}, ${result.state}). See Jobs for indexing status.`, "success");
+      setFailures((current) =>
+        current.filter((item) => item.id !== failure.id),
+      );
+      toast(
+        `Upload verified (job ${result.job_id}, ${result.state}). See Jobs for indexing status.`,
+        "success",
+      );
       verified = true;
     } catch (error) {
       if (alive.current && getApiKey() === failure.credential)
-        setFailures(current => current.map(item => item.id === failure.id ? { ...item, error: error instanceof Error ? error.message : "Verification failed" } : item));
+        setFailures((current) =>
+          current.map((item) =>
+            item.id === failure.id
+              ? {
+                  ...item,
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : "Verification failed",
+                }
+              : item,
+          ),
+        );
     } finally {
       uploadBusy.current = false;
       if (alive.current) {
         setRecovering(false);
-        if (getApiKey() !== failure.credential) setFailures(current => current.filter(item => item.credential === getApiKey()));
+        if (getApiKey() !== failure.credential)
+          setFailures((current) =>
+            current.filter((item) => item.credential === getApiKey()),
+          );
         else if (verified) refreshAfterUpload();
       }
     }
@@ -237,7 +271,8 @@ export const FilesTab: React.FC<{
     const input = e.currentTarget;
     const selected = Array.from(input.files ?? []);
     input.value = "";
-    if (!selected.length || uploadBusy.current || mutations.current.size) return;
+    if (!selected.length || uploadBusy.current || mutations.current.size)
+      return;
     uploadBusy.current = true;
     const credential = getApiKey();
     setIsUploading(true);
@@ -249,18 +284,30 @@ export const FilesTab: React.FC<{
         if (!alive.current || getApiKey() !== credential) break;
         if (result.success) successCount++;
         else {
-          const failure = { id: nextFailure.current++, name: file.name, error: result.error, credential, recovery: result.recovery };
-          setFailures(current => [...current, failure]);
+          const failure = {
+            id: nextFailure.current++,
+            name: file.name,
+            error: result.error,
+            credential,
+            recovery: result.recovery,
+          };
+          setFailures((current) => [...current, failure]);
         }
       }
       if (successCount && alive.current && getApiKey() === credential) {
-        toast(`Uploaded ${successCount} file(s). Indexing is pending. See Jobs.`, "success");
+        toast(
+          `Uploaded ${successCount} file(s). Indexing is pending. See Jobs.`,
+          "success",
+        );
       }
     } finally {
       uploadBusy.current = false;
       if (alive.current) {
         setIsUploading(false);
-        if (getApiKey() !== credential) setFailures(current => current.filter(item => item.credential === getApiKey()));
+        if (getApiKey() !== credential)
+          setFailures((current) =>
+            current.filter((item) => item.credential === getApiKey()),
+          );
         else if (successCount) refreshAfterUpload();
       }
     }
@@ -417,20 +464,62 @@ export const FilesTab: React.FC<{
               multiple
               className="hidden"
               onChange={handleFileUpload}
-              disabled={isUploading || recovering || Object.values(reindexingKeys).some(Boolean)}
+              disabled={
+                isUploading ||
+                recovering ||
+                Object.values(reindexingKeys).some(Boolean)
+              }
             />
           </label>
         </div>
       </div>
 
-      {failures.filter(failure => failure.credential === getApiKey()).map(failure => (
-        <div key={failure.id} role="alert" className="border border-red-800 p-3 text-white space-y-2">
-          <p>{failure.name}: {failure.error}</p>
-          {failure.recovery && <p>Recovery reference: {failure.recovery.key}, job {failure.recovery.job_id}</p>}
-          {failure.recovery && <button disabled={isUploading || recovering || Object.values(reindexingKeys).some(Boolean) || getApiKey() !== failure.credential} onClick={() => void handleRecovery(failure)}>Verify existing upload</button>}
-          <button disabled={isUploading || recovering || Object.values(reindexingKeys).some(Boolean)} onClick={() => setFailures(current => current.filter(item => item.id !== failure.id))}>Dismiss</button>
-        </div>
-      ))}
+      {failures
+        .filter((failure) => failure.credential === getApiKey())
+        .map((failure) => (
+          <div
+            key={failure.id}
+            role="alert"
+            className="border border-red-800 p-3 text-white space-y-2"
+          >
+            <p>
+              {failure.name}: {failure.error}
+            </p>
+            {failure.recovery && (
+              <p>
+                Recovery reference: {failure.recovery.key}, job{" "}
+                {failure.recovery.job_id}
+              </p>
+            )}
+            {failure.recovery && (
+              <button
+                disabled={
+                  isUploading ||
+                  recovering ||
+                  Object.values(reindexingKeys).some(Boolean) ||
+                  getApiKey() !== failure.credential
+                }
+                onClick={() => void handleRecovery(failure)}
+              >
+                Verify existing upload
+              </button>
+            )}
+            <button
+              disabled={
+                isUploading ||
+                recovering ||
+                Object.values(reindexingKeys).some(Boolean)
+              }
+              onClick={() =>
+                setFailures((current) =>
+                  current.filter((item) => item.id !== failure.id),
+                )
+              }
+            >
+              Dismiss
+            </button>
+          </div>
+        ))}
 
       {/* METRICS ROW */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

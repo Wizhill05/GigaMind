@@ -10,6 +10,7 @@ from gigamind.db.database import engine, is_postgres, ProfileItem, MemoryItem, C
 from gigamind.services.embedding import generate_embedding, cosine_similarity
 from gigamind.services import embedding as embedding_config
 from gigamind.services import file_lifecycle
+from gigamind.services.file_retrieval import file_candidates
 from gigamind.db.jobs import ResourceJobState  # Register job models before metadata initialization.
 from gigamind.db.memory_index import MemoryIndexState
 from fastapi import HTTPException
@@ -71,12 +72,10 @@ def search_memory(
     limit: int = 5,
     scope: str = "all"
 ) -> List[Dict[str, Any]]:
-    """
-    Hierarchical Multimodal 2-Stage RAG Search Engine:
-    - Ingests text queries or visual image queries (base64) using Gemini Embedding 2.
-    - Hierarchical Fusion: Combines whole-document holistic vectors (storage_files)
-      with surgical page/visual snippet vectors (storage_chunks).
-    - Stage 2: Cross-Encoder Neural Rerank Pass (Top limit unique items returned).
+    """Retrieve legacy sources with bounded lexical/vector pools and reranking.
+
+    File evidence is deduplicated by storage key after ranking. Accepted knowledge
+    uses its separate scoped service and does not pass through this pipeline.
     """
     scope_clean = (scope or "all").lower().strip()
     if scope_clean not in ("all", "memories", "files"):
@@ -199,143 +198,47 @@ def search_memory(
                         "score": round(p_score, 4),
                         "retrieval_method": "lexical"
                     })
-        # ====================================================
-        # 2. VECTORIZED OBJECT STORAGE SCAN (if scope: all | files)
-        # ====================================================
         if scope_clean in ("all", "files"):
-            distinct_files_map: Dict[str, Dict[str, Any]] = {}
-            if is_postgres and query_vector is not None:
-                vector_str = f"[{','.join(str(x) for x in query_vector)}]"
+            lexical, vectors = file_candidates(
+                session, query_vector=query_vector, lexical_hits=lexical_hits,
+                term_count=len(query_keywords), source_agent=source_agent, category=category,
+                capacity=max(25, limit), is_postgres=is_postgres,
+            )
+            candidates.extend(lexical)
+            candidates.extend(vectors)
 
-                # 1. Whole-Document Holistic Candidates Scan
-                sql_docs = """
-                SELECT id, key, filename, mime_type, multimodal_type, document_summary,
-                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
-                FROM storage_files
-                WHERE embedding_vector IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM resource_job_state r
-                                  WHERE r.key = storage_files.key AND r.deleted IS TRUE)
-                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                LIMIT 30;
-                """
-                doc_rows = session.exec(text(sql_docs), params={"vec": vector_str}).all()
-                for dr in doc_rows:
-                    distinct_files_map[dr.key] = {
-                        "id": dr.id,
-                        "file_id": dr.id,
-                        "file_key": dr.key,
-                        "filename": dr.filename,
-                        "mime_type": dr.mime_type,
-                        "multimodal_type": dr.multimodal_type or "text",
-                        "content": dr.document_summary or f"[{dr.multimodal_type.upper()}: {dr.filename}]",
-                        "score": float(dr.vector_score or 0.0),
-                        "doc_vector_score": float(dr.vector_score or 0.0),
-                        "vector_score": float(dr.vector_score or 0.0),
-                        "retrieval_method": "vector",
-                        "chunk_index": 0,
-                        "total_chunks": 1,
-                        "matching_pages": [],
-                        "url": "",
-                        "source": "file",
-                        "category": "file"
-                    }
+    # Reserve space for each retrieval method before comparing/reranking raw scores.
+    capacity = max(25, limit)
+    order = lambda item: (-item["score"], str(item.get("source", "")), str(item["id"]))
+    lexical = sorted((c for c in candidates if c["retrieval_method"] == "lexical"), key=order)[:capacity]
+    vectors = sorted((c for c in candidates if c["retrieval_method"] != "lexical"), key=order)[:capacity]
+    def candidate_identity(item):
+        return (item["source"], item.get("file_key"), item.get("_record_type"), item["id"])
 
-                # 2. Page-Level & Visual Snippet Candidates Scan
-                sql_chunks = """
-                SELECT id, file_id, file_key, filename, chunk_index, total_chunks, page_number, is_visual_anchor, content,
-                       1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS vector_score
-                FROM storage_chunks
-                WHERE embedding_vector IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM resource_job_state r
-                                  WHERE r.key = storage_chunks.file_key AND r.deleted IS TRUE)
-                ORDER BY embedding_vector <=> CAST(:vec AS vector) ASC
-                LIMIT 60;
-                """
-                chunk_rows = session.exec(text(sql_chunks), params={"vec": vector_str}).all()
-                for cr in chunk_rows:
-                    fkey = cr.file_key
-                    chunk_score = float(cr.vector_score or 0.0)
-                    if fkey not in distinct_files_map:
-                        distinct_files_map[fkey] = {
-                            "id": cr.id,
-                            "file_id": cr.file_id,
-                            "file_key": cr.file_key,
-                            "filename": cr.filename,
-                            "content": cr.content,
-                            "page_number": cr.page_number,
-                            "chunk_index": cr.chunk_index,
-                            "total_chunks": cr.total_chunks,
-                            "score": chunk_score,
-                            "vector_score": chunk_score,
-                            "retrieval_method": "vector",
-                            "matching_pages": [cr.page_number] if cr.page_number is not None else [],
-                            "url": "",
-                            "source": "file",
-                            "category": "file"
-                        }
-                    else:
-                        target = distinct_files_map[fkey]
-                        # Hierarchical fusion: 0.6 * page_score + 0.4 * doc_score
-                        doc_score = target.get("doc_vector_score", chunk_score)
-                        fused_score = round(0.6 * chunk_score + 0.4 * doc_score, 4)
-                        if chunk_score > target["score"]:
-                            target["content"] = cr.content
-                            target["score"] = fused_score
-                            target["vector_score"] = fused_score
-                            target["chunk_index"] = cr.chunk_index
-                            target["total_chunks"] = cr.total_chunks
-                            target["page_number"] = cr.page_number
-                        if cr.page_number is not None and cr.page_number not in target["matching_pages"]:
-                            target["matching_pages"].append(cr.page_number)
-
-            # Fallback SQLite candidate scanner
-            if not distinct_files_map:
-                s_files = session.exec(select(StorageFileItem).where(
-                    ~select(ResourceJobState.key).where(
-                        ResourceJobState.key == StorageFileItem.key,
-                        ResourceJobState.deleted.is_(True),
-                    ).exists()
-                ).limit(40)).all()
-                for sf in s_files:
-                    f_score = 0.0
-                    file_vector_score = 0.0
-                    try:
-                        sf_vec = json.loads(sf.embedding_json)
-                        file_vector_score = cosine_similarity(query_vector or [], sf_vec)
-                        f_score += file_vector_score * 0.7
-                    except (ValueError, TypeError, OverflowError):
-                        pass
-                    sf_lower = sf.filename.lower() + " " + (sf.document_summary or "").lower()
-                    kw_hits = sum(1 for kw in query_keywords if kw in sf_lower)
-                    if query_keywords:
-                        f_score += (kw_hits / len(query_keywords)) * 0.3
-
-                    if f_score > 0.05:
-                        distinct_files_map[sf.key] = {
-                            "id": sf.id,
-                            "file_id": sf.id,
-                            "file_key": sf.key,
-                            "filename": sf.filename,
-                            "content": sf.document_summary or f"[{sf.filename}]",
-                            "score": round(f_score, 4),
-                            "retrieval_method": "lexical+vector" if file_vector_score and kw_hits else "vector" if file_vector_score else "lexical",
-                            "vector_score": file_vector_score if file_vector_score else None,
-                            "url": "",
-                            "matching_pages": [],
-                            "source": "file",
-                            "category": "file"
-                        }
-
-            candidates.extend(distinct_files_map.values())
+    selected = {}
+    for candidate in lexical + vectors:
+        key = candidate_identity(candidate)
+        if key in selected:
+            previous = selected[key]
+            combined = {**previous, **candidate, "retrieval_method": "lexical+vector"}
+            combined["score"] = max(previous["score"], candidate["score"])
+            combined["matching_pages"] = sorted(set(previous.get("matching_pages", []) + candidate.get("matching_pages", [])))[:8]
+            selected[key] = combined
+        else:
+            selected[key] = candidate
+    candidates = list(selected.values())
     admitted = []
+    urls = {}
     for candidate in candidates:
         if candidate.get("source") == "file":
             try:
                 with file_lifecycle.active_access(candidate["file_key"], engine):
-                    if storage_service.is_enabled():
-                        candidate["url"] = storage_service.get_presigned_download_url(
-                            candidate["file_key"], filename=candidate.get("filename")
-                        ) or ""
+                    key = candidate["file_key"]
+                    if key not in urls:
+                        urls[key] = storage_service.get_presigned_download_url(
+                            key, filename=candidate.get("filename")
+                        ) or "" if storage_service.is_enabled() else ""
+                    candidate["url"] = urls[key]
             except HTTPException as exc:
                 if exc.status_code == 409:
                     continue
@@ -344,17 +247,22 @@ def search_memory(
     candidates = admitted
     # Sort all candidates by initial score
     candidates.sort(key=lambda x: (-x["score"], str(x.get("source", "")), str(x["id"])))
-    top_candidates = candidates[:50]
+    top_candidates = candidates
 
     # ====================================================
     # STAGE 2: CROSS-ENCODER NEURAL RERANK PASS
     # ====================================================
-    original_scores = {(c["source"], c["id"]): c.get("vector_score") for c in top_candidates}
-    reranked_results = rerank_candidates(query=query or "visual and multimodal search", candidates=top_candidates, top_n=limit)
+    original_scores = {candidate_identity(c): c.get("vector_score") for c in top_candidates}
+    reranked_results = rerank_candidates(query=query or "visual and multimodal search", candidates=top_candidates, top_n=len(top_candidates))
 
     final_output = []
+    seen = set()
     for item in reranked_results:
         src = item.get("source", "memory")
+        identity = (src, item.get("file_key") if src == "file" else item["id"])
+        if identity in seen:
+            continue
+        seen.add(identity)
         if src == "file":
             res_item = {
                 "id": item["id"],
@@ -370,8 +278,14 @@ def search_memory(
                 "score": item["score"],
                 "vector_score": item.get("vector_score", item["score"]),
                 "rerank_score": item.get("rerank_score", item["score"]),
-                "url": item.get("url", "")
+                "url": item.get("url", ""),
+                "category": "file",
+                "matching_pages": item.get("matching_pages", []),
             }
+            if item.get("source_agent") is not None:
+                res_item["source_agent"] = item["source_agent"]
+            if "is_visual_anchor" in item:
+                res_item["is_visual_anchor"] = item["is_visual_anchor"]
             if item.get("matching_pages"):
                 pages_str = ", ".join(str(p) for p in sorted(item["matching_pages"]))
                 res_item["citation"] = f"{item.get('filename')} (Page{'s' if len(item['matching_pages']) > 1 else ''} {pages_str})"
@@ -401,12 +315,14 @@ def search_memory(
 
         method = item.get("retrieval_method", "vector")
         res_item["retrieval_method"] = method
-        actual_vector_score = original_scores.get((src, item["id"]))
+        actual_vector_score = original_scores.get(candidate_identity(item))
         if actual_vector_score is None:
             res_item.pop("vector_score", None)
         else:
             res_item["vector_score"] = actual_vector_score
         final_output.append(res_item)
+        if len(final_output) >= limit:
+            break
 
     return final_output
 
