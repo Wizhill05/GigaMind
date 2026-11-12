@@ -148,3 +148,22 @@ export const listActivity = (
     { signal },
   );
 };
+
+const inspection = z.object({
+  proposal_id: z.string(), proposal_revision: z.number().int().positive(), inspected_at: z.iso.datetime(),
+  evidence: z.array(z.object({
+    index: z.number().int().nonnegative(), source_type: z.string(), source_id: z.string(),
+    status: z.enum(['matched', 'quote_mismatch', 'role_mismatch', 'not_found', 'unsupported', 'unresolved']),
+    quote_match: z.boolean().nullable(), claimed_role: z.string().nullable(), recorded_role: z.string().nullable(),
+    role_verified: z.boolean(), excerpt: z.string().nullable(),
+    matched_span: z.object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative() }).nullable(),
+    source_hash: z.string().nullable(), source_revision: z.number().int().nullable(),
+    locator: z.object({ message_index: z.number().int().nullable(), page_number: z.number().int().nullable(), chunk_index: z.number().int().nullable() }),
+    note: z.string(),
+  })),
+});
+export type EvidenceInspection = z.infer<typeof inspection>;
+export const inspectEvidence = (id: string, expected_revision: number, signal?: AbortSignal) =>
+  request(`/proposals/${encodeURIComponent(id)}/inspect-evidence`, inspection, {
+    method: 'POST', body: JSON.stringify({ expected_revision }), signal,
+  });

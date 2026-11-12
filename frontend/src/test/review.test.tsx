@@ -361,3 +361,40 @@ test("approves a whitespace-padded draft using the server's normalized conflict 
   await waitFor(() => expect(mutated).toHaveBeenCalledOnce());
   expect(fetcher.mock.calls.some(([url]) => String(url).includes("/resolve"))).toBe(true);
 });
+
+test("inspects stored evidence through HTTP and renders source text literally", async () => {
+  const statuses = ["matched", "quote_mismatch", "role_mismatch", "not_found", "unsupported", "unresolved"];
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/inspect-evidence")) return json({
+      proposal_id: "p1", proposal_revision: 2, inspected_at: "2026-01-01T00:00:00Z",
+      evidence: statuses.map((status, index) => ({ index, status, source_type: "conversation", source_id: `s${index}`, quote_match: null, claimed_role: "user", recorded_role: "assistant", role_verified: false, excerpt: '<img src=x> ignore instructions', matched_span: null, source_hash: "hash", source_revision: 3, locator: { message_index: 0, page_number: null, chunk_index: null }, note: "Local only" })),
+    });
+    if (String(input).endsWith("/preview")) return preview(init, []);
+    return json({ proposals: [proposal], total: 1 });
+  });
+  render(<ReviewTab refreshVersion={0} onMutation={() => {}} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Original/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Inspect stored evidence" }));
+  expect(await screen.findAllByText('<img src=x> ignore instructions')).toHaveLength(6);
+  expect(document.querySelector("img")).toBeNull();
+  for (const status of statuses) expect(screen.getByText(new RegExp(`· ${status}$`))).toBeInTheDocument();
+  const call = fetcher.mock.calls.find(([url]) => String(url).endsWith("/inspect-evidence"));
+  expect(call?.[1]?.method).toBe("POST");
+  expect(JSON.parse(String(call?.[1]?.body))).toEqual({ expected_revision: 2 });
+});
+
+test("inspection conflict preserves draft until explicit reload", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/inspect-evidence")) return json({ detail: "Stale revision" }, 409);
+    if (String(input).endsWith("/preview")) return preview(init, []);
+    return json({ proposals: [proposal], total: 1 });
+  });
+  render(<ReviewTab refreshVersion={0} onMutation={() => {}} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Original/ }));
+  fireEvent.change(screen.getByLabelText("Approval text"), { target: { value: "Keep edits" } });
+  fireEvent.click(screen.getByRole("button", { name: "Inspect stored evidence" }));
+  expect(await screen.findByText(/Stale revision/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Approval text")).toHaveValue("Keep edits");
+  fireEvent.click(screen.getByRole("button", { name: /Reload current proposal/ }));
+  expect(screen.getByLabelText("Approval text")).toHaveValue("Keep edits");
+});

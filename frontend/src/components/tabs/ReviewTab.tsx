@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { ApiError } from "../../api";
+import React, { useEffect, useRef, useState } from "react";
+import { ApiError, getApiKey } from "../../api";
 import {
+  inspectEvidence,
+  type EvidenceInspection,
   getHistory,
   getMemory,
   listProposals,
@@ -23,11 +25,24 @@ export function ReviewTab({
   refreshVersion: number;
   onMutation: () => void;
 }) {
+  const [selected, setSelected] = useState<Proposal | null>(null);
+  const [inspection, setInspection] = useState<EvidenceInspection | null>(null);
+  const [inspectionError, setInspectionError] = useState("");
+  const [inspecting, setInspecting] = useState(false);
+  const inspectionRequest = useRef<AbortController | null>(null);
+  const key = getApiKey();
+  useEffect(() => {
+    inspectionRequest.current?.abort();
+    inspectionRequest.current = null;
+    setInspecting(false);
+    setInspection(null);
+    setInspectionError("");
+    return () => { inspectionRequest.current?.abort(); inspectionRequest.current = null; };
+  }, [selected?.id, selected?.revision, selected?.project_id, key, refreshVersion]);
   const [offset, setOffset] = useState(0);
   const [reload, setReload] = useState(0);
   const [total, setTotal] = useState(0);
   const [items, setItems] = useState<Proposal[]>([]);
-  const [selected, setSelected] = useState<Proposal | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [content, setContent] = useState("");
@@ -123,8 +138,32 @@ export function ReviewTab({
         });
     return () => c.abort();
   }, [historyId, historyReload]);
+  async function inspect() {
+    if (!selected || busy || stale || inspectionRequest.current) return;
+    const controller = new AbortController();
+    inspectionRequest.current = controller;
+    setInspecting(true);
+    setInspection(null);
+    setInspectionError("");
+    try {
+      const result = await inspectEvidence(selected.id, selected.revision, controller.signal);
+      if (controller.signal.aborted || inspectionRequest.current !== controller || getApiKey() !== key) return;
+      if (result.proposal_id !== selected.id || result.proposal_revision !== selected.revision) throw new Error("Inspection response did not match the stored proposal revision. Please retry.");
+      setInspection(result);
+    } catch (e) {
+      if (!controller.signal.aborted && inspectionRequest.current === controller && getApiKey() === key) {
+        setInspectionError(message(e));
+        if (e instanceof ApiError && e.status === 409) setStale(true);
+      }
+    } finally {
+      if (inspectionRequest.current === controller) {
+        inspectionRequest.current = null;
+        setInspecting(false);
+      }
+    }
+  }
   async function resolve(action: "approve" | "reject") {
-    if (!selected) return;
+    if (!selected || inspectionRequest.current || busy) return;
     setBusy(true);
     setDetailError("");
     try {
@@ -145,7 +184,7 @@ export function ReviewTab({
     }
   }
   async function retryProposal() {
-    if (!selected) return;
+    if (!selected || inspectionRequest.current || busy) return;
     setBusy(true);
     try {
       const page = await listProposals(offset);
@@ -162,7 +201,7 @@ export function ReviewTab({
     }
   }
   async function restore(revision: number) {
-    if (!current) return;
+    if (!current || inspectionRequest.current || busy) return;
     setBusy(true);
     setHistoryError("");
     try {
@@ -202,6 +241,11 @@ export function ReviewTab({
                   className={`${panel} w-full text-left hover:border-[#ff6b00]`}
                   disabled={busy}
                   onClick={() => {
+                    inspectionRequest.current?.abort();
+                    inspectionRequest.current = null;
+                    setInspection(null);
+                    setInspectionError("");
+                    setInspecting(false);
                     setSelected(p);
                     setContent(p.content);
                     setStale(false);
@@ -260,6 +304,26 @@ export function ReviewTab({
           ) : (
             <p>No evidence supplied.</p>
           )}
+          <div className="space-y-2">
+            <p>Inspects the stored proposal revision, not the approval draft. Supported sources: memory, conversation, and file chunks; other source kinds are unsupported. Text matches do not establish truth, identity, or approval. Hashes describe local content, not signed provenance.</p>
+            <button className={button} disabled={busy || inspecting || stale} onClick={inspect}>Inspect stored evidence</button>
+            {inspecting && <p role="status">Inspecting stored evidence...</p>}
+            {inspectionError && <p role="alert">{inspectionError} {!stale && <button className={button} disabled={busy || inspecting} onClick={inspect}>Retry inspection</button>}</p>}
+            {inspection && <div>
+              <p>Inspected at {inspection.inspected_at} · Stored proposal revision {inspection.proposal_revision}</p>
+              {inspection.evidence.map((e) => <div key={e.index} className="border-t border-[#303030] py-2">
+                <p>Evidence {e.index}: {e.source_type} · {e.source_id} · {e.status}</p>
+                <p>Text match: {e.quote_match === null ? "unavailable" : e.quote_match ? "yes" : "no"}</p>
+                <p>Claimed role: {e.claimed_role ?? "unavailable"} · Recorded role: {e.recorded_role ?? "unavailable"} · Role verified: {e.role_verified ? "yes" : "no"}</p>
+                {e.excerpt !== null && <pre className="whitespace-pre-wrap break-words">{e.excerpt}</pre>}
+                {e.source_hash !== null && <p>Local content hash: {e.source_hash}</p>}
+                {e.source_revision !== null && <p>Source revision: {e.source_revision}</p>}
+                {Object.entries(e.locator).map(([name, value]) => value !== null && <p key={name}>{name}: {value}</p>)}
+                {e.matched_span && <p>Source code point offsets: {e.matched_span.start}–{e.matched_span.end}</p>}
+                <p>{e.note}</p>
+              </div>)}
+            </div>}
+          </div>
           {selected.status === "proposed" && (
             <>
               <label className="block">
@@ -317,7 +381,7 @@ export function ReviewTab({
               {stale && (
                 <button
                   className={button}
-                  disabled={busy}
+                  disabled={busy || inspecting}
                   onClick={retryProposal}
                 >
                   Reload current proposal and keep edits
@@ -327,7 +391,7 @@ export function ReviewTab({
                 <button
                   className={button}
                   disabled={
-                    busy ||
+                    busy || inspecting ||
                     stale ||
                     !content.trim() ||
                     previewKey !==
@@ -344,7 +408,7 @@ export function ReviewTab({
                 </button>
                 <button
                   className={button}
-                  disabled={busy || stale}
+                  disabled={busy || inspecting || stale}
                   onClick={() => resolve("reject")}
                 >
                   Reject
@@ -397,7 +461,7 @@ export function ReviewTab({
                   <p>{r.snapshot.content}</p>
                   <button
                     className={button}
-                    disabled={busy || !!historyError}
+                    disabled={busy || inspecting || !!historyError}
                     onClick={() => restore(r.revision)}
                   >
                     Restore revision {r.revision}
