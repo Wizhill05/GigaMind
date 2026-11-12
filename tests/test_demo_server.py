@@ -82,6 +82,32 @@ def test_launcher_end_to_end(tmp_path):
             assert stats["total_memories"] == 64
             assert stats["total_chat_logs"] == 15
             assert get("/api/v1/review/context?query=unrelated")["rules"]
+            assert get("/api/v1/review/handoffs?project_id=demo-orchard")["total"] == 1
+            assert get("/api/v1/review/issues?project_id=demo-orchard")["total"] == 1
+            listed = get("/api/v1/jobs")["jobs"]
+            assert {j["state"] for j in listed} == {"queued", "cancelled", "failed"}
+            queued = next(j for j in listed if j["state"] == "queued")
+            request = Request(
+                url + "/api/v1/jobs/" + queued["id"] + "/cancel",
+                headers={"Authorization": "Bearer " + key},
+                method="POST",
+            )
+            with urlopen(request, timeout=3) as response:
+                assert json.load(response)["state"] == "cancelled"
+            request = Request(
+                url + "/api/v1/search_files",
+                data=json.dumps({"query": "vermilion lantern"}).encode(),
+                headers={
+                    "Authorization": "Bearer " + key,
+                    "Content-Type": "application/json",
+                },
+            )
+            with urlopen(request, timeout=10) as response:
+                results = json.load(response)["results"]
+            assert any(
+                r.get("page_number") == 12 and r.get("source") == "file"
+                for r in results
+            )
             assets = list((runtime / "dist/assets").glob("*.js"))
             assert any("Synthetic demo" in f.read_text() for f in assets)
             assert hostile.read_bytes() == b"untouched"

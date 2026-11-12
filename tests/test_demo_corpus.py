@@ -38,6 +38,23 @@ def test_demo_corpus(tmp_path, monkeypatch):
         assert len(session.exec(select(ConversationItem)).all()) == 15
         indexes = session.exec(select(MemoryIndexState)).all()
         assert len(indexes) == 64 and all(i.index_status == "pending" for i in indexes)
+        from gigamind.db.database import StorageFileItem, StorageChunkItem
+        from gigamind.db.jobs import Job
+
+        files = session.exec(select(StorageFileItem)).all()
+        chunks = session.exec(select(StorageChunkItem)).all()
+        assert len(files) == 3 and all(
+            f.indexing_status == "pending" and f.embedding_json == "[]" for f in files
+        )
+        assert len(chunks) == 36 and all(c.embedding_json == "[]" for c in chunks)
+        assert all(
+            c.page_number == 12 for c in chunks if "vermilion lantern" in c.content
+        )
+        assert {j.state for j in session.exec(select(Job)).all()} == {
+            "queued",
+            "cancelled",
+            "failed",
+        }
         records = session.exec(select(AcceptedKnowledge)).all()
         old = next(r for r in records if r.status == "superseded")
         assert [r["status"] for r in trust.get_history(actor, old.id)["revisions"]] == [

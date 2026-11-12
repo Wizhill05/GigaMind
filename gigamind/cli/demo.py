@@ -29,6 +29,9 @@ def main():
     from sqlmodel import Session
     from gigamind.db.database import init_db, engine, MemoryItem, ConversationItem
     from gigamind.db.memory_index import MemoryIndexState
+    from gigamind.db.database import StorageFileItem, StorageChunkItem
+    from gigamind.services import coordination, jobs
+    from datetime import datetime, timezone
     from gigamind.security import Actor
     from gigamind.services import trust
 
@@ -85,6 +88,48 @@ def main():
                     created_at=stamp,
                 )
             )
+        for i, project in enumerate(data["projects"]):
+            key = f"synthetic-demo/{project}/field-notes.txt"
+            filename = f"{project}-field-notes.txt"
+            pages = [
+                f"SYNTHETIC DEMO: {project} fictional notes, page {n}. "
+                + (
+                    "The vermilion lantern marks the assembly point."
+                    if n == 12
+                    else "Routine planning notes."
+                )
+                for n in range(1, 13)
+            ]
+            session.add(
+                StorageFileItem(
+                    id=f"demo-file-{i}",
+                    key=key,
+                    filename=filename,
+                    mime_type="text/plain",
+                    multimodal_type="text",
+                    source_agent="synthetic-demo",
+                    extracted_text_length=sum(map(len, pages)),
+                    total_chunks=len(pages),
+                    indexing_status="pending",
+                    document_summary=f"SYNTHETIC DEMO: {project} text-only notes; vectors pending.",
+                    created_at=stamp,
+                    updated_at=stamp,
+                )
+            )
+            for n, content in enumerate(pages):
+                session.add(
+                    StorageChunkItem(
+                        id=f"demo-file-{i}-chunk-{n}",
+                        file_id=f"demo-file-{i}",
+                        file_key=key,
+                        filename=filename,
+                        chunk_index=n,
+                        total_chunks=len(pages),
+                        page_number=n + 1,
+                        content=content,
+                        created_at=stamp,
+                    )
+                )
         session.commit()
 
     def proposal(
@@ -135,7 +180,7 @@ def main():
         "demo-orchard",
         subject="launch cadence",
     )
-    proposal(
+    current = proposal(
         "new",
         "Orchard launch cadence is weekly.",
         "demo-orchard",
@@ -162,6 +207,42 @@ def main():
             subject="budget",
             approve=False,
         )
+    for project in ("demo-orchard", "demo-harbor"):
+        coordination.save_handoff(
+            actor,
+            task_name="SYNTHETIC DEMO: planning handoff",
+            summary=f"SYNTHETIC DEMO: {project} fictional next steps",
+            status="open",
+            project_id=project,
+            verified_outcomes=[],
+            unresolved=["Synthetic review pending"],
+            next_actions=["Review fictional notes"],
+            idempotency_key=f"demo-handoff-{project}",
+        )
+    coordination.report_memory_issue(
+        actor,
+        memory_id=current["id"],
+        project_id="demo-orchard",
+        reason="SYNTHETIC DEMO: review the fictional cadence",
+        idempotency_key="demo-issue",
+    )
+    with Session(engine) as session:
+        for state in ("queued", "cancelled", "failed"):
+            job = jobs.enqueue_in_session(
+                session,
+                "index_file",
+                {"key": f"synthetic-demo/job-{state}.txt"},
+                idempotency_key=f"synthetic-demo-{state}",
+                not_before=datetime(9999, 1, 1, tzinfo=timezone.utc),
+            )
+            if state != "queued":
+                job.state = state
+            if state == "failed":
+                job.error = (
+                    "SYNTHETIC DEMO: simulated failure; no provider was contacted"
+                )
+            session.add(job)
+        session.commit()
     print(f"Synthetic demo database created: {path}")
 
 
