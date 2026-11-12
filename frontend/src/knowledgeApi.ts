@@ -18,7 +18,9 @@ const memory = z.object({
   writer_id: z.string(),
   revision: z.number().int().positive().safe(),
   status: z.string(),
-  validity_status: z.enum(["active", "future", "expired", "inactive"]).optional(),
+  validity_status: z
+    .enum(["active", "future", "expired", "inactive"])
+    .optional(),
   kind: z.string().optional(),
   valid_from: z.string().nullable().optional(),
   valid_until: z.string().nullable().optional(),
@@ -79,7 +81,7 @@ export function listKnowledge(
     z.object({
       memories: z.array(memory),
       total: z.number().int().nonnegative().safe(),
-      as_of: z.string().optional(),
+      as_of: timestamp.optional(),
     }),
     { signal },
   );

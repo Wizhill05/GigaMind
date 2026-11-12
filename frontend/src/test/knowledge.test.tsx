@@ -542,7 +542,9 @@ test.each(["list", "history", "validity"])(
     expect(screen.queryByText("Loading knowledge...")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Reload"));
     await screen.findByText("Approved fact");
-    expect(fetcher.mock.calls[fetcher.mock.calls.length - 1]?.[1]?.headers).toMatchObject({
+    expect(
+      fetcher.mock.calls[fetcher.mock.calls.length - 1]?.[1]?.headers,
+    ).toMatchObject({
       Authorization: "Bearer new",
     });
   },
@@ -604,12 +606,30 @@ test("shows server validity and as-of context on refresh without inferring from 
     version += 1;
     return json({
       memories: [
-        { ...memory, validity_status: version === 1 ? "future" : "expired", valid_from: "2026-01-01T00:00:00.123456Z" },
-        { ...memory, id: "two", content: "Inactive fact", status: "deleted", validity_status: "inactive" },
-        { ...memory, id: "three", content: "Active fact", validity_status: "active" },
+        {
+          ...memory,
+          validity_status: version === 1 ? "future" : "expired",
+          valid_from: "2026-01-01T00:00:00.123456Z",
+        },
+        {
+          ...memory,
+          id: "two",
+          content: "Inactive fact",
+          status: "deleted",
+          validity_status: "inactive",
+        },
+        {
+          ...memory,
+          id: "three",
+          content: "Active fact",
+          validity_status: "active",
+        },
       ],
       total: 3,
-      as_of: version === 1 ? "2026-01-01T00:00:00.123455+00:00" : "2026-01-02T00:00:00.000001+00:00",
+      as_of:
+        version === 1
+          ? "2026-01-01T00:00:00.123455+00:00"
+          : "2026-01-02T00:00:00.000001+00:00",
     });
   });
   const view = render(<KnowledgeTab refreshVersion={0} />);
@@ -621,3 +641,70 @@ test("shows server validity and as-of context on refresh without inferring from 
   expect(await screen.findByText("Validity: expired")).toBeInTheDocument();
   expect(screen.getByText(/2026-01-02T00:00:00.000001/)).toBeInTheDocument();
 });
+
+test("App displays server-time validity changes through authenticated header refresh", async () => {
+  const { App } = await import("../App");
+  let expired = false;
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (url) => {
+      if (String(url).includes("/review/knowledge?"))
+        return json({
+          memories: [
+            { ...memory, validity_status: expired ? "expired" : "active" },
+          ],
+          total: 1,
+          as_of: expired
+            ? "2026-01-02T00:00:00.000001Z"
+            : "2026-01-01T00:00:00.123456Z",
+        });
+      return json({
+        total_memories: 0,
+        total_storage_files: 0,
+        total_profile_rules: 0,
+        total_chat_logs: 0,
+      });
+    });
+  render(<App />);
+  expect(fetcher).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Master API Key"), {
+    target: { value: "master" },
+  });
+  fireEvent.click(screen.getByText("Authorize Connection"));
+  fireEvent.click(
+    within(await screen.findByRole("complementary")).getByRole("button", {
+      name: "Approved Knowledge",
+    }),
+  );
+  await screen.findByText("Validity: active");
+  expect(screen.getByText(/server time:/)).toHaveTextContent(
+    "2026-01-01T00:00:00.123456Z",
+  );
+  expired = true;
+  fireEvent.click(screen.getByTitle("Refresh telemetry"));
+  await screen.findByText("Validity: expired");
+  expect(screen.getByText(/server time:/)).toHaveTextContent(
+    "2026-01-02T00:00:00.000001Z",
+  );
+});
+
+test.each([undefined, "not-a-timestamp"])(
+  "does not claim validity without a usable server instant %s",
+  async (as_of) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      json({
+        memories: [{ ...memory, validity_status: "active" }],
+        total: 1,
+        as_of,
+      }),
+    );
+    render(<KnowledgeTab refreshVersion={0} />);
+    if (as_of === undefined)
+      expect(await screen.findByText("Validity: unknown")).toBeInTheDocument();
+    else
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Could not load knowledge",
+      );
+    expect(screen.queryByText("Validity: active")).not.toBeInTheDocument();
+  },
+);

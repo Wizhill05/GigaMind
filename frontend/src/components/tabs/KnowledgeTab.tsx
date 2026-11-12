@@ -37,7 +37,11 @@ export function KnowledgeTab({
   const [project, setProject] = useState("");
   const [status, setStatus] = useState("accepted");
   const [offset, setOffset] = useState(0);
-  const [data, setData] = useState<{ memories: Knowledge[]; total: number; as_of?: string }>({
+  const [data, setData] = useState<{
+    memories: Knowledge[];
+    total: number;
+    as_of?: string;
+  }>({
     memories: [],
     total: 0,
   });
@@ -254,12 +258,19 @@ export function KnowledgeTab({
         </div>
       )}
       {loading ? <p>Loading knowledge...</p> : <p>{data.total} records</p>}
-      {!loading && <p>Validity status as of server time: {data.as_of ?? "Unreported"}</p>}
+      {!loading && (
+        <p>Validity status as of server time: {data.as_of ?? "Unreported"}</p>
+      )}
       {!loading &&
         data.memories.map((m) => (
           <article key={m.id} className="border border-[#333] p-4 space-y-2">
             <p>{m.content}</p>
-            <p><span className="inline-block rounded border border-[#777] px-2 py-1">Validity: {m.validity_status ?? "unknown"}</span></p>
+            <p>
+              <span className="inline-block rounded border border-[#777] px-2 py-1">
+                Validity:{" "}
+                {data.as_of ? (m.validity_status ?? "unknown") : "unknown"}
+              </span>
+            </p>
             <p>
               Valid from:{" "}
               {m.valid_from === undefined

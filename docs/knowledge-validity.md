@@ -7,3 +7,5 @@ A record outside its window remains accepted in storage. It is excluded from ret
 A context request evaluates search results and preferences at the same request-time instant. A restore applies bounds recorded in the selected snapshot, including explicit nulls. For a legacy snapshot that lacks a bound, restore preserves the current bound for that field.
 
 The knowledge list reports a derived `validity_status` for each record and an `as_of` UTC instant for the response. Accepted records are active, future, or expired at that instant; other record statuses are inactive. Scoped reads use the same instant to select eligible records. These fields are read-only and are not stored in revision snapshots.
+
+The console labels validity at the returned server instant. Refresh to obtain a new instant; the browser does not infer current eligibility from its own clock. If a response lacks a usable server timestamp, the console reports the status as unknown.

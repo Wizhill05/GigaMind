@@ -97,6 +97,8 @@ def test_authenticated_knowledge_list_filters_before_pagination(tmp_path, monkey
             ):
                 assert get(params).status_code == 403
             page = get({"project_id": "a", "limit": 1}).json()
+            assert page["as_of"].endswith("+00:00")
+            assert page["memories"][0]["validity_status"] == "active"
             assert page["total"] == 2 and [m["id"] for m in page["memories"]] == [
                 newest["id"]
             ]

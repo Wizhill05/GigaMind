@@ -334,24 +334,34 @@ def test_restore_legacy_missing_bounds_and_explicit_null(records):
     ]
     assert restored["valid_until"] is None
 
-@pytest.mark.parametrize("instant,expected", [
-    ("2024-12-31T23:59:59.999999+00:00", "future"),
-    ("2025-01-01T00:00:00.000000+00:00", "active"),
-    ("2025-01-01T00:00:00.000001+00:00", "active"),
-    ("2025-01-01T00:00:00.000002+00:00", "expired"),
-])
+
+@pytest.mark.parametrize(
+    "instant,expected",
+    [
+        ("2024-12-31T23:59:59.999999+00:00", "future"),
+        ("2025-01-01T00:00:00.000000+00:00", "active"),
+        ("2025-01-01T00:00:00.000001+00:00", "active"),
+        ("2025-01-01T00:00:00.000002+00:00", "expired"),
+    ],
+)
 def test_list_status_uses_one_instant(records, monkeypatch, instant, expected):
     from gigamind.services import knowledge_list
 
     admin, agent, memory = records
-    validity.set_validity(admin, memory["id"], expected_revision=1,
-                          valid_from="2025-01-01T01:00:00+01:00",
-                          valid_until="2025-01-01T00:00:00.000002Z")
+    validity.set_validity(
+        admin,
+        memory["id"],
+        expected_revision=1,
+        valid_from="2025-01-01T01:00:00+01:00",
+        valid_until="2025-01-01T00:00:00.000002Z",
+    )
     history = trust.get_history(admin, memory["id"])
     calls = []
+
     def clock():
         calls.append(instant)
         return instant
+
     monkeypatch.setattr(validity, "current_time", clock)
     result = knowledge_list.list_knowledge(admin, project_id="a")
     assert result["as_of"] == instant
@@ -372,15 +382,27 @@ def test_list_http_inactive_and_scope(records, monkeypatch):
 
     admin, agent, memory = records
     trust.delete_memory(admin, memory["id"], expected_revision=1)
-    monkeypatch.setattr(validity, "current_time", lambda: "2025-01-01T00:00:00.000001+00:00")
+    monkeypatch.setattr(
+        validity, "current_time", lambda: "2025-01-01T00:00:00.000001+00:00"
+    )
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_actor] = lambda: admin
     client = TestClient(app)
-    result = client.get("/api/v1/review/knowledge", params={"project_id": "a", "status": "deleted"})
+    result = client.get(
+        "/api/v1/review/knowledge", params={"project_id": "a", "status": "deleted"}
+    )
     assert result.status_code == 200
     assert result.json()["as_of"] == "2025-01-01T00:00:00.000001+00:00"
     assert result.json()["memories"][0]["validity_status"] == "inactive"
     app.dependency_overrides[get_actor] = lambda: agent
-    assert client.get("/api/v1/review/knowledge", params={"project_id": "a", "status": "deleted"}).status_code == 403
-    assert client.get("/api/v1/review/knowledge", params={"project_id": "b"}).status_code == 403
+    assert (
+        client.get(
+            "/api/v1/review/knowledge", params={"project_id": "a", "status": "deleted"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get("/api/v1/review/knowledge", params={"project_id": "b"}).status_code
+        == 403
+    )
