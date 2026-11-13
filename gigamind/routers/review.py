@@ -53,6 +53,20 @@ def proposals(
     return trust.list_proposals(actor, project_id, limit=limit, offset=offset)
 
 
+class InspectEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: StrictInt = Field(ge=1)
+
+
+@router.post("/proposals/{proposal_id}/inspect-evidence")
+def inspect_evidence(
+    proposal_id: str, body: InspectEvidence, actor: Actor = Depends(get_actor)
+):
+    from gigamind.services import evidence_inspection
+
+    return evidence_inspection.inspect(actor, proposal_id, body.expected_revision)
+
+
 @router.post("/proposals/{proposal_id}/resolve")
 def resolve(proposal_id: str, body: Resolution, actor: Actor = Depends(get_actor)):
     return trust.resolve_proposal(actor, proposal_id, **dump(body))

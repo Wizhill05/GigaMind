@@ -1,0 +1,5 @@
+# Evidence inspection
+
+Administrators can inspect a stored proposal with `POST /api/v1/review/proposals/{id}/inspect-evidence` and `{"expected_revision": 1}`. A stale revision returns 409. Inspection reads current local memory, conversation messages, and file chunks; other source types are unsupported. Deleted file resources are hidden. Inspection does not change the proposal or its audit history.
+
+A match means only that the exact quote occurs in the current stored text. Conversation role verification compares the claim to the recorded role of the matching message; it does not establish a person's identity. The SHA-256 hash identifies inspected local text and is not signed provenance. Spans use Unicode code point offsets in the source text (for conversations, the selected message); excerpts are limited to 1,200 characters and are not the full offset-addressable source. Sources over 100,000 UTF-8 bytes and sources exceeding the 1,000,000-byte request budget are unresolved. Duplicate references share the request budget and cached source read. A memory revision is reported when an index state exists. No remote content is fetched.

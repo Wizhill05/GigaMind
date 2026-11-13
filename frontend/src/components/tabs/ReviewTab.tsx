@@ -31,14 +31,42 @@ export function ReviewTab({
   const [inspecting, setInspecting] = useState(false);
   const inspectionRequest = useRef<AbortController | null>(null);
   const key = getApiKey();
+  const alive = useRef(true);
+  const mutationPending = useRef(false);
+  const inspectionCredential = useRef(key);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    setSelected(null);
+    setItems([]);
+    setContent("");
+    setHistoryId(null);
+    setCurrent(null);
+    setRevisions([]);
+    setDetailError("");
+    setStale(false);
+  }, [key]);
   useEffect(() => {
     inspectionRequest.current?.abort();
     inspectionRequest.current = null;
     setInspecting(false);
     setInspection(null);
     setInspectionError("");
-    return () => { inspectionRequest.current?.abort(); inspectionRequest.current = null; };
-  }, [selected?.id, selected?.revision, selected?.project_id, key, refreshVersion]);
+    return () => {
+      inspectionRequest.current?.abort();
+      inspectionRequest.current = null;
+    };
+  }, [
+    selected?.id,
+    selected?.revision,
+    selected?.project_id,
+    key,
+    refreshVersion,
+  ]);
   const [offset, setOffset] = useState(0);
   const [reload, setReload] = useState(0);
   const [total, setTotal] = useState(0);
@@ -64,20 +92,20 @@ export function ReviewTab({
     setError("");
     listProposals(offset, c.signal)
       .then((d) => {
-        if (!c.signal.aborted) {
+        if (!c.signal.aborted && getApiKey() === key) {
           setItems(d.proposals);
           setTotal(d.total);
           setLoading(false);
         }
       })
       .catch((e) => {
-        if (!c.signal.aborted) {
+        if (!c.signal.aborted && getApiKey() === key) {
           setError(message(e));
           setLoading(false);
         }
       });
     return () => c.abort();
-  }, [offset, reload, refreshVersion]);
+  }, [offset, reload, refreshVersion, key]);
   useEffect(() => {
     const c = new AbortController();
     setConflicts([]);
@@ -85,26 +113,31 @@ export function ReviewTab({
     setPreviewKey("");
     if (selected?.status === "proposed" && content.trim() && !stale) {
       setDetailError("");
-      const key = JSON.stringify([selected.id, selected.revision, content]);
+      const draftKey = JSON.stringify([
+        selected.id,
+        selected.revision,
+        content,
+      ]);
       const timer = window.setTimeout(() => {
         previewProposal(selected.id, content, selected.revision, c.signal)
           .then((result) => {
             if (
               !c.signal.aborted &&
+              getApiKey() === key &&
               result.proposal_id === selected.id &&
               result.revision === selected.revision &&
               result.content === content.trim()
             ) {
               setConflicts(result.conflicts);
-              setPreviewKey(key);
-            } else if (!c.signal.aborted) {
+              setPreviewKey(draftKey);
+            } else if (!c.signal.aborted && getApiKey() === key) {
               setDetailError(
                 "Preview response did not match the current draft. Please retry.",
               );
             }
           })
           .catch((e) => {
-            if (!c.signal.aborted) {
+            if (!c.signal.aborted && getApiKey() === key) {
               setDetailError(message(e));
               if (e instanceof ApiError && e.status === 409) setStale(true);
             }
@@ -116,7 +149,7 @@ export function ReviewTab({
       };
     }
     return () => c.abort();
-  }, [selected, content, detailReload, stale]);
+  }, [selected, content, detailReload, stale, key]);
   useEffect(() => {
     const c = new AbortController();
     setCurrent(null);
@@ -128,30 +161,51 @@ export function ReviewTab({
         getHistory(historyId, c.signal),
       ])
         .then(([m, h]) => {
-          if (!c.signal.aborted) {
+          if (!c.signal.aborted && getApiKey() === key) {
             setCurrent(m.memory);
             setRevisions(h.revisions);
           }
         })
         .catch((e) => {
-          if (!c.signal.aborted) setHistoryError(message(e));
+          if (!c.signal.aborted && getApiKey() === key)
+            setHistoryError(message(e));
         });
     return () => c.abort();
-  }, [historyId, historyReload]);
+  }, [historyId, historyReload, key]);
   async function inspect() {
     if (!selected || busy || stale || inspectionRequest.current) return;
     const controller = new AbortController();
     inspectionRequest.current = controller;
+    inspectionCredential.current = key;
     setInspecting(true);
     setInspection(null);
     setInspectionError("");
     try {
-      const result = await inspectEvidence(selected.id, selected.revision, controller.signal);
-      if (controller.signal.aborted || inspectionRequest.current !== controller || getApiKey() !== key) return;
-      if (result.proposal_id !== selected.id || result.proposal_revision !== selected.revision) throw new Error("Inspection response did not match the stored proposal revision. Please retry.");
+      const result = await inspectEvidence(
+        selected.id,
+        selected.revision,
+        controller.signal,
+      );
+      if (
+        controller.signal.aborted ||
+        inspectionRequest.current !== controller ||
+        getApiKey() !== key
+      )
+        return;
+      if (
+        result.proposal_id !== selected.id ||
+        result.proposal_revision !== selected.revision
+      )
+        throw new Error(
+          "Inspection response did not match the stored proposal revision. Please retry.",
+        );
       setInspection(result);
     } catch (e) {
-      if (!controller.signal.aborted && inspectionRequest.current === controller && getApiKey() === key) {
+      if (
+        !controller.signal.aborted &&
+        inspectionRequest.current === controller &&
+        getApiKey() === key
+      ) {
         setInspectionError(message(e));
         if (e instanceof ApiError && e.status === 409) setStale(true);
       }
@@ -163,7 +217,11 @@ export function ReviewTab({
     }
   }
   async function resolve(action: "approve" | "reject") {
-    if (!selected || inspectionRequest.current || busy) return;
+    if (!selected || inspectionRequest.current || mutationPending.current)
+      return;
+    mutationPending.current = true;
+    const credential = getApiKey();
+    const valid = () => alive.current && getApiKey() === credential;
     setBusy(true);
     setDetailError("");
     try {
@@ -173,21 +231,29 @@ export function ReviewTab({
         ...(action === "approve" ? { content } : {}),
         supersedes: action === "approve" ? chosen : [],
       });
+      if (!valid()) return;
       setSelected(null);
       setReload((v) => v + 1);
       onMutation();
     } catch (e) {
+      if (!valid()) return;
       setDetailError(message(e));
       if (e instanceof ApiError && e.status === 409) setStale(true);
     } finally {
-      setBusy(false);
+      mutationPending.current = false;
+      if (alive.current) setBusy(false);
     }
   }
   async function retryProposal() {
-    if (!selected || inspectionRequest.current || busy) return;
+    if (!selected || inspectionRequest.current || mutationPending.current)
+      return;
+    mutationPending.current = true;
+    const credential = getApiKey();
+    const valid = () => alive.current && getApiKey() === credential;
     setBusy(true);
     try {
       const page = await listProposals(offset);
+      if (!valid()) return;
       const fresh = page.proposals.find((p) => p.id === selected.id);
       if (!fresh) throw new Error("Proposal is no longer on this page.");
       setSelected(fresh);
@@ -195,13 +261,19 @@ export function ReviewTab({
       setItems(page.proposals);
       setTotal(page.total);
     } catch (e) {
+      if (!valid()) return;
       setDetailError(message(e));
     } finally {
-      setBusy(false);
+      mutationPending.current = false;
+      if (alive.current) setBusy(false);
     }
   }
   async function restore(revision: number) {
-    if (!current || inspectionRequest.current || busy) return;
+    if (!current || inspectionRequest.current || mutationPending.current)
+      return;
+    mutationPending.current = true;
+    const credential = getApiKey();
+    const valid = () => alive.current && getApiKey() === credential;
     setBusy(true);
     setHistoryError("");
     try {
@@ -209,12 +281,15 @@ export function ReviewTab({
         revision,
         expected_revision: current.revision,
       });
+      if (!valid()) return;
       setHistoryReload((v) => v + 1);
       onMutation();
     } catch (e) {
+      if (!valid()) return;
       setHistoryError(message(e));
     } finally {
-      setBusy(false);
+      mutationPending.current = false;
+      if (alive.current) setBusy(false);
     }
   }
   return (
@@ -305,24 +380,90 @@ export function ReviewTab({
             <p>No evidence supplied.</p>
           )}
           <div className="space-y-2">
-            <p>Inspects the stored proposal revision, not the approval draft. Supported sources: memory, conversation, and file chunks; other source kinds are unsupported. Text matches do not establish truth, identity, or approval. Hashes describe local content, not signed provenance.</p>
-            <button className={button} disabled={busy || inspecting || stale} onClick={inspect}>Inspect stored evidence</button>
+            <p>
+              Inspects the stored proposal revision, not the approval draft.
+              Supported sources: memory, conversation, and file chunks; other
+              source kinds are unsupported. Text matches do not establish truth,
+              identity, or approval. Hashes describe local content, not signed
+              provenance.
+            </p>
+            <button
+              className={button}
+              disabled={busy || inspecting || stale}
+              onClick={inspect}
+            >
+              Inspect stored evidence
+            </button>
             {inspecting && <p role="status">Inspecting stored evidence...</p>}
-            {inspectionError && <p role="alert">{inspectionError} {!stale && <button className={button} disabled={busy || inspecting} onClick={inspect}>Retry inspection</button>}</p>}
-            {inspection && <div>
-              <p>Inspected at {inspection.inspected_at} · Stored proposal revision {inspection.proposal_revision}</p>
-              {inspection.evidence.map((e) => <div key={e.index} className="border-t border-[#303030] py-2">
-                <p>Evidence {e.index}: {e.source_type} · {e.source_id} · {e.status}</p>
-                <p>Text match: {e.quote_match === null ? "unavailable" : e.quote_match ? "yes" : "no"}</p>
-                <p>Claimed role: {e.claimed_role ?? "unavailable"} · Recorded role: {e.recorded_role ?? "unavailable"} · Role verified: {e.role_verified ? "yes" : "no"}</p>
-                {e.excerpt !== null && <pre className="whitespace-pre-wrap break-words">{e.excerpt}</pre>}
-                {e.source_hash !== null && <p>Local content hash: {e.source_hash}</p>}
-                {e.source_revision !== null && <p>Source revision: {e.source_revision}</p>}
-                {Object.entries(e.locator).map(([name, value]) => value !== null && <p key={name}>{name}: {value}</p>)}
-                {e.matched_span && <p>Source code point offsets: {e.matched_span.start}–{e.matched_span.end}</p>}
-                <p>{e.note}</p>
-              </div>)}
-            </div>}
+            {inspectionError && (
+              <p role="alert">
+                {inspectionError}{" "}
+                {!stale && (
+                  <button
+                    className={button}
+                    disabled={busy || inspecting}
+                    onClick={inspect}
+                  >
+                    Retry inspection
+                  </button>
+                )}
+              </p>
+            )}
+            {inspection && inspectionCredential.current === getApiKey() && (
+              <div>
+                <p>
+                  Inspected at {inspection.inspected_at} · Stored proposal
+                  revision {inspection.proposal_revision}
+                </p>
+                {inspection.evidence.map((e) => (
+                  <div key={e.index} className="border-t border-[#303030] py-2">
+                    <p>
+                      Evidence {e.index}: {e.source_type} · {e.source_id} ·{" "}
+                      {e.status}
+                    </p>
+                    <p>
+                      Text match:{" "}
+                      {e.quote_match === null
+                        ? "unavailable"
+                        : e.quote_match
+                          ? "yes"
+                          : "no"}
+                    </p>
+                    <p>
+                      Claimed role: {e.claimed_role ?? "unavailable"} · Recorded
+                      role: {e.recorded_role ?? "unavailable"} · Recorded-role
+                      match: {e.role_verified ? "yes" : "no"}
+                    </p>
+                    {e.excerpt !== null && (
+                      <pre className="whitespace-pre-wrap break-words">
+                        {e.excerpt}
+                      </pre>
+                    )}
+                    {e.source_hash !== null && (
+                      <p>Local content hash: {e.source_hash}</p>
+                    )}
+                    {e.source_revision !== null && (
+                      <p>Source revision: {e.source_revision}</p>
+                    )}
+                    {Object.entries(e.locator).map(
+                      ([name, value]) =>
+                        value !== null && (
+                          <p key={name}>
+                            {name}: {value}
+                          </p>
+                        ),
+                    )}
+                    {e.matched_span && (
+                      <p>
+                        Source code point offsets: {e.matched_span.start}–
+                        {e.matched_span.end}
+                      </p>
+                    )}
+                    <p>{e.note}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           {selected.status === "proposed" && (
             <>
@@ -391,7 +532,8 @@ export function ReviewTab({
                 <button
                   className={button}
                   disabled={
-                    busy || inspecting ||
+                    busy ||
+                    inspecting ||
                     stale ||
                     !content.trim() ||
                     previewKey !==
