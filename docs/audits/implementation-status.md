@@ -1,6 +1,6 @@
 Implementation status, 2026-11-13
 
-The original audit is the full scope. This file records completion gaps, not a reduced release plan. No deployment or production data changes have been performed.
+The original audit is the full scope. This file records completion gaps, not a reduced release plan. The reviewed application was deployed to production on13 November2026 after a verified backup. Production application data was reset and a fresh scoped client created. Earlier entries below retain their verification history. See [production connection](../production-connection.md) for the current endpoint and operation.
 
 Reviewed and integrated foundations:
 - Memory deletion/reset commits, logical-parent listing/statistics and category/source predicates.
