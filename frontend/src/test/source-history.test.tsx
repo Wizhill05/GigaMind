@@ -256,7 +256,7 @@ test("profile history uses the stored profile ID", async () => {
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input) => {
       if (String(input).includes("/provenance")) {
-        const data = body("stored-profile");
+        const data = body("stored/profile?x#y");
         return json({
           ...data,
           head: { ...data.head, kind: "profile" },
@@ -269,7 +269,7 @@ test("profile history uses the stored profile ID", async () => {
       return json({
         profile: [
           {
-            id: "stored-profile",
+            id: "stored/profile?x#y",
             key: "editor",
             value: "vim",
             category: "general",
@@ -287,7 +287,7 @@ test("profile history uses the stored profile ID", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "History" }));
   await screen.findByText("Original credential: Unknown (legacy)");
   expect(fetcher).toHaveBeenCalledWith(
-    expect.stringContaining("/sources/profile/stored-profile/provenance"),
+    expect.stringContaining("/sources/profile/stored%2Fprofile%3Fx%23y/provenance"),
     expect.objectContaining({
       headers: { Authorization: "Bearer history-test-key" },
     }),

@@ -60,3 +60,7 @@ def test_native_snapshot_is_consistent(native_source_db):
     )
 
     snapshot(native_source_db)
+
+
+def test_native_legacy_profile_path_ids(native_source_db):
+    behavior.test_legacy_profile_ids_with_reserved_path_characters(native_source_db)

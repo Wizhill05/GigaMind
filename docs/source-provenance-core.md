@@ -6,7 +6,7 @@ The Memory and Profile lists have a History action showing the original credenti
 
 ## API
 
-`GET /api/v1/sources/{kind}/{id}/provenance` is administrator-only, including reads of deleted-source metadata. `kind` is `memory` or `profile`. `limit` defaults to 20 and accepts 1–100; `offset` defaults to 0 and accepts 0–1,000,000. An unknown source returns 404. Directly seeded sources without receipts return explicit legacy-unknown attribution without creating audit data on a read.
+`GET /api/v1/sources/{kind}/{id}/provenance` is administrator-only, including reads of deleted-source metadata. `kind` is `memory` or `profile`. `limit` defaults to 20 and accepts 1–100; `offset` defaults to 0 and accepts 0–1,000,000. URL-encode the opaque source ID; legacy IDs containing slashes and other reserved characters remain supported. An unknown source returns 404. Directly seeded sources without receipts return explicit legacy-unknown attribution without creating audit data on a read.
 
 The JSON response has `head`, descending `receipts`, `total`, `limit`, and `offset`. The head contains `kind`, `source_id`, `revision`, `active`, `creator_id`, and `creator_provenance`. Creator provenance is `authenticated`, `unattributed`, or `legacy_unknown`. Each receipt contains its kind/source ID, positive receipt revision, operation, writer ID and provenance, optional payload hash and actual source revision, and a UTC timestamp. Receipt writer provenance is `authenticated` or `unattributed`.
 

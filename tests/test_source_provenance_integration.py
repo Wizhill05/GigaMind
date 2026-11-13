@@ -532,3 +532,37 @@ def test_http_reset_uses_current_master_and_records_writer(provenance_db, monkey
         assert result["receipts"][0]["writer_id"] == "master"
         assert result["receipts"][0]["operation"] == "reset"
         assert not result["head"]["active"]
+
+
+def test_legacy_profile_ids_with_reserved_path_characters(provenance_db):
+    from urllib.parse import quote
+    from fastapi.testclient import TestClient
+    from sqlmodel import Session
+    from gigamind.db.database import ProfileItem
+    from gigamind.main import app
+
+    source_id = "legacy/a?b#c"
+    with Session(provenance_db) as session:
+        session.add(
+            ProfileItem(
+                id=source_id, key="legacy key", value="private value", updated_at="old"
+            )
+        )
+        session.commit()
+    headers = {"Authorization": "Bearer offline-test-master-key"}
+    encoded = quote(source_id, safe="")
+    path = f"/api/v1/sources/profile/{encoded}/provenance"
+    with TestClient(app) as client:
+        response = client.get(path, headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["head"]["source_id"] == source_id
+        assert response.json()["head"]["creator_provenance"] == "legacy_unknown"
+        assert (
+            source_provenance.read_provenance(provenance_db, "profile", source_id)
+            is None
+        )
+        assert (
+            client.delete("/api/v1/profile/" + encoded, headers=headers).status_code
+            == 200
+        )
+        assert not client.get(path, headers=headers).json()["head"]["active"]

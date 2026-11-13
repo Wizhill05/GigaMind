@@ -560,7 +560,7 @@ class SourceProvenancePage(BaseModel):
     offset: int = Field(ge=0, le=1_000_000)
 
 
-@app.get("/api/v1/sources/{kind}/{id}/provenance", response_model=SourceProvenancePage, dependencies=[Depends(verify_auth)])
+@app.get("/api/v1/sources/{kind}/{id:path}/provenance", response_model=SourceProvenancePage, dependencies=[Depends(verify_auth)])
 def api_source_provenance(
     kind: Literal["memory", "profile"], id: str = PathParameter(..., min_length=1, pattern=r"\S"),
     limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
@@ -599,7 +599,7 @@ def api_vectorize_conversation(id: str):
     if not success:
         raise HTTPException(status_code=404, detail=f"Conversation '{id}' not found")
     return {"success": True, "id": id, "message": f"Conversation {id} vectorized successfully"}
-@app.delete("/api/v1/profile/{id}", dependencies=[Depends(verify_auth)])
+@app.delete("/api/v1/profile/{id:path}", dependencies=[Depends(verify_auth)])
 def api_delete_profile_rule(id: str, actor: Actor = Depends(verify_auth)):
     success = delete_profile_rule(id, actor=actor)
     if not success:
