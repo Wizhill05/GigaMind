@@ -14,7 +14,13 @@ from gigamind.db import trust_models  # register trust tables
 from gigamind.db.jobs import UploadManifest
 from gigamind.db.coordination import Handoff, MemoryIssue
 
-VERSION = 5
+from gigamind.db.conversation_ledger import (
+    ConversationSource,
+    ConversationReceipt,
+    register_legacy,
+)
+
+VERSION = 6
 LEGACY_COLUMNS = {
     "memories": {
         "media_type": "TEXT DEFAULT 'text'",
@@ -222,6 +228,25 @@ def _upgrade(conn):
     _backfill(conn)
 
 
+def _upgrade_conversation_ledger(conn):
+    from gigamind.db.database import ConversationItem
+    from sqlalchemy import select
+
+    ConversationSource.__table__.create(conn, checkfirst=True)
+    ConversationReceipt.__table__.create(conn, checkfirst=True)
+    rows = conn.execute(
+        select(ConversationItem.id, ConversationItem.platform)
+        .where(
+            ~select(ConversationReceipt.conversation_id)
+            .where(ConversationReceipt.conversation_id == ConversationItem.id)
+            .exists()
+        )
+        .execution_options(yield_per=500)
+    )
+    for row in rows:
+        register_legacy(conn, row.id, row.platform)
+
+
 def migrate(engine):
     with engine.connect() as conn:
         if conn.dialect.name == "sqlite":
@@ -279,6 +304,8 @@ def migrate(engine):
                         conn.exec_driver_sql(
                             f'ALTER TABLE trust_knowledge ADD COLUMN "{name}" TEXT'
                         )
+            if version < 6:
+                _upgrade_conversation_ledger(conn)
             if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),

@@ -266,14 +266,14 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
     if (
       busyRef.current ||
       !window.confirm(
-        `Permanently delete conversation transcript "${title || id}" from database?`,
+        `Forget conversation "${title || id}"? This removes all stored versions with the same known platform and source ID and blocks their reimport. Backups and separately reviewed knowledge remain.`,
       )
     )
       return;
     void runMutation(async (valid) => {
       await deleteConversation(id);
       if (!valid()) return;
-      toast("Deleted conversation transcript", "success");
+      toast("Conversation source forgotten", "success");
       changed();
     });
   };

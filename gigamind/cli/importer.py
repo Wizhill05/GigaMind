@@ -30,7 +30,7 @@ def main():
                 inputs.append((platform, data))
         init_db()
         for platform, data in inputs:
-            result = import_conversations_data(data, platform)
+            result = import_conversations_data(data, platform, provenance="local_cli")
             print(f"{platform}: {result['message']}")
     except (OSError, ValueError) as exc:
         print(f"Import failed: {str(exc)[:300]}", file=sys.stderr)

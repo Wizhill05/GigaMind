@@ -560,12 +560,12 @@ def api_get_conversation(id: str):
 
 
 @app.delete("/api/v1/conversations/{id}", dependencies=[Depends(verify_auth)])
-def api_delete_conversation(id: str):
-    """Deletes a conversation transcript log by ID."""
-    success = delete_conversation(id)
+def api_delete_conversation(id: str, actor: Actor = Depends(verify_auth)):
+    """Forget the source and all versions linked to its known identity."""
+    success = delete_conversation(id, actor=actor)
     if not success:
         raise HTTPException(status_code=404, detail=f"Conversation '{id}' not found")
-    return {"success": True, "id": id, "message": f"Conversation {id} deleted successfully"}
+    return {"success": True, "id": id, "message": "Conversation source forgotten; linked versions removed"}
 
 @app.post("/api/v1/conversations/{id}/vectorize", dependencies=[Depends(verify_auth)])
 def api_vectorize_conversation(id: str):
@@ -582,7 +582,7 @@ def api_delete_profile_rule(id: str):
     return {"success": True, "id": id, "message": f"Profile rule {id} deleted successfully"}
 
 @app.post("/api/v1/conversations/import_file", dependencies=[Depends(verify_auth)])
-async def api_import_conversations_file(file: UploadFile = File(...), platform: Optional[str] = None):
+async def api_import_conversations_file(file: UploadFile = File(...), platform: Optional[str] = None, actor: Actor = Depends(verify_auth)):
     """Uploads and batch-imports conversations.json from Claude, ChatGPT, or standard exports."""
     from gigamind.services.conversation_import import MAX_BYTES
 
@@ -590,7 +590,7 @@ async def api_import_conversations_file(file: UploadFile = File(...), platform: 
         content = await file.read(MAX_BYTES + 1)
         if len(content) > MAX_BYTES:
             raise HTTPException(413, 'Conversation import exceeds size limit')
-        return await asyncio.to_thread(import_conversations_data, content, default_platform=platform)
+        return await asyncio.to_thread(import_conversations_data, content, default_platform=platform, actor=actor)
     except ValueError as exc:
         raise HTTPException(400, str(exc)[:300]) from None
     finally:

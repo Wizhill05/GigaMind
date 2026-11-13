@@ -194,6 +194,8 @@ def normalize_conversations(raw, default_platform=None):
             or len(agent.encode("utf-8")) > 512
         ):
             raise ValueError("Invalid indexed conversation metadata")
+        if source_id is not None and len(source_id) > 4096:
+            raise ValueError("Conversation source identifier exceeds size limit")
         if not messages:
             raise ValueError("Conversation has no text messages")
         canonical = {

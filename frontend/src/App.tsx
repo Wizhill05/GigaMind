@@ -179,14 +179,14 @@ export const AppContent: React.FC = () => {
     if (
       mutation.locked.current ||
       !window.confirm(
-        "Permanently delete conversation transcript from database?",
+        "Forget this conversation source? This removes all stored versions with the same known platform and source ID and blocks their reimport. Backups and separately reviewed knowledge remain.",
       )
     )
       return;
     void runTranscriptMutation(async (valid) => {
       await deleteConversation(id);
       if (!valid()) return;
-      toast("Deleted conversation transcript", "success");
+      toast("Conversation source forgotten", "success");
       setActiveTranscript(null);
       conversationChanged();
     });

@@ -675,43 +675,17 @@ def add_conversation_log(platform: str, title: str, summary: str, messages: List
     }
 
 def import_conversations_data(
-    raw_data: Any, default_platform: Optional[str] = None
+    raw_data: Any,
+    default_platform: Optional[str] = None,
+    *,
+    actor=None,
+    provenance: str = "unattributed",
 ) -> Dict[str, Any]:
-    from gigamind.services.conversation_import import normalize_conversations
-    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-    from sqlalchemy.dialects.postgresql import insert as postgres_insert
+    from gigamind.services.conversation_ledger import import_sources
 
-    conversations = normalize_conversations(raw_data, default_platform)
-    insert = postgres_insert if engine.dialect.name == "postgresql" else sqlite_insert
-    ingested = skipped = 0
-    with Session(engine) as session:
-        for conv in conversations:
-            result = session.execute(
-                insert(ConversationItem)
-                .values(
-                    id=conv["id"],
-                    platform=conv["platform"],
-                    title=conv["title"],
-                    summary=conv["summary"],
-                    source_agent=conv["source_agent"],
-                    created_at=conv["created_at"]
-                    or datetime.now(timezone.utc).isoformat(),
-                    messages_json=json.dumps(conv["messages"], ensure_ascii=False),
-                    embedding_json="[]",
-                )
-                .on_conflict_do_nothing(index_elements=["id"])
-            )
-            ingested += result.rowcount
-            skipped += 1 - result.rowcount
-        session.commit()
-    return {
-        "success": True,
-        "ingested": ingested,
-        "skipped": skipped,
-        "pending_indexing": ingested,
-        "total_processed": len(conversations),
-        "message": f"Imported {ingested} conversation(s); {skipped} duplicate(s) skipped. Indexing pending.",
-    }
+    return import_sources(
+        raw_data, default_platform, actor=actor, provenance=provenance, engine=engine
+    )
 
 
 def search_conversations(
@@ -1197,6 +1171,8 @@ def get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = 
         }
 
 def get_conversation(conv_id: str) -> Optional[Dict[str, Any]]:
+    from gigamind.services.conversation_ledger import get_receipt
+
     with Session(engine) as session:
         conv = session.get(ConversationItem, conv_id)
         if conv is None:
@@ -1205,20 +1181,16 @@ def get_conversation(conv_id: str) -> Optional[Dict[str, Any]]:
             "id": conv.id, "platform": conv.platform, "title": conv.title,
             "summary": conv.summary, "source_agent": conv.source_agent or "user",
             "messages": json.loads(conv.messages_json or "[]"),
+            "provenance": get_receipt(conv_id, engine=engine),
             "is_vectorized": bool(conv.embedding_json and conv.embedding_json != "[]"),
             "created_at": conv.created_at,
         }
 
 
-def delete_conversation(conv_id: str) -> bool:
-    """Deletes a conversation transcript session by ID."""
-    with Session(engine) as session:
-        conv = session.exec(select(ConversationItem).where(ConversationItem.id == conv_id)).first()
-        if not conv:
-            return False
-        session.delete(conv)
-        session.commit()
-        return True
+def delete_conversation(conv_id: str, *, actor=None) -> bool:
+    from gigamind.services.conversation_ledger import forget
+
+    return forget(conv_id, actor=actor, engine=engine)
 
 def vectorize_conversation(conv_id: str) -> bool:
     """Generates Gemini Embedding 2 vector for a single conversation."""
