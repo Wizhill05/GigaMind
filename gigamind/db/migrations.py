@@ -20,7 +20,9 @@ from gigamind.db.conversation_ledger import (
     register_legacy,
 )
 
-VERSION = 6
+from gigamind.db.source_provenance import SourceHead, SourceReceipt
+
+VERSION = 7
 LEGACY_COLUMNS = {
     "memories": {
         "media_type": "TEXT DEFAULT 'text'",
@@ -306,6 +308,15 @@ def migrate(engine):
                         )
             if version < 6:
                 _upgrade_conversation_ledger(conn)
+            if version < 7:
+                SourceHead.__table__.create(conn, checkfirst=True)
+                SourceReceipt.__table__.create(conn, checkfirst=True)
+                for kind, table, condition in (("memory", "memories", "parent_id IS NULL"), ("profile", "profile", "1=1")):
+                    conn.execute(text(
+                        "INSERT INTO source_provenance_heads (kind, source_id, revision, active, creator_provenance) "
+                        f"SELECT :kind, id, 0, true, 'legacy_unknown' FROM {table} WHERE {condition} "
+                        "ON CONFLICT (kind, source_id) DO NOTHING"
+                    ), {"kind": kind})
             if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),
