@@ -4,8 +4,8 @@ import asyncio
 import uuid
 import base64
 import binascii
-from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, BackgroundTasks, Query
+from typing import Optional, List, Dict, Any, Literal
+from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, BackgroundTasks, Query, Path as PathParameter
 from contextlib import asynccontextmanager
 from sqlalchemy import text, update, or_
 import hashlib
@@ -25,6 +25,7 @@ from gigamind.services.memory import (
     set_profile_rule,
     get_profile_rules,
     get_memories,
+    get_source_provenance,
     delete_memory,
     update_memory,
     get_conversations,
@@ -41,6 +42,7 @@ from gigamind.services.memory import (
 )
 from gigamind.security import Actor, ClientCredential, SCOPES, create_client, get_actor, public_client, require_scope, now_utc, usable
 from gigamind.db.database import engine
+from gigamind.db.source_provenance import SourceHead, SourceReceipt
 from sqlmodel import Session, select
 from gigamind.db.trust_models import initialize_trust_tables
 from gigamind.db.migrations import schema_ready
@@ -104,7 +106,6 @@ assets_dir = os.path.join(frontend_dist_dir, "assets")
 if os.path.exists(assets_dir):
     app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
 
-API_KEY = os.getenv("GIGAMIND_API_KEY", "")
 
 def verify_auth(actor: Actor = Depends(require_scope("admin"))):
     return actor
@@ -452,7 +453,7 @@ def api_get_profile(category: Optional[str] = None, source_agent: Optional[str] 
     return {"profile": rules}
 
 @app.post("/api/v1/add_memory", dependencies=[Depends(verify_auth)])
-def api_add_memory(req: AddMemoryRequest):
+def api_add_memory(req: AddMemoryRequest, actor: Actor = Depends(verify_auth)):
     mem = add_memory(
         content=req.content,
         category=req.category,
@@ -461,19 +462,21 @@ def api_add_memory(req: AddMemoryRequest):
         attachments=req.attachments,
         file_keys=req.file_keys,
         media_url=req.media_url,
-        media_type=req.media_type
+        media_type=req.media_type,
+        actor=actor
     )
     return {"success": True, "memory": mem}
 @app.post("/api/v1/set_profile_rule", dependencies=[Depends(verify_auth)])
-def api_set_profile_rule(req: SetProfileRuleRequest):
-    rule = set_profile_rule(key=req.key, value=req.value, category=req.category, source_agent=req.source_agent)
+def api_set_profile_rule(req: SetProfileRuleRequest, actor: Actor = Depends(verify_auth)):
+    rule = set_profile_rule(key=req.key, value=req.value, category=req.category, source_agent=req.source_agent, actor=actor)
     return {"success": True, "rule": rule}
 
 @app.post("/api/v1/memories/reset", dependencies=[Depends(verify_auth)])
-def api_reset_memories(req: ResetMemoriesRequest):
-    if req.password != API_KEY:
+def api_reset_memories(req: ResetMemoriesRequest, actor: Actor = Depends(verify_auth)):
+    configured_key = os.getenv("GIGAMIND_API_KEY", "")
+    if not configured_key or req.password != configured_key:
         raise HTTPException(status_code=401, detail="Invalid Master Password / API Key")
-    count = reset_all_memories()
+    count = reset_all_memories(actor=actor)
     return {"success": True, "count": count, "message": f"Hard reset complete. Purged {count} memory records from database."}
 
 @app.get("/api/v1/memories/export", dependencies=[Depends(verify_auth)])
@@ -516,24 +519,24 @@ def api_get_memories(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le
     return get_memories(page=page, limit=limit, category=category, source_agent=source_agent, q=q)
 
 @app.delete("/api/v1/memories/{id}", dependencies=[Depends(verify_auth)])
-def api_delete_memory(id: str):
-    success = delete_memory(id)
+def api_delete_memory(id: str, actor: Actor = Depends(verify_auth)):
+    success = delete_memory(id, actor=actor)
     if not success:
         raise HTTPException(status_code=404, detail=f"Memory '{id}' not found")
     return {"success": True, "id": id, "message": f"Memory {id} deleted successfully"}
 
 @app.post("/api/v1/delete_memory", dependencies=[Depends(verify_auth)])
-def api_post_delete_memory(req: DeleteMemoryApiRequest):
+def api_post_delete_memory(req: DeleteMemoryApiRequest, actor: Actor = Depends(verify_auth)):
     """Allows Custom GPT Actions and API clients to delete a memory by ID with confirmation."""
     if not req.user_confirmed:
         raise HTTPException(status_code=400, detail="User confirmation required to delete memory.")
-    success = delete_memory(req.memory_id)
+    success = delete_memory(req.memory_id, actor=actor)
     if not success:
         raise HTTPException(status_code=404, detail=f"Memory '{req.memory_id}' not found")
     return {"success": True, "id": req.memory_id, "message": f"Memory {req.memory_id} deleted successfully"}
 
 @app.put("/api/v1/memories/{id}", dependencies=[Depends(verify_auth)])
-def api_update_memory(id: str, req: UpdateMemoryRequest):
+def api_update_memory(id: str, req: UpdateMemoryRequest, actor: Actor = Depends(verify_auth)):
     updated = update_memory(
         memory_id=id,
         content=req.content,
@@ -541,11 +544,33 @@ def api_update_memory(id: str, req: UpdateMemoryRequest):
         source_agent=req.source_agent,
         tags=req.tags,
         attachments=req.attachments,
-        expected_revision=req.expected_revision
+        expected_revision=req.expected_revision,
+        actor=actor
     )
     if not updated:
         raise HTTPException(status_code=404, detail=f"Memory '{id}' not found")
     return {"success": True, "memory": updated}
+
+
+class SourceProvenancePage(BaseModel):
+    head: SourceHead
+    receipts: List[SourceReceipt]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0, le=1_000_000)
+
+
+@app.get("/api/v1/sources/{kind}/{id}/provenance", response_model=SourceProvenancePage, dependencies=[Depends(verify_auth)])
+def api_source_provenance(
+    kind: Literal["memory", "profile"], id: str = PathParameter(..., min_length=1, pattern=r"\S"),
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
+):
+    result = get_source_provenance(kind, id, limit, offset)
+    if result is None:
+        raise HTTPException(404, "Source provenance not found")
+    return result
+
+
 @app.get("/api/v1/conversations", dependencies=[Depends(verify_auth)])
 def api_get_conversations(page: int = Query(1, ge=1), limit: int = Query(20, ge=1, le=100), platform: Optional[str] = None, source_agent: Optional[str] = None):
     return get_conversations(page=page, limit=limit, platform=platform, source_agent=source_agent)
@@ -575,8 +600,8 @@ def api_vectorize_conversation(id: str):
         raise HTTPException(status_code=404, detail=f"Conversation '{id}' not found")
     return {"success": True, "id": id, "message": f"Conversation {id} vectorized successfully"}
 @app.delete("/api/v1/profile/{id}", dependencies=[Depends(verify_auth)])
-def api_delete_profile_rule(id: str):
-    success = delete_profile_rule(id)
+def api_delete_profile_rule(id: str, actor: Actor = Depends(verify_auth)):
+    success = delete_profile_rule(id, actor=actor)
     if not success:
         raise HTTPException(status_code=404, detail=f"Profile rule '{id}' not found")
     return {"success": True, "id": id, "message": f"Profile rule {id} deleted successfully"}

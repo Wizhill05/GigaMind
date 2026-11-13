@@ -249,6 +249,23 @@ def _upgrade_conversation_ledger(conn):
         register_legacy(conn, row.id, row.platform)
 
 
+def _upgrade_source_provenance(conn):
+    SourceHead.__table__.create(conn, checkfirst=True)
+    SourceReceipt.__table__.create(conn, checkfirst=True)
+    for kind, table, condition in (
+        ("memory", "memories", "parent_id IS NULL"),
+        ("profile", "profile", "1=1"),
+    ):
+        conn.execute(
+            text(
+                "INSERT INTO source_provenance_heads (kind, source_id, revision, active, creator_provenance) "
+                f"SELECT :kind, id, 0, true, 'legacy_unknown' FROM {table} WHERE {condition} "
+                "ON CONFLICT (kind, source_id) DO NOTHING"
+            ),
+            {"kind": kind},
+        )
+
+
 def migrate(engine):
     with engine.connect() as conn:
         if conn.dialect.name == "sqlite":
@@ -309,14 +326,7 @@ def migrate(engine):
             if version < 6:
                 _upgrade_conversation_ledger(conn)
             if version < 7:
-                SourceHead.__table__.create(conn, checkfirst=True)
-                SourceReceipt.__table__.create(conn, checkfirst=True)
-                for kind, table, condition in (("memory", "memories", "parent_id IS NULL"), ("profile", "profile", "1=1")):
-                    conn.execute(text(
-                        "INSERT INTO source_provenance_heads (kind, source_id, revision, active, creator_provenance) "
-                        f"SELECT :kind, id, 0, true, 'legacy_unknown' FROM {table} WHERE {condition} "
-                        "ON CONFLICT (kind, source_id) DO NOTHING"
-                    ), {"kind": kind})
+                _upgrade_source_provenance(conn)
             if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),

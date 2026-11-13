@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Filter, Search, Trash2 } from "lucide-react";
+import { Plus, Filter, Search, Trash2, History } from "lucide-react";
 import { PixelShield } from "../ui/PixelIcons";
 import { ProfileRule } from "../../types";
 import { fetchProfileRules, deleteProfileRule, getApiKey } from "../../api";
 import { AgentBadge, CategoryBadge } from "../ui/Badge";
 import { useToast } from "../ui/Toast";
+import { SourceHistoryDialog } from "../SourceHistoryDialog";
 import {
   useConversationMutation,
   type ConversationMutation,
@@ -24,6 +25,8 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
   mutation: sharedMutation,
 }) => {
   const [rules, setRules] = useState<ProfileRule[]>([]);
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const historyKey = getApiKey();
   const [categoryFilter, setCategoryFilter] = useState("");
   const [sourceAgentFilter, setSourceAgentFilter] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
@@ -119,6 +122,7 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
 
   return (
     <div className="space-y-6 font-sans text-xs">
+      {historyId && <SourceHistoryDialog key={JSON.stringify([historyId, refreshVersion])} kind="profile" sourceId={historyId} apiKey={historyKey} onClose={() => setHistoryId(null)} />}
       {/* HEADER & TOP CONTROLS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
@@ -284,6 +288,14 @@ export const ProfileRulesTab: React.FC<ProfileRulesTabProps> = ({
                 </div>
 
                 {/* ROW ACTION */}
+                <button
+                  disabled={pending}
+                  onClick={() => { if (!mutation.locked.current) setHistoryId(rule.id); }}
+                  title={`Credential history for ${rule.key}`}
+                  className="bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 btn-press"
+                >
+                  <History className="w-3.5 h-3.5" /><span>History</span>
+                </button>
                 <button
                   disabled={pending}
                   onClick={() => handleDelete(rule.id)}

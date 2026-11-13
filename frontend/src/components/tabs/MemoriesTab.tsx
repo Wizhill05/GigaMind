@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check, Paperclip, ExternalLink, RefreshCw, FileText } from 'lucide-react';
+import { Plus, Filter, Search, Trash2, Edit3, ChevronLeft, ChevronRight, Copy, Check, Paperclip, ExternalLink, RefreshCw, FileText, History } from 'lucide-react';
 import { PixelDatabase } from '../ui/PixelIcons';
 import { Memory, StorageFile } from '../../types';
 import { getApiKey, fetchMemories, deleteMemory, fetchIndexedFiles, reindexStorageFile } from '../../api';
 import { AgentBadge, CategoryBadge } from '../ui/Badge';
 import { useToast } from '../ui/Toast';
+import { SourceHistoryDialog } from '../SourceHistoryDialog';
 
 interface MemoriesTabProps {
   refreshVersion: number;
@@ -15,6 +16,8 @@ interface MemoriesTabProps {
 
 export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpenEditModal, refreshVersion, onMutation }) => {
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const historyKey = getApiKey();
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -130,7 +133,7 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
   // Keyboard Arrow Navigation inside list
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (activeSubTab !== 'memories' || filteredMemories.length === 0) return;
+      if (historyId || activeSubTab !== 'memories' || filteredMemories.length === 0) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       if (e.key === 'ArrowDown') {
@@ -146,16 +149,17 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [filteredMemories, selectedIndex, onOpenEditModal, activeSubTab]);
+  }, [filteredMemories, selectedIndex, onOpenEditModal, activeSubTab, historyId]);
 
   return (
     <div className="space-y-6 font-sans text-xs">
+      {historyId && <SourceHistoryDialog key={JSON.stringify([historyId, refreshVersion])} kind="memory" sourceId={historyId} apiKey={historyKey} onClose={() => setHistoryId(null)} />}
       {/* HEADER & TOP CONTROLS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-xl font-semibold text-white tracking-tight">Memory &amp; Knowledge Repository</h2>
           <p className="text-xs text-[#8a8f9e] mt-0.5">
-            Manage persistent knowledge, user facts, and vectorized Cloudflare R2 files
+            Source notes and indexed files. Shared agent context uses reviewed Knowledge.
           </p>
         </div>
 
@@ -419,13 +423,22 @@ export const MemoriesTab: React.FC<MemoriesTabProps> = ({ onOpenNewModal, onOpen
                   </div>
 
                   {/* ROW ACTIONS */}
-                  <div className="flex items-center gap-2 flex-shrink-0 opacity-90 group-hover:opacity-100 transition-opacity">
+                  <div className="flex flex-wrap max-w-full items-center gap-2 flex-shrink-0 opacity-90 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => handleCopyJson(mem)}
                       className="bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 btn-press"
                     >
                       {copiedId === mem.id ? <Check className="w-3.5 h-3.5 text-amber-400" /> : <Copy className="w-3.5 h-3.5" />}
                       <span>{copiedId === mem.id ? 'Copied' : 'JSON'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setHistoryId(mem.id)}
+                      title={`Credential history for ${mem.id}`}
+                      className="bg-[#161616] border border-[#333333] hover:border-[#ff6b00]/40 text-[#c1c5d0] hover:text-white px-3 py-1.5 rounded-none text-xs transition-colors flex items-center gap-1.5 btn-press"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      <span>History</span>
                     </button>
 
                     <button

@@ -9,7 +9,7 @@ from sqlalchemy import func, update, delete
 from gigamind.db.database import engine, is_postgres, ProfileItem, MemoryItem, ConversationItem, TaskSessionItem, StorageFileItem, StorageChunkItem
 from gigamind.services.embedding import generate_embedding, cosine_similarity
 from gigamind.services import embedding as embedding_config
-from gigamind.services import file_lifecycle
+from gigamind.services import file_lifecycle, source_provenance
 from gigamind.services.file_retrieval import file_candidates
 from gigamind.db.jobs import ResourceJobState  # Register job models before metadata initialization.
 from gigamind.db.memory_index import MemoryIndexState
@@ -520,6 +520,24 @@ def _register_attachment_metadata(session, attachments, source_agent, timestamp)
         )
 
 
+def _source_payload(item):
+    if isinstance(item, MemoryItem):
+        fields = (
+            "id",
+            "content",
+            "category",
+            "media_type",
+            "media_url",
+            "source_agent",
+            "tags_json",
+            "attachments_json",
+            "created_at",
+        )
+    else:
+        fields = ("id", "key", "value", "category", "source_agent", "updated_at")
+    return {name: getattr(item, name) for name in fields}
+
+
 def add_memory(
     content: str,
     category: str = "general",
@@ -529,11 +547,13 @@ def add_memory(
     file_keys: Optional[List[str]] = None,
     media_url: Optional[str] = None,
     media_type: Optional[str] = None,
+    *,
+    actor=None,
 ) -> Dict[str, Any]:
     if not isinstance(content, str) or not content.strip() or len(content) > 50000:
         raise HTTPException(422, "Memory content must contain 1 to 50000 characters")
     now = _now()
-    memory_id = f"mem_{uuid.uuid4().hex[:12]}"
+    memory_id = f"mem_{uuid.uuid4().hex}"
     resolved = list(attachments or [])
     for key in file_keys or []:
         if key and isinstance(key, str):
@@ -557,24 +577,33 @@ def add_memory(
             }
         )
     with Session(engine) as session:
-        session.add(
-            MemoryItem(
-                id=memory_id,
-                content=content,
-                category=category,
-                source_agent=source_agent or "user",
-                media_type=media_type or "text",
-                media_url=media_url,
-                tags_json=json.dumps(tags or []),
-                attachments_json=json.dumps(resolved),
-                created_at=now,
-                last_accessed=now,
-            )
+        source_provenance.lock_sources(session)
+        item = MemoryItem(
+            id=memory_id,
+            content=content,
+            category=category,
+            source_agent=source_agent or "user",
+            media_type=media_type or "text",
+            media_url=media_url,
+            tags_json=json.dumps(tags or []),
+            attachments_json=json.dumps(resolved),
+            created_at=now,
+            last_accessed=now,
         )
+        session.add(item)
         session.add(
             MemoryIndexState(memory_id=memory_id, created_at=now, updated_at=now)
         )
         _register_attachment_metadata(session, resolved, source_agent, now)
+        source_provenance.record_write(
+            session,
+            kind="memory",
+            source_id=memory_id,
+            operation="created",
+            actor=actor,
+            payload=_source_payload(item),
+            source_revision=1,
+        )
         session.commit()
     _index_memory(memory_id, 1, content)
     with Session(engine) as session:
@@ -586,37 +615,46 @@ def add_memory(
         return response
 
 
-def set_profile_rule(key: str, value: str, category: str = "general", source_agent: str = "user") -> Dict[str, Any]:
-    prof_id = f"prof_{key.replace(' ', '_')}"
-    now_str = datetime.now(timezone.utc).isoformat()
-
+def set_profile_rule(
+    key: str,
+    value: str,
+    category: str = "general",
+    source_agent: str = "user",
+    *,
+    actor=None,
+) -> Dict[str, Any]:
     with Session(engine) as session:
-        existing = session.exec(select(ProfileItem).where(ProfileItem.key == key)).first()
-        if existing:
-            existing.value = value
-            existing.category = category
-            existing.source_agent = source_agent or "user"
-            existing.updated_at = now_str
-        else:
+        source_provenance.lock_sources(session)
+        now_str = _now()
+        item = session.exec(select(ProfileItem).where(ProfileItem.key == key)).first()
+        existed = item is not None
+        if item is None:
             item = ProfileItem(
-                id=prof_id,
+                id=f"prof_{uuid.uuid4().hex}",
                 key=key,
                 value=value,
                 category=category,
                 source_agent=source_agent or "user",
-                updated_at=now_str
+                updated_at=now_str,
             )
             session.add(item)
+        else:
+            item.value = value
+            item.category = category
+            item.source_agent = source_agent or "user"
+            item.updated_at = now_str
+        source_provenance.record_write(
+            session,
+            kind="profile",
+            source_id=item.id,
+            operation="updated" if existed else "created",
+            actor=actor,
+            payload=_source_payload(item),
+        )
+        response = _source_payload(item)
         session.commit()
+    return response
 
-    return {
-        "id": prof_id,
-        "key": key,
-        "value": value,
-        "category": category,
-        "source_agent": source_agent or "user",
-        "updated_at": now_str
-    }
 
 def get_profile_rules(category: Optional[str] = None, source_agent: Optional[str] = None) -> List[Dict[str, Any]]:
     with Session(engine) as session:
@@ -988,33 +1026,69 @@ def get_memories(
         }
 
 
-def delete_memory(memory_id: str) -> bool:
+def delete_memory(memory_id: str, *, actor=None) -> bool:
     with Session(engine) as session:
-        items = session.exec(
-            select(MemoryItem).where(
-                (MemoryItem.id == memory_id) | (MemoryItem.parent_id == memory_id)
+        source_provenance.lock_sources(session)
+        row = session.exec(
+            select(MemoryItem.id, MemoryItem.parent_id).where(
+                MemoryItem.id == memory_id
             )
-        ).all()
-        if not items:
+        ).first()
+        if row is not None and row.parent_id is not None:
             return False
+        if (
+            row is None
+            and session.exec(
+                select(MemoryItem.id).where(MemoryItem.parent_id == memory_id).limit(1)
+            ).first()
+            is None
+        ):
+            return False
+        state = session.get(MemoryIndexState, memory_id)
+        revision = state.revision if state else None
+        # Match publication's state-row-first lock order, then delete every
+        # currently visible chunk, including a publisher that just committed.
         session.exec(
             delete(MemoryIndexState).where(MemoryIndexState.memory_id == memory_id)
         )
-        for item in items:
-            session.delete(item)
+        session.exec(
+            delete(MemoryItem).where(
+                (MemoryItem.id == memory_id) | (MemoryItem.parent_id == memory_id)
+            )
+        )
+        source_provenance.record_write(
+            session,
+            kind="memory",
+            source_id=memory_id,
+            operation="deleted",
+            actor=actor,
+            source_revision=revision,
+        )
         session.commit()
         return True
 
 
-def reset_all_memories() -> int:
+def reset_all_memories(*, actor=None) -> int:
     with Session(engine) as session:
-        items = session.exec(select(MemoryItem)).all()
-        count = sum(item.parent_id is None for item in items)
+        source_provenance.lock_sources(session)
+        parents = session.exec(
+            select(MemoryItem.id, MemoryIndexState.revision)
+            .outerjoin(MemoryIndexState, MemoryIndexState.memory_id == MemoryItem.id)
+            .where(MemoryItem.parent_id.is_(None))
+        ).all()
         session.exec(delete(MemoryIndexState))
-        for item in items:
-            session.delete(item)
+        session.exec(delete(MemoryItem))
+        for row in parents:
+            source_provenance.record_write(
+                session,
+                kind="memory",
+                source_id=row.id,
+                operation="reset",
+                actor=actor,
+                source_revision=row.revision,
+            )
         session.commit()
-        return count
+        return len(parents)
 
 
 def export_all_memories() -> List[Dict[str, Any]]:
@@ -1037,12 +1111,14 @@ def update_memory(
     attachments: Optional[List[Dict[str, Any]]] = None,
     *,
     expected_revision: Optional[int] = None,
+    actor=None,
 ) -> Optional[Dict[str, Any]]:
     if content is not None and (
         not isinstance(content, str) or not content.strip() or len(content) > 50000
     ):
         raise HTTPException(422, "Memory content must contain 1 to 50000 characters")
     with Session(engine) as session:
+        source_provenance.lock_sources(session)
         item = session.get(MemoryItem, memory_id)
         if not item or item.parent_id is not None:
             return None
@@ -1116,6 +1192,15 @@ def update_memory(
                 session, attachments, item.source_agent, item.last_accessed
             )
         source_content = item.content
+        source_provenance.record_write(
+            session,
+            kind="memory",
+            source_id=memory_id,
+            operation="updated",
+            actor=actor,
+            payload=_source_payload(item),
+            source_revision=old_revision + 1,
+        )
         session.commit()
     if needs_index:
         _index_memory(memory_id, old_revision + 1, source_content)
@@ -1220,14 +1305,54 @@ def vectorize_conversation(conv_id: str) -> bool:
             except Exception as p_err:
                 print(f"vectorize conv pgvector note: {p_err}")
         return True
-def delete_profile_rule(rule_id: str) -> bool:
+def delete_profile_rule(rule_id: str, *, actor=None) -> bool:
     with Session(engine) as session:
-        item = session.exec(select(ProfileItem).where((ProfileItem.id == rule_id) | (ProfileItem.key == rule_id))).first()
+        source_provenance.lock_sources(session)
+        item = session.exec(
+            select(ProfileItem).where(
+                (ProfileItem.id == rule_id) | (ProfileItem.key == rule_id)
+            )
+        ).first()
         if not item:
             return False
+        source_provenance.record_write(
+            session, kind="profile", source_id=item.id, operation="deleted", actor=actor
+        )
         session.delete(item)
         session.commit()
         return True
+
+
+def get_source_provenance(kind: str, source_id: str, limit: int = 20, offset: int = 0):
+    result = source_provenance.read_provenance(engine, kind, source_id, limit, offset)
+    if result is not None:
+        return result
+    model = MemoryItem if kind == "memory" else ProfileItem
+    with Session(engine) as session:
+        statement = select(model.id).where(model.id == source_id)
+        if kind == "memory":
+            statement = statement.where(MemoryItem.parent_id.is_(None))
+        if session.exec(statement).first() is None:
+            return None
+    # Directly seeded sources may postdate migration. A read never invents
+    # attribution or creates a receipt; prefer any concurrently committed head.
+    return source_provenance.read_provenance(
+        engine, kind, source_id, limit, offset
+    ) or {
+        "head": {
+            "kind": kind,
+            "source_id": source_id,
+            "revision": 0,
+            "active": True,
+            "creator_id": None,
+            "creator_provenance": "legacy_unknown",
+        },
+        "receipts": [],
+        "total": 0,
+        "limit": limit,
+        "offset": offset,
+    }
+
 
 def get_stats() -> Dict[str, Any]:
     with Session(engine) as session:

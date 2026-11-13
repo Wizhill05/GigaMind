@@ -1,4 +1,5 @@
 """Content-free source attribution tables."""
+
 from typing import Optional
 from sqlmodel import Field, SQLModel
 

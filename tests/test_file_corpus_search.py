@@ -1,5 +1,7 @@
 """Published file text stays searchable beyond vector and summary candidate caps."""
 
+import os
+
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
@@ -10,7 +12,7 @@ from sqlalchemy import text
 
 from gigamind.db.database import StorageFileItem, StorageChunkItem
 from gigamind.db.jobs import ResourceJobState
-from gigamind.main import app, API_KEY
+from gigamind.main import app
 from gigamind.security import Actor
 from gigamind.services import memory, file_lifecycle
 
@@ -87,7 +89,7 @@ def corpus(tmp_path, monkeypatch):
 
 def test_published_late_pages_and_summary_survive_filters_and_parent_dedup(corpus):
     client = TestClient(app)
-    headers = {"Authorization": f"Bearer {API_KEY}"}
+    headers = {"Authorization": f"Bearer {os.environ['GIGAMIND_API_KEY']}"}
     response = client.post(
         "/api/v1/search_memory",
         headers=headers,

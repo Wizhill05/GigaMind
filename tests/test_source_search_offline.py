@@ -1,3 +1,4 @@
+import os
 import base64
 
 import pytest
@@ -6,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
 from gigamind.db.database import MemoryItem, ProfileItem
-from gigamind.main import app, API_KEY
+from gigamind.main import app
 from gigamind.services import memory
 
 
@@ -58,7 +59,7 @@ def source_db(tmp_path, monkeypatch):
 
 def test_authenticated_complete_filtered_lexical_search(source_db):
     client = TestClient(app)
-    headers = {"Authorization": f"Bearer {API_KEY}"}
+    headers = {"Authorization": f"Bearer {os.environ['GIGAMIND_API_KEY']}"}
 
     def search(query, **kwargs):
         response = client.post(
@@ -106,7 +107,7 @@ def test_image_validation_and_unavailable(source_db):
 
 def test_image_http_errors_are_distinct_from_text_fallback(source_db):
     client = TestClient(app)
-    headers = {"Authorization": f"Bearer {API_KEY}"}
+    headers = {"Authorization": f"Bearer {os.environ['GIGAMIND_API_KEY']}"}
     for image in (
         base64.b64encode(b"\xff\xd8\xffJFIF").decode(),
         base64.b64encode(b"\x89PNG\r\n\x1a\n").decode(),

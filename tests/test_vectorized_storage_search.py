@@ -25,7 +25,7 @@ from gigamind.db.database import (
 )
 from gigamind.services.memory import add_memory, search_memory, delete_memory
 from fastapi.testclient import TestClient
-from gigamind.main import app, API_KEY
+from gigamind.main import app
 from tests.cleanup_test_data import cleanup_all_test_data
 
 
@@ -35,7 +35,7 @@ class TestVectorizedStorageSearch(unittest.TestCase):
         init_db()
         cleanup_all_test_data(verbose=False)
         cls.client = TestClient(app)
-        cls.auth_headers = {"Authorization": f"Bearer {API_KEY}"}
+        cls.auth_headers = {"Authorization": f"Bearer {os.environ['GIGAMIND_API_KEY']}"}
 
     @classmethod
     def tearDownClass(cls):

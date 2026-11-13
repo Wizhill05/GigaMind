@@ -1,10 +1,11 @@
+import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 
 from gigamind.db.database import StorageFileItem
 from gigamind.db.jobs import ResourceJobState
-from gigamind.main import app, API_KEY
+from gigamind.main import app
 from gigamind.security import Actor
 from gigamind.services import file_lifecycle, memory
 
@@ -69,7 +70,7 @@ def test_search_filters_before_limit_and_delete_admission(setup, monkeypatch):
 
     monkeypatch.setattr(file_lifecycle, "active_access", racing_access)
     client = TestClient(app)
-    headers = {"Authorization": f"Bearer {API_KEY}"}
+    headers = {"Authorization": f"Bearer {os.environ['GIGAMIND_API_KEY']}"}
     for path in ("search_memory", "search_multimodal", "search_files"):
         response = client.post(
             f"/api/v1/{path}",
