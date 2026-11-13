@@ -1,13 +1,13 @@
 # Stage 1: Build React Frontend SPA
-FROM node:22-alpine AS frontend-builder
+FROM node:22.23.4-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Python FastAPI Backend Server
-FROM python:3.11-slim
+FROM python:3.12.3-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
