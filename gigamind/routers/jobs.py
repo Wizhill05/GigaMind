@@ -17,7 +17,7 @@ router = APIRouter(
 
 class JobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["index_file"]
+    kind: Literal["index_file", "index_conversation"]
     payload: dict
     idempotency_key: str | None = None
     max_attempts: StrictInt = 3
@@ -43,6 +43,15 @@ def public(job):
 @router.post("")
 def create(req: JobRequest):
     try:
+        if req.kind == "index_conversation":
+            from gigamind.services.conversation_index import enqueue_conversation
+
+            if set(req.payload) != {"conversation_id"}:
+                raise ValueError("index_conversation requires conversation_id")
+            return public(enqueue_conversation(
+                req.payload["conversation_id"], req.idempotency_key,
+                max_attempts=req.max_attempts, engine=engine,
+            ))
         return public(
             jobs.enqueue(
                 req.kind,
@@ -54,6 +63,8 @@ def create(req: JobRequest):
         )
     except jobs.Conflict as exc:
         raise HTTPException(409, str(exc)) from exc
+    except LookupError:
+        raise HTTPException(404, "Conversation not found") from None
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

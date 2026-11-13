@@ -16,6 +16,7 @@ import { setApiKey } from "../api";
 import { MemoriesTab } from "../components/tabs/MemoriesTab";
 import { ProfileRulesTab } from "../components/tabs/ProfileRulesTab";
 import { ToastProvider } from "../components/ui/Toast";
+import { FilesTab } from "../components/tabs/FilesTab";
 
 const body = (id = "one", offset = 0) => ({
   head: {
@@ -307,4 +308,56 @@ test("keeps global command shortcuts inside the modal boundary", () => {
   } finally {
     window.removeEventListener("keydown", globalShortcut);
   }
+});
+
+test("file history distinguishes upload registration and verified bytes and refreshes by file ID", async () => {
+  setApiKey("file-history-key");
+  let revision = 2;
+  const fileHistory = () => ({
+    head: {
+      kind: "file", source_id: "opaque-file-id", revision, active: true,
+      creator_id: "original-uploader", creator_provenance: "authenticated",
+    },
+    receipts: Array.from({ length: revision }, (_, i) => ({
+      kind: "file", source_id: "opaque-file-id", revision: revision - i,
+      operation: revision - i === 1 ? "created" : "verified",
+      writer_id: revision - i === 1 ? "original-uploader" : "recovery-admin",
+      writer_provenance: "authenticated", payload_hash: "b".repeat(64),
+      source_revision: null, timestamp: "2026-11-13T10:00:00+00:00",
+    })),
+    total: revision, limit: 20, offset: 0,
+  });
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (String(input).includes("/provenance")) return json(fileHistory());
+    return json({ files: [{
+      id: "opaque-file-id", key: "files/object/name", filename: "report.txt",
+      size_bytes: 5, total_chunks: 0, extracted_text_length: 0,
+      indexing_status: "pending", created_at: "2026-11-13",
+    }], count: 1 });
+  });
+  const tree = (refresh: number) => <ToastProvider><FilesTab refreshVersion={refresh} /></ToastProvider>;
+  const view = render(tree(0));
+  fireEvent.click(await screen.findByRole("button", { name: "Source history for report.txt" }));
+  await screen.findByText("Original credential: original-uploader");
+  expect(screen.getByText("Receipt 2: verified")).toBeInTheDocument();
+  expect(screen.getByText(/Created records an upload registration/)).toHaveTextContent("physical cleanup may still be pending");
+  expect(fetcher).toHaveBeenCalledWith(
+    "/api/v1/sources/file/opaque-file-id/provenance?limit=20&offset=0",
+    expect.objectContaining({ headers: { Authorization: "Bearer file-history-key" } }),
+  );
+  revision = 3;
+  view.rerender(tree(1));
+  await screen.findByText("Receipt 3: verified");
+  fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+test("verification receipts are valid only for files", async () => {
+  const data = body();
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(json({
+    ...data,
+    head: { ...data.head, active: true },
+    receipts: data.receipts.map((receipt, index) => index === 0 ? { ...receipt, operation: "verified" } : receipt),
+  }));
+  await expect(getSourceProvenance({ kind: "memory", sourceId: "one", apiKey: "secret" })).rejects.toThrow("does not match");
 });

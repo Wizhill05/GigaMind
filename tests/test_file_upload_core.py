@@ -8,13 +8,14 @@ from sqlmodel import Session, create_engine, select
 
 from gigamind.db.database import StorageFileItem
 from gigamind.db.jobs import Job, ResourceJobState, UploadManifest
-from gigamind.services import file_uploads, jobs
+from gigamind.db.source_provenance import SourceHead, SourceReceipt
+from gigamind.services import file_uploads, jobs, source_provenance
 
 
 @pytest.fixture
 def engine(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'uploads.db'}")
-    for model in (StorageFileItem, Job, ResourceJobState, UploadManifest):
+    for model in (StorageFileItem, Job, ResourceJobState, UploadManifest, SourceHead, SourceReceipt):
         model.__table__.create(engine)
     yield engine
     engine.dispose()
@@ -78,15 +79,15 @@ def test_tombstone(engine):
 
 def test_failure_after_metadata_is_added_rolls_back(engine, monkeypatch):
     old = jobs.enqueue("index_file", {"key": "file/a"}, engine=engine)
-    original = Session.commit
+    original = source_provenance.record_write
 
-    def fail_commit(session):
-        if any(isinstance(item, StorageFileItem) for item in session.new):
-            session.flush()
-            raise RuntimeError("injected after metadata flush")
-        return original(session)
+    def fail_after_flush(session, **kwargs):
+        original(session, **kwargs)
+        assert session.exec(select(StorageFileItem)).first() is not None
+        assert session.exec(select(UploadManifest)).first() is not None
+        raise RuntimeError("injected after metadata and receipt flush")
 
-    monkeypatch.setattr(Session, "commit", fail_commit)
+    monkeypatch.setattr(source_provenance, "record_write", fail_after_flush)
     with pytest.raises(RuntimeError):
         prepare(engine, sha256=hashlib.sha256(b"abc").hexdigest())
     engine.dispose()
@@ -95,6 +96,8 @@ def test_failure_after_metadata_is_added_rolls_back(engine, monkeypatch):
         assert session.get(ResourceJobState, "file/a").current_job_id == old.id
         assert session.exec(select(StorageFileItem)).first() is None
         assert session.exec(select(UploadManifest)).first() is None
+        assert session.exec(select(SourceHead)).first() is None
+        assert session.exec(select(SourceReceipt)).first() is None
         assert len(session.exec(select(Job)).all()) == 1
 
 

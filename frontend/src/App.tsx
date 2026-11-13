@@ -193,15 +193,15 @@ export const AppContent: React.FC = () => {
   };
   const handleVectorizeTranscript = (id: string) => {
     void runTranscriptMutation(async (valid) => {
-      await vectorizeConversation(id);
+      const queued = await vectorizeConversation(id);
       if (!valid()) return;
+      toast(`Indexing ${queued.state}. Job ${queued.job_id}. Check Jobs for progress.`, "success");
       conversationChanged();
       const updated = await fetchConversation(id);
       if (!valid()) return;
       setActiveTranscript((current) =>
         current?.id === id ? updated : current,
       );
-      if (valid()) toast("Vectorization request completed", "success");
     });
   };
 

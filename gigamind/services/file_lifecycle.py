@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 from gigamind.db.database import MemoryItem, StorageChunkItem, StorageFileItem
 from gigamind.db.jobs import Job, ResourceJobState, UploadManifest
 from gigamind.security import Actor
-from gigamind.services import jobs
+from gigamind.services import jobs, source_provenance
 
 
 def owned_key(key):
@@ -94,11 +94,17 @@ def referenced(session, key):
 
 
 def request_delete(actor, key, engine=None):
-    if not isinstance(actor, Actor) or actor.is_admin is not True:
+    if (
+        not isinstance(actor, Actor)
+        or actor.is_admin is not True
+        or not isinstance(actor.id, str)
+        or not actor.id.strip()
+    ):
         raise HTTPException(403, "Admin required")
     validate_key(key)
     now = jobs.stamp(jobs.utcnow())
     with Session(jobs.resolve_engine(engine), expire_on_commit=False) as session:
+        source_provenance.lock_sources(session)
         owner = jobs.lock_resource(session, key, now)
         manifest = session.get(UploadManifest, key)
         if manifest and manifest.state not in {"prepared", "verified"}:
@@ -118,6 +124,18 @@ def request_delete(actor, key, engine=None):
         ):
             session.commit()
             return current
+        file = session.exec(
+            select(StorageFileItem).where(StorageFileItem.key == key)
+        ).first()
+        if file is not None:
+            source_provenance.record_write(
+                session,
+                kind="file",
+                source_id=file.id,
+                operation="deleted",
+                actor=actor,
+                payload={"phase": "deleted", "key": key},
+            )
         jobs.cancel_active(session, key, now)
         session.exec(delete(StorageChunkItem).where(StorageChunkItem.file_key == key))
         session.exec(delete(StorageFileItem).where(StorageFileItem.key == key))

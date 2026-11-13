@@ -63,8 +63,9 @@ def test_exact_conversation_is_admin_only_and_reflects_current_source(
             client.get("/api/v1/conversations/source", headers=admin).json()[
                 "conversation"
             ]["is_vectorized"]
-            is True
+            is False
         )
+        assert client.get("/api/v1/conversations/source", headers=admin).json()["conversation"]["index_status"] == "legacy"
         assert (
             client.delete("/api/v1/conversations/source", headers=admin).status_code
             == 200

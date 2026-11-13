@@ -45,7 +45,7 @@ jobs:
         with:
           python-version: '3.12.16'
       - run: python -m pip install -r requirements-test.txt
-      - run: python -m pytest tests/test_postgres_migrations.py tests/test_conversation_ledger_postgres.py tests/test_evidence_inspection.py
+      - run: python -m pytest tests/test_postgres_migrations.py tests/test_conversation_ledger_postgres.py tests/test_evidence_inspection.py tests/test_source_provenance_postgres.py tests/test_file_source_provenance_postgres.py tests/test_conversation_indexing_postgres.py
         env:
           GIGAMIND_RUN_LOCAL_POSTGRES: '1'
           GIGAMIND_TEST_POSTGRES_URL: postgresql://test:test@127.0.0.1:5432/gigamind_test

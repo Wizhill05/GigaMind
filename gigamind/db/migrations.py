@@ -21,8 +21,12 @@ from gigamind.db.conversation_ledger import (
 )
 
 from gigamind.db.source_provenance import SourceHead, SourceReceipt
+from gigamind.db.conversation_index import (
+    ConversationIndexState,
+    ConversationIndexSegment,
+)
 
-VERSION = 7
+VERSION = 8
 LEGACY_COLUMNS = {
     "memories": {
         "media_type": "TEXT DEFAULT 'text'",
@@ -266,6 +270,11 @@ def _upgrade_source_provenance(conn):
         )
 
 
+def _upgrade_conversation_index(conn):
+    ConversationIndexState.__table__.create(conn, checkfirst=True)
+    ConversationIndexSegment.__table__.create(conn, checkfirst=True)
+
+
 def migrate(engine):
     with engine.connect() as conn:
         if conn.dialect.name == "sqlite":
@@ -327,6 +336,8 @@ def migrate(engine):
                 _upgrade_conversation_ledger(conn)
             if version < 7:
                 _upgrade_source_provenance(conn)
+            if version < 8:
+                _upgrade_conversation_index(conn)
             if version < VERSION:
                 conn.execute(
                     text("INSERT INTO schema_migrations (version) VALUES (:version)"),

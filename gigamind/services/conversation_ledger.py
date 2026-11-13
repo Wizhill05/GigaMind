@@ -217,6 +217,31 @@ def forget(conversation_id, *, actor=None, engine):
         ids = select(receipts.c.conversation_id).where(
             receipts.c.source_key == source_key
         )
+        from gigamind.db.conversation_index import (
+            ConversationIndexSegment,
+            ConversationIndexState,
+        )
+        from gigamind.db.jobs import Job
+
+        connection.execute(
+            delete(ConversationIndexSegment).where(
+                ConversationIndexSegment.conversation_id.in_(ids)
+            )
+        )
+        connection.execute(
+            delete(ConversationIndexState).where(
+                ConversationIndexState.conversation_id.in_(ids)
+            )
+        )
+        connection.execute(
+            update(Job)
+            .where(
+                Job.kind == "index_conversation",
+                Job.resource_key.in_(ids),
+                Job.state.in_(["queued", "retrying", "running"]),
+            )
+            .values(state="cancelled", lease_token=None, lease_deadline=None, updated_at=now)
+        )
         connection.execute(delete(transcripts).where(transcripts.c.id.in_(ids)))
         connection.execute(
             update(receipts)

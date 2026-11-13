@@ -45,6 +45,9 @@ export interface Conversation {
   source_agent: SourceAgent;
   messages: ConversationMessage[];
   is_vectorized?: boolean;
+  index_status?: "not_indexed" | "legacy" | "queued" | "running" | "retrying" | "completed" | "failed" | "cancelled";
+  index_job_id?: string | null;
+  index_error?: string | null;
   score?: number;
   created_at: string;
 }

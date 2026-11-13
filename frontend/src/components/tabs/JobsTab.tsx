@@ -80,7 +80,7 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
     setActionError("");
     try {
       if (confirm === "cancel") await cancelJob(detail.id);
-      else if (detail.kind === "index_file") {
+      else if (detail.kind === "index_file" || detail.kind === "index_conversation") {
         const result = await retryIndex(detail);
         setSelected(result.id);
       } else {
@@ -114,7 +114,7 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
         </button>
       </div>
       <p className="text-sm text-[#aaa]">
-        Index jobs process files for search. Cleanup jobs remove file data;
+        Index jobs process files and conversations for search. Cleanup jobs remove file data;
         accepted cleanup does not mean bytes have been deleted.
       </p>
       {error && (
@@ -197,7 +197,7 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
             </button>
           )}
           {detail.state === "failed" &&
-            ["index_file", "delete_file"].includes(detail.kind) && (
+            ["index_file", "index_conversation", "delete_file"].includes(detail.kind) && (
               <button
                 className={button}
                 disabled={busy || confirm !== null}
@@ -205,7 +205,7 @@ export function JobsTab({ refreshVersion }: { refreshVersion: number }) {
                   if (!inFlight.current) setConfirm("retry");
                 }}
               >
-                Retry {detail.kind === "index_file" ? "indexing" : "cleanup"}
+                Retry {detail.kind === "delete_file" ? "cleanup" : "indexing"}
               </button>
             )}
           {confirm && (

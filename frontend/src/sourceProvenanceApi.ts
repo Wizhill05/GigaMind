@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { ApiError } from "./api";
 
-const kindSchema = z.enum(["memory", "profile"]);
+const kindSchema = z.enum(["memory", "profile", "file"]);
 const integer = z.number().int().nonnegative().safe();
 const receiptSchema = z.object({
   kind: kindSchema,
   source_id: z.string().min(1),
   revision: z.number().int().positive().safe(),
-  operation: z.enum(["created", "updated", "deleted", "reset"]),
+  operation: z.enum(["created", "updated", "deleted", "reset", "verified"]),
   writer_id: z.string().nullable(),
   writer_provenance: z.enum(["authenticated", "unattributed"]),
   payload_hash: z
@@ -93,7 +93,7 @@ export async function getSourceProvenance({
     (offset === 0 &&
       latest &&
       result.head.active !==
-        (latest.operation === "created" || latest.operation === "updated")) ||
+        !["deleted", "reset"].includes(latest.operation)) ||
     (result.head.creator_provenance !== "authenticated" &&
       result.head.creator_id !== null) ||
     (result.head.creator_provenance === "authenticated" &&
@@ -103,6 +103,7 @@ export async function getSourceProvenance({
     result.receipts.some(
       (receipt, index) =>
         receipt.revision !== result.total - offset - index ||
+        (receipt.operation === "verified" && kind !== "file") ||
         (receipt.writer_provenance === "authenticated" &&
           !receipt.writer_id?.trim()) ||
         (receipt.writer_provenance === "unattributed" &&

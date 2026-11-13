@@ -153,6 +153,8 @@ export async function deleteProfileRule(id: string): Promise<void> {
 const conversationSchema = z.object({
   id: z.string().min(1), platform: z.string(), title: z.string(), summary: z.string(),
   source_agent: z.string(), created_at: z.string(), is_vectorized: z.boolean().optional(),
+  index_status: z.enum(["not_indexed", "legacy", "queued", "running", "retrying", "completed", "failed", "cancelled"]).optional(),
+  index_job_id: z.string().nullable().optional(), index_error: z.string().nullable().optional(),
   messages: z.array(z.object({
     role: z.string().min(1), content: z.string(), id: z.string().optional(),
     created_at: z.union([z.string(), z.number().finite()]).optional(),
@@ -174,7 +176,8 @@ export async function fetchConversations(
 }
 
 const conversationMutationSchema = z.object({ success: z.literal(true), id: z.string(), message: z.string() });
-const backfillSchema = z.object({ success: z.literal(true), message: z.string() });
+const queueConversationSchema = conversationMutationSchema.extend({ job_id: z.string().min(1), state: z.enum(["queued", "running", "retrying", "completed", "failed", "cancelled"]) });
+const backfillSchema = z.object({ success: z.literal(true), queued: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(), next_cursor: z.string().nullable(), message: z.string() });
 const importSchema = z.object({ success: z.literal(true), ingested: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(), pending_indexing: z.number().int().nonnegative(), total_processed: z.number().int().nonnegative(), message: z.string() });
 
 export async function fetchConversation(id: string, signal?: AbortSignal) {
@@ -189,11 +192,11 @@ export async function deleteConversation(id: string) {
 
 export async function vectorizeConversation(id: string) {
   const res = await checkedFetch(`/api/v1/conversations/${encodeURIComponent(id)}/vectorize`, { method: 'POST', headers: getHeaders() });
-  return conversationMutationSchema.parse(await res.json());
+  return queueConversationSchema.parse(await res.json());
 }
 
-export async function backfillConversationVectors() {
-  const res = await checkedFetch('/api/v1/conversations/backfill_vectors', { method: 'POST', headers: getHeaders() });
+export async function backfillConversationVectors(cursor: string | null = null) {
+  const res = await checkedFetch('/api/v1/conversations/backfill_vectors', { method: 'POST', headers: getHeaders(), body: JSON.stringify({ cursor, limit: 20 }) });
   return backfillSchema.parse(await res.json());
 }
 

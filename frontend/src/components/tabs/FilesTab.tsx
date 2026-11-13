@@ -7,6 +7,7 @@ import {
   Trash2,
   ExternalLink,
   Layers,
+  History,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -32,6 +33,7 @@ import {
   fetchFileChunks,
 } from "../../api";
 import { useToast } from "../ui/Toast";
+import { SourceHistoryDialog } from "../SourceHistoryDialog";
 
 export const FilesTab: React.FC<{
   onMutation?: () => void;
@@ -40,6 +42,7 @@ export const FilesTab: React.FC<{
   const [files, setFiles] = useState<StorageFile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [localRevision, setLocalRevision] = useState(0);
+  const [history, setHistory] = useState<{ id: string; credential: string } | null>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [filterText, setFilterText] = useState<string>("");
 
@@ -891,7 +894,15 @@ export const FilesTab: React.FC<{
                       </td>
 
                       <td className="p-3 text-right pr-4">
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => setHistory({ id: file.id, credential: getApiKey() })}
+                            className="p-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-white border border-[#333333] transition-colors"
+                            title="Source history"
+                            aria-label={`Source history for ${file.filename}`}
+                          >
+                            <History className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={() => handleOpenChunksModal(file)}
                             className="p-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#c1c5d0] hover:text-white border border-[#333333] transition-colors"
@@ -941,6 +952,16 @@ export const FilesTab: React.FC<{
           </div>
         )}
       </div>
+
+      {history && history.credential === getApiKey() && (
+        <SourceHistoryDialog
+          key={JSON.stringify([history.id, history.credential, refreshVersion, localRevision])}
+          kind="file"
+          sourceId={history.id}
+          apiKey={history.credential}
+          onClose={() => setHistory(null)}
+        />
+      )}
 
       {/* CHUNKS INSPECTION MODAL */}
       {selectedFileForChunks && (

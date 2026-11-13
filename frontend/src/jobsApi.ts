@@ -64,7 +64,7 @@ export const retryIndex = (item: Job) =>
   request("/jobs", job, {
     method: "POST",
     body: JSON.stringify({
-      kind: "index_file",
+      kind: item.kind,
       payload: item.payload,
       idempotency_key: requestId(),
       max_attempts: item.max_attempts,

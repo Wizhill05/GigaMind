@@ -262,9 +262,11 @@ def test_missing_object_reclaim_and_persistent_intent(setup, monkeypatch):
 
 
 def test_attachment_committing_first_blocks_cleanup(setup, monkeypatch):
+    from gigamind.services import source_provenance
+
     registered, release, delete_attempted = Event(), Event(), Event()
     register = memory._register_attachment_metadata
-    lock_resource = jobs.lock_resource
+    lock_sources = source_provenance.lock_sources
 
     def register_and_pause(*args, **kwargs):
         register(*args, **kwargs)
@@ -274,10 +276,10 @@ def test_attachment_committing_first_blocks_cleanup(setup, monkeypatch):
     def observed_lock(*args, **kwargs):
         if registered.is_set() and not release.is_set():
             delete_attempted.set()
-        return lock_resource(*args, **kwargs)
+        return lock_sources(*args, **kwargs)
 
     monkeypatch.setattr(memory, "_register_attachment_metadata", register_and_pause)
-    monkeypatch.setattr(jobs, "lock_resource", observed_lock)
+    monkeypatch.setattr(source_provenance, "lock_sources", observed_lock)
     with ThreadPoolExecutor(2) as pool:
         attached = pool.submit(memory.add_memory, "source", file_keys=["file"])
         assert registered.wait(5)

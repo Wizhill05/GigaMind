@@ -17,7 +17,7 @@ from gigamind.services.storage import storage_service
 LIMIT = 20_000_000
 
 
-def recover(key, job_id):
+def recover(key, job_id, *, actor=None):
     validate_key(key)
     with Session(jobs.resolve_engine(None)) as session:
         owner = session.get(ResourceJobState, key)
@@ -52,7 +52,9 @@ def recover(key, job_id):
             },
         ) from None
     try:
-        verified = file_uploads.verify_upload(key, job_id, data, require_current=True)
+        verified = file_uploads.verify_upload(
+            key, job_id, data, actor=actor, require_current=True
+        )
     except jobs.Conflict:
         raise HTTPException(409, "Upload is no longer current") from None
     except Exception:
@@ -139,6 +141,7 @@ def upload(data, filename, mime_type, prefix, actor):
             actor.id,
             uuid.uuid4().hex,
             sha256=hashlib.sha256(data).hexdigest(),
+            actor=actor,
         )
     except jobs.Conflict as exc:
         raise HTTPException(409, str(exc)) from None
@@ -172,7 +175,7 @@ def upload(data, filename, mime_type, prefix, actor):
         raise HTTPException(
             503, {"message": "Upload outcome unknown", "key": key, "job_id": job["id"]}
         ) from None
-    result = recover(key, job["id"])
+    result = recover(key, job["id"], actor=actor)
     if result["state"] == "cancelled":
         raise HTTPException(
             409,

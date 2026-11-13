@@ -11,10 +11,21 @@ from sqlmodel import Session, select
 
 from gigamind.db.database import StorageFileItem
 from gigamind.db.jobs import Job, UploadManifest
-from gigamind.services import jobs
+from gigamind.security import Actor
+from gigamind.services import jobs, source_provenance
 from gigamind.services.file_lifecycle import validate_key
 
 PREPARED_UNTIL = datetime(9999, 1, 1, tzinfo=timezone.utc)
+
+
+def _validate_actor(actor):
+    if actor is not None and (
+        not isinstance(actor, Actor)
+        or actor.is_admin is not True
+        or not isinstance(actor.id, str)
+        or not actor.id.strip()
+    ):
+        raise PermissionError("an authenticated writer must be an admin")
 
 
 def _snapshot(file, job):
@@ -31,10 +42,12 @@ def _prepare_upload(
     idempotency_key,
     *,
     sha256=None,
+    actor=None,
     engine=None,
     clock=jobs.utcnow,
 ):
     """Register validated metadata and a deferred job, returning committed snapshots."""
+    _validate_actor(actor)
     validate_key(key)
     if sha256 is not None:
         if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
@@ -53,6 +66,7 @@ def _prepare_upload(
     instant = clock()
     now = jobs.stamp(instant)
     with Session(jobs.resolve_engine(engine), expire_on_commit=False) as session:
+        source_provenance.lock_sources(session)
         owner = jobs.lock_resource(session, key, now)
         if owner.deleted:
             raise HTTPException(409, "File has been deleted")
@@ -107,6 +121,14 @@ def _prepare_upload(
                     key=key, job_id=job.id, sha256=sha256, size_bytes=size_bytes
                 )
             )
+        source_provenance.record_write(
+            session,
+            kind="file",
+            source_id=file.id,
+            operation="created",
+            actor=actor,
+            payload={"phase": "prepared", "key": key, **values, "sha256": sha256},
+        )
         session.commit()
         return _snapshot(file, job)
 
@@ -121,6 +143,7 @@ def prepare_upload(
     idempotency_key,
     *,
     sha256=None,
+    actor=None,
     engine=None,
     clock=jobs.utcnow,
 ):
@@ -134,6 +157,7 @@ def prepare_upload(
             source_agent,
             idempotency_key,
             sha256=sha256,
+            actor=actor,
             engine=engine,
             clock=clock,
         )
@@ -227,9 +251,17 @@ def record_unknown(
 
 
 def verify_upload(
-    key, job_id, remote_bytes, *, engine=None, clock=jobs.utcnow, require_current=False
+    key,
+    job_id,
+    remote_bytes,
+    *,
+    actor=None,
+    engine=None,
+    clock=jobs.utcnow,
+    require_current=False,
 ):
     """Verify fetched remote bytes; a missing or mismatched object remains unresolved."""
+    _validate_actor(actor)
     validate_key(key)
     if remote_bytes is not None and not isinstance(remote_bytes, bytes):
         raise ValueError("remote_bytes must be bytes or None")
@@ -239,6 +271,7 @@ def verify_upload(
         else None
     )
     with Session(jobs.resolve_engine(engine)) as session:
+        source_provenance.lock_sources(session)
         owner = jobs.lock_resource(session, key, jobs.stamp(clock()))
         manifest = session.get(UploadManifest, key)
         if (
@@ -256,6 +289,25 @@ def verify_upload(
             manifest.state = "unknown"
             session.commit()
             return False
+        if manifest.state != "verified":
+            file = session.exec(
+                select(StorageFileItem).where(StorageFileItem.key == key)
+            ).first()
+            if file is None or file.id != job_id:
+                raise jobs.Conflict("Upload metadata is no longer current")
+            source_provenance.record_write(
+                session,
+                kind="file",
+                source_id=file.id,
+                operation="verified",
+                actor=actor,
+                payload={
+                    "phase": "verified",
+                    "key": key,
+                    "sha256": manifest.sha256,
+                    "size_bytes": manifest.size_bytes,
+                },
+            )
         manifest.state = "verified"
         session.commit()
         return True

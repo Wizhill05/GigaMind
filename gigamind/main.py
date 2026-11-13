@@ -5,7 +5,7 @@ import uuid
 import base64
 import binascii
 from typing import Optional, List, Dict, Any, Literal
-from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, BackgroundTasks, Query, Path as PathParameter
+from fastapi import FastAPI, Request, HTTPException, Depends, Header, Form, UploadFile, File, Query, Path as PathParameter
 from contextlib import asynccontextmanager
 from sqlalchemy import text, update, or_
 import hashlib
@@ -562,7 +562,7 @@ class SourceProvenancePage(BaseModel):
 
 @app.get("/api/v1/sources/{kind}/{id:path}/provenance", response_model=SourceProvenancePage, dependencies=[Depends(verify_auth)])
 def api_source_provenance(
-    kind: Literal["memory", "profile"], id: str = PathParameter(..., min_length=1, pattern=r"\S"),
+    kind: Literal["memory", "profile", "file"], id: str = PathParameter(..., min_length=1, pattern=r"\S"),
     limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
 ):
     result = get_source_provenance(kind, id, limit, offset)
@@ -592,13 +592,30 @@ def api_delete_conversation(id: str, actor: Actor = Depends(verify_auth)):
         raise HTTPException(status_code=404, detail=f"Conversation '{id}' not found")
     return {"success": True, "id": id, "message": "Conversation source forgotten; linked versions removed"}
 
-@app.post("/api/v1/conversations/{id}/vectorize", dependencies=[Depends(verify_auth)])
-def api_vectorize_conversation(id: str):
-    """Vectorizes a single conversation transcript using Gemini Embedding 2."""
-    success = vectorize_conversation(id)
-    if not success:
-        raise HTTPException(status_code=404, detail=f"Conversation '{id}' not found")
-    return {"success": True, "id": id, "message": f"Conversation {id} vectorized successfully"}
+class ConversationIndexRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=255)
+
+
+class ConversationBackfillRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cursor: Optional[str] = Field(default=None, max_length=1024)
+    limit: StrictInt = Field(default=20, ge=1, le=100)
+
+
+@app.post("/api/v1/conversations/{id}/vectorize", status_code=202, dependencies=[Depends(verify_auth)])
+def api_vectorize_conversation(id: str, req: Optional[ConversationIndexRequest] = None):
+    """Queue complete transcript indexing; provider work runs in the worker."""
+    try:
+        job = vectorize_conversation(id, idempotency_key=req.idempotency_key if req else None)
+    except LookupError:
+        raise HTTPException(404, "Conversation not found") from None
+    except jobs.Conflict as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"success": True, "id": id, "job_id": job.id, "state": job.state,
+            "message": "Index job admitted. Check Jobs for progress."}
 @app.delete("/api/v1/profile/{id:path}", dependencies=[Depends(verify_auth)])
 def api_delete_profile_rule(id: str, actor: Actor = Depends(verify_auth)):
     success = delete_profile_rule(id, actor=actor)
@@ -643,11 +660,11 @@ def api_search_conversations(req: SearchConversationsRequest):
         "results": results
     }
 
-@app.post("/api/v1/conversations/backfill_vectors", dependencies=[Depends(verify_auth)])
-def api_backfill_conversation_vectors(background_tasks: BackgroundTasks):
-    """Asynchronously computes and backfills vector embeddings for all chat logs."""
-    background_tasks.add_task(backfill_conversation_vectors)
-    return {"success": True, "message": "Backfill vector indexing started in background."}
+@app.post("/api/v1/conversations/backfill_vectors", status_code=202, dependencies=[Depends(verify_auth)])
+def api_backfill_conversation_vectors(req: Optional[ConversationBackfillRequest] = None):
+    request = req or ConversationBackfillRequest()
+    result = backfill_conversation_vectors(cursor=request.cursor, limit=request.limit)
+    return {"success": True, **result, "message": "Index jobs admitted. Check Jobs for progress."}
 @app.get("/api/v1/stats", dependencies=[Depends(verify_auth)])
 def api_get_stats():
     return get_stats()

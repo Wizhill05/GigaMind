@@ -5,13 +5,14 @@ from sqlalchemy import create_engine
 from sqlmodel import Session
 
 from gigamind.db.database import ConversationItem
-from gigamind.services import memory
+from gigamind.db.migrations import migrate
+from gigamind.services import memory, conversation_index, embedding, jobs
 
 
 @pytest.fixture
 def database(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'search.sqlite'}")
-    ConversationItem.__table__.create(engine)
+    migrate(engine)
     monkeypatch.setattr(memory, "engine", engine)
     monkeypatch.setattr(memory, "is_postgres", False)
     monkeypatch.setattr(
@@ -81,11 +82,18 @@ def test_order_limit_and_vectors(database, monkeypatch):
     add(database, "a", [{"role": "user", "content": "needle"}])
     add(database, "semantic", [], vector=[1.0, 0.0])
     add(database, "invalid", [], vector=[True, 0])
+    # Unidentified old preview vectors are not a complete transcript index.
+    assert memory.search_conversations("unrelated", limit=1000) == []
+    monkeypatch.setattr(embedding, "generate_embedding", lambda **kwargs: [1.0, 0.0])
+    conversation_index.enqueue_conversation("semantic", engine=database)
+    assert jobs.run_once(engine=database).state == "completed"
     rows = memory.search_conversations("needle", limit=2)
     assert [row["id"] for row in rows] == ["a", "b"]
     rows = memory.search_conversations("unrelated", limit=1000)
     assert [row["id"] for row in rows] == ["semantic"]
     assert rows[0]["retrieval_method"] == "vector"
+    assert rows[0]["evidence"][0]["role"] == "indexed_segment"
+    assert rows[0]["evidence"][0]["embedding_model"] == embedding.MODEL_NAME
     monkeypatch.setattr(memory, "generate_embedding", lambda *args: [float("nan"), 0])
     assert memory.search_conversations("unrelated") == []
 
@@ -122,3 +130,31 @@ def test_query_bounds_invalid_vectors_and_database_failures(database, monkeypatc
     ConversationItem.__table__.drop(database)
     with pytest.raises(OperationalError):
         memory.search_conversations("text")
+
+
+def test_semantic_match_uses_late_segments_with_identified_model(database, monkeypatch):
+    monkeypatch.setattr(embedding, "DEFAULT_DIM", 2)
+    monkeypatch.setattr(memory, "generate_embedding", lambda *args: [1.0, 0.0])
+    calls = []
+
+    def provider(**kwargs):
+        content = kwargs["text"]
+        calls.append(content)
+        return [1.0, 0.0] if "astronomy-marker" in content else [0.0, 1.0]
+
+    monkeypatch.setattr(embedding, "generate_embedding", provider)
+    add(database, "a-legacy", [], vector=[1.0, 0.0])
+    messages = [{"role": "user", "content": "一" * 9000}]
+    messages.append({"role": "assistant", "content": "astronomy-marker is in the last turn"})
+    add(database, "z-complete", messages)
+    conversation_index.enqueue_conversation("z-complete", engine=database)
+    assert jobs.run_once(engine=database).state == "completed"
+    assert len(calls) > 1 and "astronomy-marker" not in calls[0]
+    result = memory.search_conversations("orbitalsynonym")
+    assert [row["id"] for row in result] == ["z-complete"]
+    assert result[0]["retrieval_method"] == "vector"
+    assert result[0]["evidence"][0]["index"] > 0
+    assert result[0]["evidence"][0]["embedding_model"] == embedding.MODEL_NAME
+    assert result[0]["evidence"][0]["embedding_dimension"] == 2
+    monkeypatch.setattr(embedding, "MODEL_NAME", "different-model")
+    assert memory.search_conversations("orbitalsynonym") == []

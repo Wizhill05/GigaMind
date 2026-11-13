@@ -88,6 +88,8 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
   const guard = mutation ?? localMutation;
   const { busy, locked: busyRef } = guard;
   const [isBackfilling, setIsBackfilling] = useState(false);
+  const [batch, setBatch] = useState<{ key: string; cursor: string | null; queued: number; skipped: number } | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const { toast } = useToast();
@@ -279,20 +281,25 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
   };
   const handleVectorizeSingle = (id: string) => {
     void runMutation(async (valid) => {
-      await vectorizeConversation(id);
+      const result = await vectorizeConversation(id);
       if (!valid()) return;
-      toast("Vectorization request completed", "success");
+      toast(`Indexing ${result.state}. Job ${result.job_id}. Check Jobs for progress.`, "success");
       changed();
     });
   };
   const handleBackfillAll = () => {
     void runMutation(async (valid) => {
       setIsBackfilling(true);
+      setBatchError(null);
+      const key = getApiKey();
+      const cursor = batch?.key === key ? batch.cursor : null;
       try {
-        const result = await backfillConversationVectors();
+        const result = await backfillConversationVectors(cursor);
         if (!valid()) return;
-        toast(result.message, "success");
+        setBatch({ key, cursor: result.next_cursor, queued: result.queued, skipped: result.skipped });
         changed();
+      } catch (error) {
+        if (valid()) setBatchError(error instanceof Error ? error.message : "Batch request failed");
       } finally {
         if (alive.current) setIsBackfilling(false);
       }
@@ -348,12 +355,12 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
             onClick={handleBackfillAll}
             disabled={busy}
             className="px-3 py-1.5 bg-[#1f1f1f] hover:bg-[#282828] text-[#22c55e] hover:text-white border border-[#333333] transition-colors flex items-center gap-1.5 font-mono text-[11px]"
-            title="Compute Gemini Embedding 2 vectors for all unindexed transcripts"
+            title="Queue up to 20 conversations for indexing"
           >
             <Zap
               className={`w-3.5 h-3.5 ${isBackfilling ? "animate-spin" : ""}`}
             />
-            <span>Vectorize All</span>
+            <span>{batch?.key === getApiKey() && batch.cursor ? "Queue next batch" : "Queue indexing batch"}</span>
           </button>
 
           <button
@@ -368,6 +375,13 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
           </button>
         </div>
       </div>
+
+      {batch && batch.key === getApiKey() && (
+        <p role="status" className="text-[#c1c5d0]">
+          Batch queued {batch.queued}; skipped {batch.skipped}. {batch.cursor ? "More conversations remain; queue the next batch when ready." : "No more batches remain."} Check Jobs for progress.
+        </p>
+      )}
+      {batchError && <p role="alert" className="text-red-400">{batchError} Retry the batch using the queue button.</p>}
 
       {/* CHAT TRANSCRIPT IMPORT CARD */}
       {showImportCard && (
@@ -662,25 +676,23 @@ export const ConversationsTab: React.FC<ConversationsTabProps> = ({
                         </span>
                         <AgentBadge agent={conv.source_agent} />
 
-                        {/* VECTORIZATION STATUS BADGE */}
                         {conv.is_vectorized ? (
                           <span className="inline-flex items-center gap-1 bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 px-2 py-0.2 text-[10px] font-mono font-semibold">
-                            <Sparkles className="w-3 h-3" />
-                            <span>Vectorized</span>
+                            <Sparkles className="w-3 h-3" /> Vectorized
                           </span>
+                        ) : ["queued", "running", "retrying"].includes(conv.index_status ?? "") ? (
+                          <span className="text-amber-400 font-mono">Indexing {conv.index_status}{conv.index_job_id ? ` · Job ${conv.index_job_id}` : ""}</span>
                         ) : (
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleVectorizeSingle(conv.id);
-                            }}
+                            onClick={(e) => { e.stopPropagation(); handleVectorizeSingle(conv.id); }}
                             className="inline-flex items-center gap-1 bg-amber-500/15 text-amber-400 hover:text-amber-300 border border-amber-500/30 px-2 py-0.2 text-[10px] font-mono font-semibold transition-colors"
-                            title="Click to compute vector embedding with Gemini Embedding 2"
+                            title="Queue conversation indexing"
                           >
                             <Clock className="w-3 h-3" />
-                            <span>Pending Vectorization</span>
+                            <span>{conv.index_status && conv.index_status !== "not_indexed" ? `Index ${conv.index_status} · Queue indexing` : "Pending Vectorization"}</span>
                           </button>
                         )}
+                        {conv.index_error && <span className="text-red-400">{conv.index_error}</span>}
 
                         {resultsById.has(conv.id) && (
                           <span className="text-[10px] font-mono bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 px-1.5 py-0.2">

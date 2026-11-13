@@ -68,7 +68,9 @@ def cancel_active(session, key, now):
     return session.execute(
         update(Job)
         .where(
-            Job.resource_key == key, Job.state.in_(["queued", "retrying", "running"])
+            Job.resource_key == key,
+            Job.kind.in_(["index_file", "delete_file"]),
+            Job.state.in_(["queued", "retrying", "running"]),
         )
         .values(
             state="cancelled", lease_token=None, lease_deadline=None, updated_at=now
@@ -141,7 +143,17 @@ def delete_file(payload, lease):
     return cleanup_file(payload["key"], lease)
 
 
-HANDLERS = {"index_file": index_file, "delete_file": delete_file}
+def index_conversation(payload, lease):
+    from gigamind.services.conversation_index import index_conversation as run
+
+    return run(payload, lease)
+
+
+HANDLERS = {
+    "index_file": index_file,
+    "delete_file": delete_file,
+    "index_conversation": index_conversation,
+}
 
 
 def validate_resource_key(key):

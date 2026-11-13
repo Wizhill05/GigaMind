@@ -732,7 +732,7 @@ def search_conversations(
     source_agent: Optional[str] = None,
     limit: int = 5,
 ) -> List[Dict[str, Any]]:
-    """Search complete legacy transcripts, with optional existing vector candidates."""
+    """Search complete transcripts and current, model-identified segment vectors."""
     import re
 
     if not isinstance(query, str) or len(query) > 2048:
@@ -810,39 +810,16 @@ def search_conversations(
         except (OverflowError, ValueError):
             return None
 
+    query_space = (embedding_config.MODEL_NAME, embedding_config.DEFAULT_DIM)
     try:
         vector = generate_embedding(query)
     except Exception:
         vector = None
     vector = unit_vector(vector)
+    if query_space != (embedding_config.MODEL_NAME, embedding_config.DEFAULT_DIM):
+        vector = None
 
     with Session(engine) as session:
-        native_scores = {}
-        if is_postgres and vector:
-            sql = text("""
-                SELECT id, 1.0 - (embedding_vector <=> CAST(:vec AS vector)) AS score
-                FROM conversations
-                WHERE embedding_vector IS NOT NULL
-                  AND (:platform IS NULL OR lower(platform) = lower(:platform))
-                  AND (:source_agent IS NULL OR lower(source_agent) = lower(:source_agent))
-                ORDER BY embedding_vector <=> CAST(:vec AS vector), id
-                LIMIT :candidate_limit
-            """)
-            rows = session.exec(
-                sql,
-                params={
-                    "vec": str(vector),
-                    "platform": platform,
-                    "source_agent": source_agent,
-                    "candidate_limit": max(40, limit),
-                },
-            ).all()
-            native_scores = {
-                row.id: float(row.score)
-                for row in rows
-                if row.score is not None and math.isfinite(row.score)
-            }
-
         stmt = select(ConversationItem)
         if platform:
             stmt = stmt.where(func.lower(ConversationItem.platform) == platform.lower())
@@ -907,15 +884,27 @@ def search_conversations(
                             snippet[key] = message[key]
                     snippets.append(snippet)
             lexical = len(hits) / len(terms)
-            semantic = native_scores.get(c.id)
-            if not is_postgres and vector:
-                try:
-                    stored = json.loads(c.embedding_json or "[]")
-                except (ValueError, TypeError):
-                    stored = None
-                stored = unit_vector(stored)
-                if stored:
-                    semantic = cosine_similarity(vector, stored)
+            semantic = None
+            matched_segment = None
+            if vector:
+                from gigamind.services.conversation_index import segment_vectors
+
+                for segment in segment_vectors(c.id, engine=engine):
+                    stored = unit_vector(segment["embedding"])
+                    if stored is None:
+                        continue
+                    score = cosine_similarity(vector, stored)
+                    if semantic is None or score > semantic:
+                        semantic = score
+                        matched_segment = segment
+            if not snippets and matched_segment is not None:
+                snippets.append({
+                    "role": "indexed_segment",
+                    "index": matched_segment["segment_index"],
+                    "text": matched_segment["content"][:300],
+                    "embedding_model": matched_segment["model"],
+                    "embedding_dimension": matched_segment["dimension"],
+                })
             if not lexical and (semantic is None or semantic <= 0):
                 continue
             score = (0.5 + lexical * 0.25 if lexical else 0) + (
@@ -950,38 +939,12 @@ def search_conversations(
         return best
 
 
-def backfill_conversation_vectors() -> int:
-    """Computes and backfills Gemini Embedding 2 vectors for all stored conversations."""
-    count = 0
-    with Session(engine) as session:
-        convs = session.exec(select(ConversationItem)).all()
-        for c in convs:
-            msgs_preview = ""
-            if c.messages_json:
-                try:
-                    msgs = json.loads(c.messages_json)
-                    msgs_preview = "\n".join(
-                        f"{m.get('role', 'user')}: {m.get('content', '')[:100]}"
-                        for m in msgs[:4]
-                    )
-                except Exception:
-                    pass
-            text_for_vector = f"Chat Platform: {c.platform}. Title: {c.title}\nSummary: {c.summary}\n{msgs_preview}"
-            emb = generate_embedding(text_for_vector)
-            c.embedding_json = json.dumps(emb)
-            session.add(c)
-            session.commit()
+def backfill_conversation_vectors(*, cursor=None, limit=20):
+    """Admit a bounded batch of durable indexing jobs without provider calls."""
+    from gigamind.services.conversation_index import enqueue_backfill
 
-            if is_postgres:
-                try:
-                    with Session(engine) as p_sess:
-                        vec_str = f"[{','.join(str(x) for x in emb)}]"
-                        p_sess.exec(text("UPDATE conversations SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": vec_str, "id": c.id})
-                        p_sess.commit()
-                except Exception as p_err:
-                    print(f"backfill pgvector note: {p_err}")
-            count += 1
-    return count
+    return enqueue_backfill(cursor=cursor, limit=limit, engine=engine)
+
 
 def get_memories(
     page: int = 1,
@@ -1213,47 +1176,61 @@ def update_memory(
         )
 
 
+def _conversation_response(conv):
+    from gigamind.services.conversation_index import metadata
+
+    info = metadata(conv.id, engine=engine)
+    return {
+        "id": conv.id,
+        "platform": conv.platform,
+        "title": conv.title,
+        "summary": conv.summary,
+        "source_agent": conv.source_agent or "user",
+        "messages": json.loads(conv.messages_json or "[]"),
+        "is_vectorized": bool(info and info["indexed"]),
+        "index_status": info["state"] if info else "not_indexed",
+        "index_job_id": info.get("job_id") if info else None,
+        "index_error": info.get("error") if info else None,
+        "created_at": conv.created_at,
+    }
+
+
 def get_conversations(page: int = 1, limit: int = 20, platform: Optional[str] = None, source_agent: Optional[str] = None) -> Dict[str, Any]:
+    from gigamind.db.conversation_index import ConversationIndexState
+
+    page = max(1, page)
+    limit = max(1, min(limit, 100))
+    conditions = []
+    if platform:
+        conditions.append(ConversationItem.platform == platform)
+    if source_agent:
+        conditions.append(ConversationItem.source_agent == source_agent)
     with Session(engine) as session:
-        stmt = select(ConversationItem)
-        if platform:
-            stmt = stmt.where(ConversationItem.platform == platform)
-        if source_agent:
-            stmt = stmt.where(ConversationItem.source_agent == source_agent)
-
-        all_items = session.exec(stmt).all()
-        total = len(all_items)
-
-        offset = (page - 1) * limit
-        items = session.exec(stmt.order_by(ConversationItem.created_at.desc()).offset(offset).limit(limit)).all()
-
-        res_convs = []
-        vectorized_count = 0
-        for conv in items:
-            has_vec = bool(conv.embedding_json and conv.embedding_json != "[]")
-            if has_vec:
-                vectorized_count += 1
-            res_convs.append({
-                "id": conv.id,
-                "platform": conv.platform,
-                "title": conv.title,
-                "summary": conv.summary,
-                "source_agent": getattr(conv, "source_agent", "user") or "user",
-                "messages": json.loads(conv.messages_json or "[]"),
-                "is_vectorized": has_vec,
-                "created_at": conv.created_at
-            })
-
-        pages = (total + limit - 1) // limit if limit > 0 else 1
-        total_vectorized = sum(1 for c in all_items if c.embedding_json and c.embedding_json != "[]")
+        total = session.exec(select(func.count()).select_from(ConversationItem).where(*conditions)).one()
+        items = session.exec(
+            select(ConversationItem).where(*conditions)
+            .order_by(ConversationItem.created_at.desc(), ConversationItem.id)
+            .offset((page - 1) * limit).limit(limit)
+        ).all()
+        indexed = ConversationIndexState
+        total_vectorized = session.exec(
+            select(func.count()).select_from(ConversationItem)
+            .join(indexed, indexed.conversation_id == ConversationItem.id)
+            .where(*conditions, indexed.indexed_fingerprint.is_not(None),
+                   indexed.indexed_fingerprint == indexed.requested_fingerprint,
+                   indexed.model == embedding_config.MODEL_NAME,
+                   indexed.dimension == embedding_config.DEFAULT_DIM,
+                   indexed.segment_count > 0)
+        ).one()
         return {
-            "conversations": res_convs,
+            "conversations": [_conversation_response(conv) for conv in items],
             "total": total,
             "total_vectorized": total_vectorized,
             "page": page,
             "limit": limit,
-            "pages": pages
+            "pages": (total + limit - 1) // limit,
         }
+
 
 def get_conversation(conv_id: str) -> Optional[Dict[str, Any]]:
     from gigamind.services.conversation_ledger import get_receipt
@@ -1262,14 +1239,7 @@ def get_conversation(conv_id: str) -> Optional[Dict[str, Any]]:
         conv = session.get(ConversationItem, conv_id)
         if conv is None:
             return None
-        return {
-            "id": conv.id, "platform": conv.platform, "title": conv.title,
-            "summary": conv.summary, "source_agent": conv.source_agent or "user",
-            "messages": json.loads(conv.messages_json or "[]"),
-            "provenance": get_receipt(conv_id, engine=engine),
-            "is_vectorized": bool(conv.embedding_json and conv.embedding_json != "[]"),
-            "created_at": conv.created_at,
-        }
+        return {**_conversation_response(conv), "provenance": get_receipt(conv_id, engine=engine)}
 
 
 def delete_conversation(conv_id: str, *, actor=None) -> bool:
@@ -1277,34 +1247,13 @@ def delete_conversation(conv_id: str, *, actor=None) -> bool:
 
     return forget(conv_id, actor=actor, engine=engine)
 
-def vectorize_conversation(conv_id: str) -> bool:
-    """Generates Gemini Embedding 2 vector for a single conversation."""
-    with Session(engine) as session:
-        c = session.exec(select(ConversationItem).where(ConversationItem.id == conv_id)).first()
-        if not c:
-            return False
-        msgs_preview = ""
-        if c.messages_json:
-            try:
-                msgs = json.loads(c.messages_json)
-                msgs_preview = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')[:100]}" for m in msgs[:4])
-            except Exception:
-                pass
-        text_for_vector = f"Chat Platform: {c.platform}. Title: {c.title}\nSummary: {c.summary}\n{msgs_preview}"
-        emb = generate_embedding(text_for_vector)
-        c.embedding_json = json.dumps(emb)
-        session.add(c)
-        session.commit()
 
-        if is_postgres:
-            try:
-                with Session(engine) as p_sess:
-                    vec_str = f"[{','.join(str(x) for x in emb)}]"
-                    p_sess.exec(text("UPDATE conversations SET embedding_vector = CAST(:vec AS vector) WHERE id = :id"), params={"vec": vec_str, "id": c.id})
-                    p_sess.commit()
-            except Exception as p_err:
-                print(f"vectorize conv pgvector note: {p_err}")
-        return True
+def vectorize_conversation(conv_id: str, *, idempotency_key=None):
+    from gigamind.services.conversation_index import enqueue_conversation
+
+    return enqueue_conversation(conv_id, idempotency_key, engine=engine)
+
+
 def delete_profile_rule(rule_id: str, *, actor=None) -> bool:
     with Session(engine) as session:
         source_provenance.lock_sources(session)
@@ -1327,7 +1276,7 @@ def get_source_provenance(kind: str, source_id: str, limit: int = 20, offset: in
     result = source_provenance.read_provenance(engine, kind, source_id, limit, offset)
     if result is not None:
         return result
-    model = MemoryItem if kind == "memory" else ProfileItem
+    model = {"memory": MemoryItem, "profile": ProfileItem, "file": StorageFileItem}[kind]
     with Session(engine) as session:
         statement = select(model.id).where(model.id == source_id)
         if kind == "memory":

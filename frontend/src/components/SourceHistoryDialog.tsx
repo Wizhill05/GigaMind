@@ -94,6 +94,14 @@ function History({ kind, sourceId, apiKey }: Omit<Props, "onClose">) {
         Recorded credentials identify the submitting account. Source authorship
         and factual accuracy require separate verification.
       </p>
+      {kind === "file" && (
+        <p className="text-[#8a8f9e]">
+          Created records an upload registration. Verified records a remote
+          checksum match, which is separate from indexing. Deleted records
+          forgetting; physical cleanup may still be pending. These receipts do
+          not establish who authored the file.
+        </p>
+      )}
       <h4 className="text-white font-semibold">Receipts</h4>
       {receipts.length === 0 ? (
         <p>No receipts on this page.</p>

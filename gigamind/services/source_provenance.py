@@ -41,8 +41,9 @@ def record_write(
     ):
         raise RuntimeError("source transaction is not locked")
     if (
-        kind not in ("memory", "profile")
-        or operation not in ("created", "updated", "deleted", "reset")
+        kind not in ("memory", "profile", "file")
+        or operation not in ("created", "updated", "deleted", "reset", "verified")
+        or (operation == "verified" and kind != "file")
         or not isinstance(source_id, str)
         or not source_id.strip()
     ):
@@ -105,7 +106,7 @@ def record_write(
 def read_provenance(engine, kind, source_id, limit=20, offset=0):
     """Return a head and descending receipt page bounded by its revision."""
     if (
-        kind not in ("memory", "profile")
+        kind not in ("memory", "profile", "file")
         or not isinstance(source_id, str)
         or not source_id.strip()
         or type(limit) is not int

@@ -85,6 +85,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
                 {conversation.platform}
               </span>
               <AgentBadge agent={conversation.source_agent} />
+              {conversation.index_status && <span className="text-xs text-[#c1c5d0]">Index: {conversation.index_status}{conversation.index_job_id ? ` · Job ${conversation.index_job_id}` : ""}</span>}
               <span className="text-xs text-[#8a8f9e] font-mono">
                 id: {conversation.id}
               </span>
@@ -96,12 +97,13 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
             <p className="text-xs text-[#8a8f9e] leading-relaxed">
               {conversation.summary}
             </p>
+            {conversation.index_error && <p className="text-xs text-red-400">{conversation.index_error}</p>}
           </div>
 
           <div className="flex items-center gap-2">
             {onVectorize && (
               <button
-                disabled={busy}
+                disabled={busy || ["queued", "running", "retrying"].includes(conversation.index_status ?? "")}
                 onClick={() => onVectorize(conversation.id)}
                 className={`p-2 border rounded-none transition-colors btn-press flex items-center gap-1 text-[11px] font-mono ${
                   conversation.is_vectorized
@@ -116,7 +118,7 @@ export const TranscriptDrawer: React.FC<TranscriptDrawerProps> = ({
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>
-                  {conversation.is_vectorized ? "Vectorized" : "Vectorize"}
+                  {conversation.is_vectorized ? "Vectorized" : ["queued", "running", "retrying"].includes(conversation.index_status ?? "") ? "Indexing" : "Vectorize"}
                 </span>
               </button>
             )}

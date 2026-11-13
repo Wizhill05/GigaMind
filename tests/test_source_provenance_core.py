@@ -133,7 +133,7 @@ def test_schema6_backfill_preserves_ledger(tmp_path):
                 "INSERT INTO conversation_receipts (conversation_id, source_key, provenance, deleted_at) VALUES ('gone', 'tombstone', 'legacy_unknown', 'deleted')"
             )
         )
-        c.execute(text("DELETE FROM schema_migrations WHERE version=7"))
+        c.execute(text("DELETE FROM schema_migrations WHERE version > 6"))
         c.execute(text("INSERT INTO schema_migrations (version) VALUES (6)"))
     migrate(engine)
     assert (

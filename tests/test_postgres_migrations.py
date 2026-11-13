@@ -549,6 +549,13 @@ def test_native_transcript_search_filters_before_candidates_and_unions_text(
             )
         )
         session.commit()
+    from gigamind.services import conversation_index, embedding, jobs
+
+    # Old document vectors lack a model and full-transcript coverage receipt.
+    assert memory.search_conversations("synonym", platform="claude", source_agent="gpt") == []
+    monkeypatch.setattr(embedding, "generate_embedding", lambda **kwargs: [0.9, 0.1])
+    conversation_index.enqueue_conversation("semantic-visible", engine=postgres_engine)
+    assert jobs.run_once(engine=postgres_engine).state == "completed"
     found = memory.search_conversations(
         "synonym", platform="claude", source_agent="gpt"
     )
@@ -562,9 +569,9 @@ def test_native_transcript_search_filters_before_candidates_and_unions_text(
     assert "needle" in combined[0]["evidence"][0]["text"]
     with postgres_engine.begin() as connection:
         connection.execute(
-            text("ALTER TABLE conversations DROP COLUMN embedding_vector CASCADE")
+            text("DROP TABLE conversation_index_segments")
         )
-    with pytest.raises(DBAPIError, match="embedding_vector"):
+    with pytest.raises(DBAPIError, match="conversation_index_segments"):
         memory.search_conversations("needle")
 
 
@@ -862,6 +869,7 @@ def test_native_cleanup_and_attachment_races(postgres_engine, monkeypatch):
     from gigamind.db.database import MemoryItem
     from gigamind.security import Actor
     from gigamind.services import memory, file_lifecycle, jobs
+    from gigamind.services import source_provenance
     from gigamind.services.storage import storage_service
 
     monkeypatch.setenv("EMBEDDING_DIM", "3")
@@ -913,7 +921,7 @@ def test_native_cleanup_and_attachment_races(postgres_engine, monkeypatch):
 
     registered, release, delete_attempted = Event(), Event(), Event()
     register = memory._register_attachment_metadata
-    lock = jobs.lock_resource
+    lock = source_provenance.lock_sources
 
     def hold_registration(*args, **kwargs):
         register(*args, **kwargs)
@@ -926,7 +934,7 @@ def test_native_cleanup_and_attachment_races(postgres_engine, monkeypatch):
         return lock(*args, **kwargs)
 
     monkeypatch.setattr(memory, "_register_attachment_metadata", hold_registration)
-    monkeypatch.setattr(jobs, "lock_resource", observe_lock)
+    monkeypatch.setattr(source_provenance, "lock_sources", observe_lock)
     with ThreadPoolExecutor(2) as executor:
         attached = executor.submit(
             memory.add_memory, "attachment wins", file_keys=["attachment-first"]
@@ -944,7 +952,7 @@ def test_native_cleanup_and_attachment_races(postgres_engine, monkeypatch):
             deleting.result(timeout=10)
         assert rejected.value.status_code == 409
     monkeypatch.setattr(memory, "_register_attachment_metadata", register)
-    monkeypatch.setattr(jobs, "lock_resource", lock)
+    monkeypatch.setattr(source_provenance, "lock_sources", lock)
 
     locked, release_cleanup, attachment_attempted = Event(), Event(), Event()
     references = file_lifecycle.referenced
@@ -956,11 +964,12 @@ def test_native_cleanup_and_attachment_races(postgres_engine, monkeypatch):
         return references(session, key)
 
     def observe_registration(*args, **kwargs):
-        attachment_attempted.set()
-        return register(*args, **kwargs)
+        if locked.is_set() and not release_cleanup.is_set():
+            attachment_attempted.set()
+        return lock(*args, **kwargs)
 
     monkeypatch.setattr(file_lifecycle, "referenced", hold_cleanup)
-    monkeypatch.setattr(memory, "_register_attachment_metadata", observe_registration)
+    monkeypatch.setattr(source_provenance, "lock_sources", observe_registration)
     with ThreadPoolExecutor(2) as executor:
         deleting = executor.submit(
             file_lifecycle.request_delete, actor, "cleanup-first", postgres_engine

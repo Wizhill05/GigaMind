@@ -227,7 +227,7 @@ it("retains the source and releases the lock when backfill fails", async () => {
     </ToastProvider>,
   );
   await screen.findByText("Example");
-  const button = screen.getByText("Vectorize All").closest("button");
+  const button = screen.getByText("Queue indexing batch").closest("button");
   if (!button) throw new Error("Missing backfill action");
   fireEvent.click(button);
   fireEvent.click(button);
@@ -239,7 +239,7 @@ it("retains the source and releases the lock when backfill fails", async () => {
       }),
     ),
   );
-  await screen.findByText("Backfill unavailable");
+  await screen.findByText(/Backfill unavailable/);
   expect(button).toBeEnabled();
   expect(button.querySelector(".animate-spin")).toBeNull();
   expect(screen.getByText("Example")).toBeInTheDocument();
@@ -276,7 +276,7 @@ it.each(["import", "backfill"])(
           files: [new File(["{}"], "old.json", { type: "application/json" })],
         },
       });
-    } else fireEvent.click(screen.getByText("Vectorize All"));
+    } else fireEvent.click(screen.getByText("Queue indexing batch"));
     setApiKey("new");
     await act(async () =>
       pending.finish(
@@ -294,7 +294,7 @@ it.each(["import", "backfill"])(
     );
     expect(changed).not.toHaveBeenCalled();
     expect(screen.queryByText("Stale success")).not.toBeInTheDocument();
-    expect(screen.getByText("Vectorize All").closest("button")).toBeEnabled();
+    expect(screen.getByText("Queue indexing batch").closest("button")).toBeEnabled();
     expect(view.container.querySelector(".animate-spin")).toBeNull();
     if (kind === "import") {
       expect(screen.queryByText("Retry old.json")).not.toBeInTheDocument();
@@ -333,7 +333,7 @@ it("ignores mutation completion after the tab unmounts", async () => {
 it("refreshes App statistics, the list and the exact drawer source after vectorization", async () => {
   const { App } = await import("../App");
   setApiKey("admin");
-  let vectorized = false;
+  let queued = false;
   const current = () => ({
     id: "1",
     title: "Example",
@@ -342,14 +342,16 @@ it("refreshes App statistics, the list and the exact drawer source after vectori
     source_agent: "user",
     messages: [],
     created_at: "",
-    is_vectorized: vectorized,
+    is_vectorized: false,
+    index_status: queued ? "queued" : "not_indexed",
+    index_job_id: queued ? "job-1" : null,
   });
   const fetcher = vi.fn((url: string) => {
     if (url.endsWith("/vectorize")) {
-      vectorized = true;
+      queued = true;
       return Promise.resolve(
         new Response(
-          JSON.stringify({ success: true, id: "1", message: "Done" }),
+          JSON.stringify({ success: true, id: "1", job_id: "job-1", state: "queued", message: "Queued" }),
         ),
       );
     }
@@ -373,7 +375,7 @@ it("refreshes App statistics, the list and the exact drawer source after vectori
         JSON.stringify({
           conversations: [current()],
           total: 1,
-          total_vectorized: vectorized ? 1 : 0,
+          total_vectorized: 0,
           page: 1,
           pages: 1,
         }),
@@ -387,7 +389,9 @@ it("refreshes App statistics, the list and the exact drawer source after vectori
   await screen.findByText("Example");
   fireEvent.click(screen.getByText("Inspect"));
   fireEvent.click(screen.getByTitle("Generate Vector Embedding"));
-  await screen.findByTitle("Vectorized (Click to re-vectorize)");
+  await screen.findByText("Index: queued · Job job-1");
+  expect(screen.getByText(/Indexing queued. Job job-1/)).toBeInTheDocument();
+  expect(screen.queryByTitle("Vectorized (Click to re-vectorize)")).not.toBeInTheDocument();
   await waitFor(() => expect(screen.getByTitle("Close Drawer")).toBeEnabled());
   expect(
     fetcher.mock.calls.filter(([url]) => url.endsWith("/stats")),
