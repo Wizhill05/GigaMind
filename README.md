@@ -4,7 +4,7 @@ GigaMind stores source material and reviewed knowledge for use by AI clients. It
 
 ## Getting started
 
-With Python 3.12.3 and Node 22.23.4, from the repository root install the Python dependencies and build the dashboard:
+With Python 3.12.16 and Node 22.23.4, from the repository root install the Python dependencies and build the dashboard:
 
 ```sh
 python3 -m venv .venv

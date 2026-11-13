@@ -28,7 +28,7 @@ npm run build
 
 The CI workflow runs the offline backend and frontend commands and the PostgreSQL migration tests against a disposable local pgvector service. It does not publish artifacts or deploy. Offline embedding fixtures verify persistence and retrieval contracts, not semantic relevance or multimodal quality. Live semantic-quality acceptance requires a separate explicitly opted-in live environment; credentials alone never enable it in pytest.
 
-Use Python 3.12.3 and Node 22.23.4 (npm 10.9.9), the versions used for the locked build. `requirements.in` is the direct dependency input; `requirements.txt` pins the complete runtime resolution and `requirements-test.txt` adds pinned test tools. To update, use a new Python 3.12.3 environment and resolve against public PyPI:
+Use [Python 3.12.16](https://www.python.org/downloads/release/python-31216/) and Node 22.23.4 (npm 10.9.9), the versions used for the locked build. `requirements.in` is the direct dependency input; `requirements.txt` pins the complete runtime resolution and `requirements-test.txt` adds pinned test tools. To update, use a new Python 3.12.16 environment and resolve against public PyPI:
 
 ```sh
 python3.12 -m venv /tmp/gigamind-resolve
@@ -39,3 +39,5 @@ python3.12 -m venv /tmp/gigamind-resolve
 Review the resolution, put runtime pins in `requirements.txt` and the test-only pins in `requirements-test.txt` after its `-r requirements.txt` line. Install both into a second clean environment and run this suite. Review upgrades and dependency changes before committing. Platform-specific dependencies may require a new lock and validation.
 
 The Render build uses `scripts/build.sh`; any failed frontend install or build stops the Python installation and fails the build.
+
+The Docker build sends only selected application and frontend inputs. `.dockerignore` excludes local credentials, databases, backups and installed dependencies; the runtime copies Python modules and the built dashboard explicitly. Keep these inputs current when adding runtime resources. A local Docker build is separate from deploying it. Backend CI installs the locked frontend dependencies because the default demo-launcher test builds the dashboard. The failure check tests npm install, frontend build and Python installation failures, and pytest includes a negative control that rejects a deliberately broken build script.

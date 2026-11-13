@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import os
 from pathlib import Path
 import socket
@@ -88,6 +89,28 @@ def server_on_socket(db, logs, sock, port):
                 proc.wait(timeout=5)
 
 
+def import_source(admin, source_id, content):
+    return ok(
+        admin.post(
+            "/api/v1/conversations/import_file",
+            files={
+                "file": (
+                    "synthetic.json",
+                    json.dumps(
+                        {
+                            "id": source_id,
+                            "platform": "custom",
+                            "source_agent": "claimed-exporter",
+                            "messages": [{"role": "user", "content": content}],
+                        }
+                    ),
+                    "application/json",
+                )
+            },
+        )
+    )
+
+
 def ok(response):
     assert response.status_code == 200, (response.status_code, response.text)
     return response.json()
@@ -166,6 +189,28 @@ def test_adoption_recovery(isolated_dir, monkeypatch):
                 return approve(p["id"])
 
             hidden = [other("b", "other"), other(None, "global")]
+            imported = import_source(
+                admin, "retained-source", "synthetic retained transcript"
+            )
+            retained_id = imported["records"][0]["id"]
+            imported = import_source(
+                admin, "forgotten-source", "synthetic forgotten transcript"
+            )
+            forgotten_id = imported["records"][0]["id"]
+            assert (
+                import_source(
+                    admin, "forgotten-source", "synthetic changed transcript"
+                )["ingested"]
+                == 1
+            )
+            ok(admin.delete("/api/v1/conversations/" + forgotten_id))
+            secrets.extend(
+                [
+                    "synthetic retained transcript",
+                    "synthetic forgotten transcript",
+                    "synthetic changed transcript",
+                ]
+            )
             job = ok(
                 admin.post(
                     "/api/v1/jobs",
@@ -276,7 +321,24 @@ def test_adoption_recovery(isolated_dir, monkeypatch):
             timeout=10,
         ) as admin:
             assert ok(admin.get("/api/v1/jobs/" + job["id"]))["state"] == "queued"
-            assert ok(admin.get("/api/v1/review/memories/" + first["id"] + "/history"))
+            history = ok(
+                admin.get("/api/v1/review/memories/" + first["id"] + "/history")
+            )["revisions"]
+            assert [item["status"] for item in history] == ["accepted", "superseded"]
+            assert all(item["snapshot"]["content"] == OLD for item in history)
+            retained = ok(admin.get("/api/v1/conversations/" + retained_id))[
+                "conversation"
+            ]
+            assert retained["provenance"]["imported_by"] == "master"
+            assert retained["provenance"]["provenance"] == "authenticated"
+            assert retained["provenance"]["upstream_id"] == "retained-source"
+            assert admin.get("/api/v1/conversations/" + forgotten_id).status_code == 404
+            assert (
+                import_source(admin, "forgotten-source", "synthetic future transcript")[
+                    "forgotten"
+                ]
+                == 1
+            )
             assert (
                 ok(admin.get("/api/v1/review/memories/" + first["id"]))["memory"][
                     "status"
@@ -339,6 +401,7 @@ def test_adoption_recovery(isolated_dir, monkeypatch):
                         context.structuredContent
                     )
                     for item in hidden:
+                        assert item["content"] not in str(context.structuredContent)
                         assert (
                             await session.call_tool(
                                 "get_memory", {"memory_id": item["id"]}
